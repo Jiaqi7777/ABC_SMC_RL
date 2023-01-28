@@ -1,0 +1,13 @@
+numpy
+scipy
+scikit-learn>=0.23.1
+glmnet==2.2.1
+sklearn
+sphinx
+sphinx_rtd_theme 
+coverage
+mpi4py
+cloudpickle
+matplotlib
+tqdm
+pot
