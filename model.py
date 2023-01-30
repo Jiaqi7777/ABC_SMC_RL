@@ -97,7 +97,7 @@ class Tabular:
         
     def lld(self, obs, sample):
         reward = obs['rewards'][-1]
-        lld = stats.norm.pdf([reward]*self.n_particle, loc=sample, scale=self.std)
+        lld = stats.norm.pdf(reward, loc=sample, scale=self.std)
         return np.prod(lld)
 
     def get_parameter(self):

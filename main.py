@@ -83,6 +83,8 @@ if __name__ == '__main__':
         for t in range(horizon):
             action = model.act(s0, para)
             s1, r, done, *info = env.step(action)
+            if done:
+                break
             if discrete:
                 s1 = model.discrete_state(s1)
             obs.insert({'state': s1, 'action': action, 'rewards': r, 'done': done})

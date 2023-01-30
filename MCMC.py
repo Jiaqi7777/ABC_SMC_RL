@@ -59,14 +59,14 @@ class MCMC:
             else:
                 return False
 
-    def metropolis_hastings(self, tables, obs, samples):
-        new_tables = deepcopy(tables)
-        for i, table in enumerate(tables):
+    def metropolis_hastings(self, paras, obs, samples, move=random_walk):
+        new_paras = deepcopy(paras)
+        for i, table in enumerate(paras):
             current_para = table
             for _ in range (self.steps):
                 proposed_para, ratio = self.random_walk(current_para)
                 current_para = proposed_para
             if self.accept(current_para, proposed_para, ratio, obs, samples[:, i]):
-                new_tables[i] = proposed_para
-        return new_tables
+                new_paras[i] = proposed_para
+        return new_paras
 
