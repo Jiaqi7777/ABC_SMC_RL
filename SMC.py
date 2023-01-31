@@ -13,16 +13,15 @@ class SMC:
         if kernel == None:
             kernel = RandomWalk(model=model)
         self._mcmc = MCMC(kernal=kernel)
-        #self.parameter_history = np.array([self._parameter])
 
     def update(self, obs, samples_l, update_frequency=5):
+        samples_l = np.array(samples_l)
         for j in range(self.n_particle):
             lld = stats.multivariate_normal.logpdf(obs['rewards'][-update_frequency:], samples_l[-update_frequency:,j])
             self._weights[j] *= lld
         self._weights /= sum(self._weights)
         self.model.set_weights(self._weights)
         new_parameter = self._mcmc.update(self.model.get_parameter(), obs, samples_l)
-        #self.parameter_history = np.vstack((self.parameter_history, new_parameter))
         self.model.set_parameter(new_parameter)
         if self.ESS() < self.min_ess:
             self.resample(self.model)
