@@ -1,72 +1,83 @@
 import numpy as np
 import scipy.stats as stats
 from copy import deepcopy
-
-class RandomWalk:
-    def __init__(self, sigma=0.1):
-        self.sigma = sigma
-
-    def move(self, current_para):
-        ratio = 1
-        return current_para + stats.norm(0, self.sigma), ratio
    
+def generate_samples(model, obs, para):
+    samples = []
+    for s0, a, s1 in zip(obs['state0'], obs['action'], obs['state1']):
+        samples.append(model.q_value(para, s0, a) - model.gamma * model.v_value(para, s1))
+    return np.array(samples)
 
-class MCMC:
-    def __init__(self, parameters, proposal=None, steps = 10, tractability=False):
-        self.parameters = parameters
-        self.proposal = proposal
-        self.steps = steps
-        self._tractability = tractability
-
-    def get_log_prior(self, parameters, sigma=1):
+def get_log_prior(parameters, sigma=1):
         """log(p(para))"""
-        return np.log(stats.norm.pdf(parameters, scale=sigma)).sum()
+        parameters = parameters.reshape(-1)
+        sigma = sigma * np.identity(len(parameters))
+        return stats.multivariate_normal.logpdf(parameters, cov=sigma).sum()
 
-    def get_log_likelihood(self, obs, samples, sigma=1):
-        """log(p(evidence|para))"""
-        if self._tractability:
-            raise NotImplementedError("Not implemented for tractable likelihood")
-            likelihood = stats.norm.pdf(evidence, loc=9.8, scale=sigma)
-            log_likelihood = np.log(likelihood).sum()
-            return log_likelihood
-        else:
-            likelihood = stats.norm.pdf(obs['rewards'], loc=samples, scale=sigma)
-            return np.log(likelihood).sum()
+def get_log_likelihood(obs, samples, sigma=1, tractability=False):
+    """log(p(evidence|para))"""
+    if tractability:
+        raise NotImplementedError("Not implemented for tractable likelihood")
+        likelihood = stats.norm.pdf(evidence, loc=9.8, scale=sigma)
+        log_likelihood = np.log(likelihood).sum()
+        return log_likelihood
+    else:
+        #sigma = sigma * np.identity(len(samples))
+        return stats.norm.logpdf(obs['rewards'], loc=samples, scale=sigma).sum()
         
-    def get_log_posterior(self, para, *args):
-        log_prior = self.get_log_prior(para)
-        log_likelihood = self.get_log_likelihood(*args)
-        return log_prior + log_likelihood
+    
+def get_log_posterior(para, *args):
+    log_prior = get_log_prior(para)
+    log_likelihood = get_log_likelihood(*args)
+    return log_prior + log_likelihood
 
-    def random_walk(self, current_para, sigma=1):
+class Kernel:
+    def __init__(self, model=None, sigma=0.1, prior=get_log_prior, likelihood=get_log_likelihood, tractability=False):
+        self.sigma = sigma
+        self.model=model
+        self.prior = prior
+        self.likelihood = likelihood
+        self.tractability = tractability
+
+    def posterior(self, para, *args):
+        return self.prior(para) + self.likelihood(*args, self.tractability)
+
+    def move(self):
+        raise NotImplementedError
+
+class RandomWalk(Kernel):
+    def __init__(self, *args, model=None):
+        super(RandomWalk, self).__init__(*args)   
+        self.model=model
+
+    def move(self, current_para, sigma=1):
         ratio = 1
         return current_para + np.random.normal(size=(current_para.shape), scale=sigma), ratio
 
-    def update(self, tables, obs, samples):
-        samples = np.array(samples)
-        return self.metropolis_hastings(tables, obs, samples)
+    def accept(self, current_para, obs, samples):
+        proposed_para, ratio = self.move(current_para)
+        proposed_samples = generate_samples(self.model, obs, proposed_para)
+        current_log_posterior = self.posterior(current_para, obs, samples)
+        proposed_log_posterior = self.posterior(proposed_para, obs, proposed_samples)
+        return proposed_log_posterior - current_log_posterior - np.log(ratio), proposed_para
+        
 
-    def accept(self, current_para, proposed_para, ratio, *args):
-        current_log_posterior = self.get_log_posterior(current_para, *args)
-        proposed_log_posterior = self.get_log_posterior(proposed_para, *args)
-        r = proposed_log_posterior - current_log_posterior - np.log(ratio)
-        if r > 1:
-            return True
-        else:
-            alpha = np.random.uniform(0, 1)
-            if alpha < np.exp(r):
-                return True
+class MCMC:
+    def __init__(self, steps = 10, kernal=RandomWalk()):
+        self.steps = steps
+        self.kernel = kernal
+
+    def update(self, paras, obs, samples):
+        for i, current_para in enumerate(paras):
+            new_paras = deepcopy(paras)
+            acceptance_ratio, proposed_para = self.kernel.accept(current_para, obs, samples[:, i])
+            if acceptance_ratio > 1:
+                accept = True
             else:
-                return False
-
-    def metropolis_hastings(self, paras, obs, samples, move=random_walk):
-        new_paras = deepcopy(paras)
-        for i, table in enumerate(paras):
-            current_para = table
-            for _ in range (self.steps):
-                proposed_para, ratio = self.random_walk(current_para)
-                current_para = proposed_para
-            if self.accept(current_para, proposed_para, ratio, obs, samples[:, i]):
+                alpha = np.random.uniform(0, 1)
+                accept = alpha < np.exp(acceptance_ratio)
+            if accept:
                 new_paras[i] = proposed_para
+        print(paras.shape, new_paras.shape)
         return new_paras
-
+        

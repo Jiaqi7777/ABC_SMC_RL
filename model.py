@@ -27,7 +27,7 @@ def uniform_grid(low, high, bins=(10,10)):
 
 class Buffer:
     def __init__(self, entry_keys):
-        self._buffers = {key: [] for key in entry_keys}
+        self._buffers = {key: np.array([]) for key in entry_keys}
 
     def insert(self, items):
         if set(items.keys()) != set(self._buffers.keys()):
@@ -52,7 +52,7 @@ class Buffer:
         return len(list(self._buffers.values())[0])
 
 class Tabular:
-    def __init__(self, env, n_particle, prior='normal', discrete=True, seed=555, gamma=0.95, std=0.1):
+    def __init__(self, env, n_particle, prior='normal', discrete=True, seed=555, gamma=0.95, std=0.1, verbose=True):
         self.env = env
         self.discrete = discrete
         self.obs_size = env.observation_space.shape
@@ -61,17 +61,18 @@ class Tabular:
         self.state_size = tuple(len(splits) + 1 for splits in self.state_grid)  # n-dimensional state space
         self.action_size = self.env.action_space.n  # 1-dimensional discrete action space
         self.seed = np.random.seed(seed)
-        print("Environment:", self.env)
-        print("State space size:", self.state_size)
-        print("Action space size:", self.action_size)
+        if verbose:
+            print("Environment:", self.env)
+            print("State space size:", self.state_size)
+            print("Action space size:", self.action_size)
         self.gamma = gamma
         self.std = std
         self.n_particle = n_particle
-        self.tables = []
+        self._weights = np.ones(n_particle) / n_particle
         if prior == 'normal':
-            for _ in range(n_particle):
-                self.tables.append(np.random.normal(size=(bins + (self.action_size,))))
-            print("Q table size:", self.tables[-1].shape)        
+            self.tables = np.random.normal(size=((n_particle,) + bins + (self.action_size,)))
+            if verbose:
+                print("Q table size:", self.tables[-1].shape)        
         else:
             raise NotImplementedError(f'The prior method corresponds to {prior} has not been implemented')
 
@@ -82,8 +83,18 @@ class Tabular:
         """Discretize a sample as per given grid."""
         return tuple(int(np.digitize(s, g)) for s, g in zip(sample_state, self.state_grid))  
 
-    def sample_para(self):
-        return random.choices(self.tables)
+    def sample_para(self, weights):
+        return random.choices(self.tables, weights)[0]
+
+    def q_value(self, table, s, a):            
+        if len(table.shape) > len(s+ (a,)):
+            return table[(slice(None), *(s+ (a,)))]
+        return table[s][a]
+
+    def v_value(self, table, s):
+        if len(table.shape) > len(s) + 1:
+            return np.max(table[(slice(None), *s)], axis = 1)
+        return max(table[s])
 
     def r_hat(self, s0, s1, a):
         '''
@@ -93,7 +104,7 @@ class Tabular:
             samples.insert({'a_hat':a_hat, 'r_hat': r_hat})
         return samples
         '''
-        return [table[s0][a] - self.gamma * max(table[s1]) for table in self.tables]
+        return self.q_value(self.tables, s0, a) - self.gamma * self.v_value(self.tables, s1) 
         
     def lld(self, obs, sample):
         reward = obs['rewards'][-1]
@@ -105,3 +116,6 @@ class Tabular:
 
     def set_parameter(self, new_para):
         self._tables = new_para
+
+    def set_weights(self, new_weights):
+        self._weights = new_weights
