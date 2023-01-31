@@ -2,7 +2,7 @@ import numpy as np
 import scipy.stats as stats
 import random
 
-def uniform_grid(low, high, bins=(10,10)):
+def uniform_grid(low, high, bins=(10,10), verbose=False):
     """Define a uniformly-spaced grid that can be used to discretize a space.
 
     Parameters
@@ -20,14 +20,15 @@ def uniform_grid(low, high, bins=(10,10)):
         A list of arrays containing split points for each dimension.
     """
     grid = [np.linspace(low[dim], high[dim], bins[dim] + 1)[1:-1] for dim in range(len(bins))]
-    print("Uniform grid: [<low>, <high>] / <bins> => <splits>")
-    for l, h, b, splits in zip(low, high, bins, grid):
-        print("    [{}, {}] / {} => {}".format(l, h, b, splits))
+    if verbose:
+        print("Uniform grid: [<low>, <high>] / <bins> => <splits>")
+        for l, h, b, splits in zip(low, high, bins, grid):
+            print("    [{}, {}] / {} => {}".format(l, h, b, splits))
     return grid
 
 class Buffer:
     def __init__(self, entry_keys):
-        self._buffers = {key: np.array([]) for key in entry_keys}
+        self._buffers = {key: [] for key in entry_keys}
 
     def insert(self, items):
         if set(items.keys()) != set(self._buffers.keys()):
@@ -57,7 +58,7 @@ class Tabular:
         self.discrete = discrete
         self.obs_size = env.observation_space.shape
         bins=(10,)*self.obs_size[0]
-        self.state_grid = uniform_grid(high=self.env.observation_space.high, low=self.env.observation_space.low, bins=bins)
+        self.state_grid = uniform_grid(high=self.env.observation_space.high, low=self.env.observation_space.low, bins=bins, verbose=verbose)
         self.state_size = tuple(len(splits) + 1 for splits in self.state_grid)  # n-dimensional state space
         self.action_size = self.env.action_space.n  # 1-dimensional discrete action space
         self.seed = np.random.seed(seed)
@@ -84,7 +85,7 @@ class Tabular:
         return tuple(int(np.digitize(s, g)) for s, g in zip(sample_state, self.state_grid))  
 
     def sample_para(self, weights):
-        return random.choices(self.tables, weights)[0]
+        return random.choices(self.tables, weights)
 
     def q_value(self, table, s, a):            
         if len(table.shape) > len(s+ (a,)):

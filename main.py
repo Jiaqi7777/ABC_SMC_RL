@@ -31,10 +31,8 @@ if __name__ == '__main__':
     if discrete:
         s0 = model.discrete_state(s0)
 
-    print(s0)
-
     obs = Buffer(['state0', 'state1', 'action', 'rewards', 'done'])
-    samples_l = np.array([])
+    samples_l = []
     for i in range(train_steps):
         para = model.sample_para(sampler._weights)[0]
         s0, _ = env.reset()
@@ -47,7 +45,7 @@ if __name__ == '__main__':
                 s1 = model.discrete_state(s1)
             obs.insert({'state0': s0, 'state1': s1, 'action': action, 'rewards': r, 'done': done})
             samples = model.r_hat(s0, s1, action)
-            samples_l = np.vstack(samples_l, samples)
+            samples_l.append(samples)
             s0 = s1
             if t % update_frequency == 0:
                 sampler.update(obs._buffers, samples_l, update_frequency)
