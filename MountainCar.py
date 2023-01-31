@@ -3,7 +3,7 @@ from model import Tabular
 from gym.envs.classic_control import MountainCarEnv
 import numpy as np
 
-def uniform_grid(low, high, bins=(10,10)):
+def uniform_grid(low, high, bins=(10,10), verbose=False):
     """Define a uniformly-spaced grid that can be used to discretize a space.
 
     Parameters
@@ -21,9 +21,10 @@ def uniform_grid(low, high, bins=(10,10)):
         A list of arrays containing split points for each dimension.
     """
     grid = [np.linspace(low[dim], high[dim], bins[dim] + 1)[1:-1] for dim in range(len(bins))]
-    print("Uniform grid: [<low>, <high>] / <bins> => <splits>")
-    for l, h, b, splits in zip(low, high, bins, grid):
-        print("    [{}, {}] / {} => {}".format(l, h, b, splits))
+    if verbose:
+        print("Uniform grid: [<low>, <high>] / <bins> => <splits>")
+        for l, h, b, splits in zip(low, high, bins, grid):
+            print("    [{}, {}] / {} => {}".format(l, h, b, splits))
     return grid
 
 class MountainCar:
@@ -37,13 +38,13 @@ class MountainCar:
     
     def step(self, action):
         obs, rew, done, *info = self.env.step(action)
-        return obs, rew, done, *info
+        return obs, rew, done, info 
 
     def set_state(self, target_state):
         self.env.state = target_state
 
     def get_state(self):
-        return deepcopy(self.env.state)
+        return self.env.state
 
     def virtual_step(self, state, action):
         env_copy = deepcopy(self.env)
@@ -73,7 +74,7 @@ class Agent:
         # Environment info
         self.env = env
         self.discrete = discrete
-        self.state_grid = uniform_grid(self.env.observation_space.high, self.env.observation_space.low, bins=(10, 10))
+        self.state_grid = uniform_grid(high=self.env.observation_space.high, low=self.env.observation_space.low, bins=(10, 10))
         self.state_size = tuple(len(splits) + 1 for splits in self.state_grid)  # n-dimensional state space
         self.action_size = self.env.action_space.n  # 1-dimensional discrete action space
         self.seed = np.random.seed(seed)
