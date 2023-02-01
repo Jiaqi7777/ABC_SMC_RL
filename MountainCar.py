@@ -51,6 +51,8 @@ class MountainCar:
         env_copy.set_state(state)
         return env_copy.step(action)
 
+    def render(self):
+        self.env.render(render_mode="rgb_array")
 
     #Tabular method
     def apply_policy(self, state, para):

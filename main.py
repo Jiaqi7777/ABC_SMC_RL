@@ -4,28 +4,38 @@ from MCMC import *
 from MountainCar import *
 import gym 
 import numpy as np
+from parameter import *
+from utils import *
+import argparse
+
 
 #Tabular method
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-c', '--continue_train', default=False)
+    parser.add_argument('-o', '--output', default='')
+    parser.add_argument('-f', '--file', default=f'Models/MountainCar_P{n_particle}_B{bins[0]}_E{last_episode}')
+    args = parser.parse_args()
+    continue_training = args.continue_train
+    file_path = args.file
+    np.random.seed(seed)
 
     #Environment
     #env = gym.make('MountainCar-v0')
     env = MountainCar()
 
+    #SMC
+    model = Tabular(env, n_particle, prior)
+    if continue_training:
+        model.set_parameter(np.load(f'{file_path}_tables.npy'))
+        model.set_weights(np.load(f'{file_path}_weights.npy'))
+        np.random.seed(last_episode)
+    else:
+        last_episode = 0
+    sampler = SMC(model)
+
     s0, _ = env.reset()
 
-    horizon = 500
-
-    
-
-    #SMC
-    n_particle = 2
-    prior = 'normal'
-    lld = 'normal'
-    train_steps = 2
-    model = Tabular(env, n_particle, prior)
-    sampler = SMC(model)
-    update_frequency = 5
     #Discretize
     discrete = True
     if discrete:
@@ -33,7 +43,7 @@ if __name__ == '__main__':
 
     obs = Buffer(['state0', 'state1', 'action', 'rewards', 'done'])
     samples_l = []
-    for i in range(train_steps):
+    for e in range(episodes):
         para = model.sample_para(sampler._weights)[0]
         s0, _ = env.reset()
         if discrete:
@@ -50,5 +60,9 @@ if __name__ == '__main__':
             if t % update_frequency == 0:
                 sampler.update(obs._buffers, samples_l, update_frequency)
             if done:
+                print("Done!!")
                 break
-
+        model.plot_policy(title=f'MountainCar Policy for Episode={e + last_episode + 1}', xlabel='position', ylabel='velocity')
+        model.plot_value(title=f'MountainCar Value for Episode={e + last_episode + 1}', xlabel='position', ylabel='velocity')
+        model.save(e + last_episode + 1, args.output)
+    replace_line('parameter.py', 'last_episode', e + last_episode)

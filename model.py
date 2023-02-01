@@ -1,8 +1,10 @@
 import numpy as np
+import matplotlib.pyplot as plt
 import scipy.stats as stats
 import random
+from utils import plot_3d
 
-def uniform_grid(low, high, bins=(10,10), verbose=False):
+def uniform_grid(low, high, bins=(10,10), include_low=1, verbose=False):
     """Define a uniformly-spaced grid that can be used to discretize a space.
 
     Parameters
@@ -13,13 +15,16 @@ def uniform_grid(low, high, bins=(10,10), verbose=False):
         Upper bounds for each dimension of the continuous space.
     bins : tuple
         Number of bins along each corresponding dimension.
+    include_low: 0, 1
+        1 not including the lowest boundary of the grid
+        0 for including 
     
     Returns
     -------
     grid : list of array_like
         A list of arrays containing split points for each dimension.
     """
-    grid = [np.linspace(low[dim], high[dim], bins[dim] + 1)[1:-1] for dim in range(len(bins))]
+    grid = [np.linspace(low[dim], high[dim], bins[dim] + 1)[include_low:-1] for dim in range(len(bins))]
     if verbose:
         print("Uniform grid: [<low>, <high>] / <bins> => <splits>")
         for l, h, b, splits in zip(low, high, bins, grid):
@@ -27,8 +32,9 @@ def uniform_grid(low, high, bins=(10,10), verbose=False):
     return grid
 
 class Buffer:
-    def __init__(self, entry_keys):
+    def __init__(self, entry_keys, seed=555):
         self._buffers = {key: [] for key in entry_keys}
+        self.seed = random.seed(seed)
 
     def insert(self, items):
         if set(items.keys()) != set(self._buffers.keys()):
@@ -53,15 +59,14 @@ class Buffer:
         return len(list(self._buffers.values())[0])
 
 class Tabular:
-    def __init__(self, env, n_particle, prior='normal', discrete=True, seed=555, gamma=0.95, std=0.1, verbose=True):
+    def __init__(self, env, n_particle, prior='normal', discrete=True, gamma=0.95, std=0.1, verbose=True):
         self.env = env
         self.discrete = discrete
         self.obs_size = env.observation_space.shape
-        bins=(10,)*self.obs_size[0]
-        self.state_grid = uniform_grid(high=self.env.observation_space.high, low=self.env.observation_space.low, bins=bins, verbose=verbose)
+        self.bins=(10,)*self.obs_size[0]
+        self.state_grid = uniform_grid(high=self.env.observation_space.high, low=self.env.observation_space.low, bins=self.bins, verbose=verbose)
         self.state_size = tuple(len(splits) + 1 for splits in self.state_grid)  # n-dimensional state space
         self.action_size = self.env.action_space.n  # 1-dimensional discrete action space
-        self.seed = np.random.seed(seed)
         if verbose:
             print("Environment:", self.env)
             print("State space size:", self.state_size)
@@ -71,7 +76,7 @@ class Tabular:
         self.n_particle = n_particle
         self._weights = np.ones(n_particle) / n_particle
         if prior == 'normal':
-            self.tables = np.random.normal(size=((n_particle,) + bins + (self.action_size,)))
+            self.tables = np.random.normal(size=((n_particle,) + self.bins + (self.action_size,)))
             if verbose:
                 print("Q table size:", self.tables[-1].shape)        
         else:
@@ -116,7 +121,33 @@ class Tabular:
         return self.tables
 
     def set_parameter(self, new_para):
-        self._tables = new_para
+        self.tables = new_para
 
     def set_weights(self, new_weights):
         self._weights = new_weights
+
+    def optimal_parameter(self):
+        return self.get_parameter()[np.argmax(self._weights)]
+
+    def plot_value(self, title='Value for each state', xlabel=None, ylabel=None, zlabel='Value'):
+        para = np.max(self.optimal_parameter(), axis=-1)
+        s0, s1 = uniform_grid(high=self.env.observation_space.high, low=self.env.observation_space.low, bins=self.bins, include_low=0)
+        S0, S1 = np.meshgrid(s0, s1)
+        plot_3d(S0, S1, para, title=title, xlabel=xlabel, ylabel=ylabel, zlabel=zlabel)
+
+    def plot_policy(self, title='Policy for each state', xlabel=None, ylabel=None, zlabel='Policy'):
+        para = np.argmax(self.optimal_parameter(), axis=-1)
+        s0, s1 = uniform_grid(high=self.env.observation_space.high, low=self.env.observation_space.low, bins=self.bins, include_low=0)
+        S0, S1 = np.meshgrid(s0, s1)
+        plot_3d(S0, S1, para, title=title, xlabel=xlabel, ylabel=ylabel, zlabel=zlabel)
+
+    def save(self, episode, file_path=''):
+        if file_path == '':
+            file_path=f'Models/MountainCar_P{self.n_particle}_B{self.bins[0]}_E{episode}'
+        with open(f'{file_path}_tables.npy', 'wb') as f:
+            np.save(f, self.tables)
+        with open(f'{file_path}_weights.npy', 'wb') as f:
+            np.save(f, self._weights)
+        
+
+
