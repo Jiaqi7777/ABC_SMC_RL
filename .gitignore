@@ -1,1 +1,10 @@
 *.pyc
+*.ipynb
+*.DS_Store
+.vscode
+
+#Models
+Models
+
+#Figures
+Figures

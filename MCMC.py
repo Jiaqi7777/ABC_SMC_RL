@@ -50,16 +50,16 @@ class RandomWalk(Kernel):
         super(RandomWalk, self).__init__(*args)   
         self.model=model
 
-    def move(self, current_para, sigma=1):
-        ratio = 1
-        return current_para + np.random.normal(size=(current_para.shape), scale=sigma), ratio
+    def move(self, current_para, sigma=0.1):
+        move_ratio = 1
+        return current_para + np.random.normal(size=(current_para.shape), scale=sigma), move_ratio
 
     def accept(self, current_para, obs, samples):
-        proposed_para, ratio = self.move(current_para)
+        proposed_para, move_ratio = self.move(current_para)
         proposed_samples = generate_samples(self.model, obs, proposed_para)
         current_log_posterior = self.posterior(current_para, obs, samples)
         proposed_log_posterior = self.posterior(proposed_para, obs, proposed_samples)
-        return proposed_log_posterior - current_log_posterior - np.log(ratio), proposed_para
+        return proposed_log_posterior - current_log_posterior - np.log(move_ratio), proposed_para
         
 
 class MCMC:
@@ -78,6 +78,6 @@ class MCMC:
                 accept = alpha < np.exp(acceptance_ratio)
             if accept:
                 new_paras[i] = proposed_para
-        print(paras.shape, new_paras.shape)
+                print(accept)
         return new_paras
         
