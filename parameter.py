@@ -1,9 +1,9 @@
 #Env 
-horizon = 200
+horizon = 2000
 #Number of Episodes
 episodes = 10
 bins = (10, 10)
-last_episode = 9
+last_episode = 18
 seed = 555
 
 #SMC parameters

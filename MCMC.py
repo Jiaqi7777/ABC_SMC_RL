@@ -23,7 +23,8 @@ def get_log_likelihood(obs, samples, sigma=1, tractability=False):
         return log_likelihood
     else:
         #sigma = sigma * np.identity(len(samples))
-        return stats.norm.logpdf(obs['rewards'], loc=samples, scale=sigma).sum()
+        lld = stats.norm.logpdf(obs['rewards'], loc=samples, scale=sigma).sum()
+        return lld
         
     
 def get_log_posterior(para, *args):
@@ -40,7 +41,7 @@ class Kernel:
         self.tractability = tractability
 
     def posterior(self, para, *args):
-        return self.prior(para) + self.likelihood(*args, self.tractability)
+        return self.prior(para) + self.likelihood(*args, tractability=self.tractability)
 
     def move(self):
         raise NotImplementedError
@@ -78,6 +79,6 @@ class MCMC:
                 accept = alpha < np.exp(acceptance_ratio)
             if accept:
                 new_paras[i] = proposed_para
-                print(accept)
+                #print('accept with ratio ', np.exp(acceptance_ratio))
         return new_paras
         

@@ -64,5 +64,5 @@ if __name__ == '__main__':
                 break
         model.plot_policy(title=f'MountainCar Policy for Episode={e + last_episode + 1}', xlabel='position', ylabel='velocity')
         model.plot_value(title=f'MountainCar Value for Episode={e + last_episode + 1}', xlabel='position', ylabel='velocity')
-        model.save(e + last_episode + 1, args.output)
+        model.save(e + last_episode + 1, args.output, horizon=horizon)
     replace_line('parameter.py', 'last_episode', e + last_episode)

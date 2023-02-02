@@ -2,9 +2,13 @@
 *.ipynb
 *.DS_Store
 .vscode
+*.yml
 
 #Models
 Models
 
 #Figures
 Figures
+
+#Not used
+bandits.py
