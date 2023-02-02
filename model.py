@@ -141,9 +141,9 @@ class Tabular:
         S0, S1 = np.meshgrid(s0, s1)
         plot_3d(S0, S1, para, title=title, xlabel=xlabel, ylabel=ylabel, zlabel=zlabel)
 
-    def save(self, episode, file_path=''):
+    def save(self, episode, file_path='', horizon=200):
         if file_path == '':
-            file_path=f'Models/MountainCar_P{self.n_particle}_B{self.bins[0]}_E{episode}'
+            file_path=f'Models/MountainCar_H_{horizon}_P{self.n_particle}_B{self.bins[0]}_E{episode}'
         with open(f'{file_path}_tables.npy', 'wb') as f:
             np.save(f, self.tables)
         with open(f'{file_path}_weights.npy', 'wb') as f:
