@@ -24,7 +24,7 @@ if __name__ == '__main__':
     #Environment
     #env = gym.make('MountainCar-v0')
     #env = MountainCar()
-    env = GridWorld(11, 5, 10)
+    env = GridWorld(11, 6, 10)
     #SMC
     model = Tabular(env, n_particle, prior, discrete=discrete, bins=bins)
     if continue_training:
@@ -42,9 +42,9 @@ if __name__ == '__main__':
         s0 = model.discrete_state(s0)
 
     obs = Buffer(['state0', 'state1', 'action', 'rewards', 'done'])
-    
+    samples_l = []
     for e in range(episodes):
-        samples_l = []
+        
         sampler._mcmc.reset()
         para = model.sample_para(sampler._weights)[0]
         s0, _ = env.reset()
@@ -61,14 +61,14 @@ if __name__ == '__main__':
             samples = model.r_hat(s0, s1, action)
             samples_l.append(samples)
             s0 = s1
-            if t % update_frequency == 0:
+            if ( t + 1 ) % update_frequency == 0:
                 sampler.update(obs._buffers, samples_l, update_frequency)
             if done:
                 print("Done!!")
                 break
-        #print(obs._buffers['state0'][-horizon:])
-        print('total accepted for episode:', sampler._mcmc.accepted)
-    #     model.plot_policy(title=f'{env_name} Policy for Episode={e + last_episode + 1}', xlabel='position', ylabel='velocity', show=show)
-    #     model.plot_value(title=f'{env_name} Value for Episode={e + last_episode + 1}', xlabel='position', ylabel='velocity', show=show)
+        print(obs._buffers['state0'][-horizon:])
+        print(f'total accepted for episode {e}:', sampler._mcmc.accepted)
+        # model.plot_policy(title=f'{env_name} Policy for Episode={e + last_episode + 1}', xlabel='position', ylabel='velocity', show=show)
+        # model.plot_value(title=f'{env_name} Value for Episode={e + last_episode + 1}', xlabel='position', ylabel='velocity', show=show)
     #     model.save(e + last_episode + 1, args.output, horizon=horizon, env_name=env_name)
     # replace_line('parameter.py', 'last_episode', e + last_episode + 1)

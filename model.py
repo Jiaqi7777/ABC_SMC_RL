@@ -89,19 +89,20 @@ class Tabular:
         else:
             raise NotImplementedError(f'The prior method corresponds to {prior} has not been implemented')
 
-    def act(self, state, table):
-        #return np.random.choice(range(self.action_size))
-        return np.argmax(table[state])
+    def act(self, state, table=None):
+        thompson_weights = np.zeros(self.action_size)
+        for i, t in enumerate(self.tables):
+            thompson_weights[np.argmax(table[state])] += self._weights[i]
+        return np.argmax(thompson_weights)
 
     def discrete_state(self, sample_state):
         """Discretize a sample as per given grid."""
         return tuple(int(np.digitize(s, g)) for s, g in zip(sample_state, self.state_grid))  
 
     def sample_para(self, weights):
-        i = random.choices(range(len(self.tables)), weights)
-        print('Best table', i)
-        return self.tables[i]
-        #return random.choices(self.tables, weights)
+        # i = random.choices(range(len(self.tables)), weights)
+        # print('Best table', i)
+        return random.choices(self.tables, weights)
 
     def q_value(self, table, s, a):            
         if len(table.shape) > len(s+ (a,)):
@@ -147,7 +148,7 @@ class Tabular:
         else:
             s0, s1 = uniform_grid(high=self.env.observation_space_high, low=self.env.observation_space_low, bins = self.bins, include_low=0)
         S0, S1 = np.meshgrid(s0, s1)
-        print(para)
+        print('Value', para)
         #plot_3d(S0, S1, para, title=title, xlabel=xlabel, ylabel=ylabel, zlabel=zlabel)
 
     def plot_policy(self, title='Policy for each state', xlabel=None, ylabel=None, zlabel='Policy', show=False):
@@ -157,7 +158,7 @@ class Tabular:
         else:
             s0, s1 = uniform_grid(high=self.env.observation_space_high, low=self.env.observation_space_low, bins = self.bins, include_low=0)
         S0, S1 = np.meshgrid(s0, s1)
-        print(para)
+        print('policy:', para)
         #plot_3d(S0, S1, para, title=title, xlabel=xlabel, ylabel=ylabel, zlabel=zlabel)
 
     def save(self, episode, file_path='', horizon=200, env_name=''):

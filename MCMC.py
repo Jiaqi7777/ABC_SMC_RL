@@ -59,7 +59,7 @@ class RandomWalk(Kernel):
     def accept(self, current_para, obs, samples):
         proposed_para, move_ratio = self.move(current_para)
         proposed_samples = generate_samples(self.model, obs, proposed_para)
-        print(proposed_samples, samples)
+        print(proposed_samples-samples)
         current_log_posterior = self.posterior(current_para, obs, samples)
         proposed_log_posterior = self.posterior(proposed_para, obs, proposed_samples)
         return proposed_log_posterior - current_log_posterior - np.log(move_ratio), proposed_para
@@ -96,16 +96,16 @@ if __name__ == '__main__':
     from model import *
     n_particle = 5    
     r = []
-    env = GridWorld(5, 2, 4)
+    env = GridWorld(n_cell=9, starting_position=5, goal_position=8)
     model = Tabular(env=env, n_particle=n_particle, prior='normal')
     s0 = (1, 2)
     s1 = (2, 3)
     action = 1
-    obs = {'rewards':[1,2,3], 'state0':[(1,2),(1,2),(1,2)],'state1':[(7,5),(8,2),(1,8)], 'action':[-1,0,1]}
+    obs = {'rewards':[1,2,3], 'state0':[(1,),(1,),(2,)],'state1':[(7,),(8,),(8,)], 'action':[-1,0,1]}
     samples_l = []
     for j in range(len(obs['state0'])):
         samples_l.append(model.r_hat(obs['state0'][j], obs['state1'][j], obs['action'][j]))
     samples_l = np.array(samples_l)
     for i in range(n_particle):
         propsed_samples = generate_samples(model, obs, model.get_parameter()[i])
-        print(samples_l[:, i], propsed_samples)
+        print(i, samples_l[:, i], propsed_samples)

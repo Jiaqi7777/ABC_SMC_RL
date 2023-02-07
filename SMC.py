@@ -18,7 +18,6 @@ class SMC:
         samples_l = np.array(samples_l)
         for j in range(self.n_particle):
             lld = stats.multivariate_normal.logpdf(obs['rewards'][-update_frequency:], samples_l[-update_frequency:,j])
-            print(samples_l[-update_frequency:,j])
             self._weights[j] *= lld
         self._weights /= sum(self._weights)
         self.model.set_weights(self._weights)
