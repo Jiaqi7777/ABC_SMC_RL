@@ -4,7 +4,7 @@ from MountainCar import *
 from model import *
 
 class SMC:
-    def __init__(self, model, min_ess=0.5, kernel=None):
+    def __init__(self, model, min_ess=1, kernel=None):
         self.n_particle = model.n_particle
         self.min_ess = min_ess 
         self._weights = model._weights
@@ -18,6 +18,7 @@ class SMC:
         samples_l = np.array(samples_l)
         for j in range(self.n_particle):
             lld = stats.multivariate_normal.logpdf(obs['rewards'][-update_frequency:], samples_l[-update_frequency:,j])
+            print(samples_l[-update_frequency:,j])
             self._weights[j] *= lld
         self._weights /= sum(self._weights)
         self.model.set_weights(self._weights)
@@ -30,7 +31,7 @@ class SMC:
         return 1 / ( 1 + np.var(self._weights) )
 
     def resample(self, model):
-        paras = random.choices(model.get_parameter(), self._weights, self.n_particle)
+        paras = np.array(random.choices(model.get_parameter(), self._weights, k=self.n_particle))
         self._weights = np.ones(self.n_particle) / self.n_particle
         self.model.set_parameter(paras)
         self.model.set_weights(self._weights)

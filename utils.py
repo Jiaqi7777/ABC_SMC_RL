@@ -7,6 +7,8 @@ def argmaxs(arr):
 
 
 def plot_3d(X, Y, Z, title=None, xlabel='s0', ylabel='s1', zlabel='Value', show=False):
+    if len(Z.shape) == 1:
+        Z = np.expand_dims(Z, axis=0)
     figure_path = 'Figures/'
     ax = plt.axes(projection='3d')
     ax.plot_surface(X, Y, Z, rstride=1, cstride=1,
@@ -15,6 +17,7 @@ def plot_3d(X, Y, Z, title=None, xlabel='s0', ylabel='s1', zlabel='Value', show=
     ax.set_ylabel(ylabel)
     ax.set_zlabel(zlabel)
     plt.title(title)
+    plt.show()
     if show:
         plt.show()
     plt.savefig(f'{figure_path+title}.png')
@@ -27,7 +30,7 @@ def replace_line(file_path, variable, new_value):
     with open(file_path, 'w') as f:
         for line in lines:
             if variable == line.split(' = ')[0]:
-                print("Replace to ", line)
                 line = f'{variable} = {new_value}\n'
+                print("Replace to ", line)
             f.write(line)
     f.close()

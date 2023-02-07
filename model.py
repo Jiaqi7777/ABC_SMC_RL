@@ -29,6 +29,8 @@ def uniform_grid(low, high, bins=(10,10), include_low=1, verbose=False):
         print("Uniform grid: [<low>, <high>] / <bins> => <splits>")
         for l, h, b, splits in zip(low, high, bins, grid):
             print("    [{}, {}] / {} => {}".format(l, h, b, splits))
+    if len(bins) == 1:
+        return grid, [0]
     return grid
 
 class Buffer:
@@ -59,18 +61,23 @@ class Buffer:
         return len(list(self._buffers.values())[0])
 
 class Tabular:
-    def __init__(self, env, n_particle, prior='normal', discrete=True, gamma=0.95, std=0.1, verbose=True):
+    def __init__(self, env, n_particle, prior='normal', discrete=False, gamma=0.95, std=0.1, verbose=True, bins=(10,)):
         self.env = env
         self.discrete = discrete
         self.obs_size = env.observation_space.shape
-        self.bins=(10,)*self.obs_size[0]
-        self.state_grid = uniform_grid(high=self.env.observation_space.high, low=self.env.observation_space.low, bins=self.bins, verbose=verbose)
-        self.state_size = tuple(len(splits) + 1 for splits in self.state_grid)  # n-dimensional state space
-        self.action_size = self.env.action_space.n  # 1-dimensional discrete action space
+        if discrete:
+            self.bins = bins*self.obs_size[0]
+            self.state_grid = uniform_grid(high=self.env.observation_space.high, low=self.env.observation_space.low, bins=self.bins, verbose=verbose)
+            self.state_size = tuple(len(splits) + 1 for splits in self.state_grid)  # n-dimensional state space
+        else:
+            self.bins = (env.observation_space.n, )
+            self.observation_shape = (1, )
+        self.action_size = self.env.action_space.n  # 1-dimensional discrete action space 
         if verbose:
-            print("Environment:", self.env)
-            print("State space size:", self.state_size)
-            print("Action space size:", self.action_size)
+                print("Environment:", self.env)
+                print("State space size:", self.bins)
+                print("Action space size:", self.action_size)
+        
         self.gamma = gamma
         self.std = std
         self.n_particle = n_particle
@@ -83,6 +90,7 @@ class Tabular:
             raise NotImplementedError(f'The prior method corresponds to {prior} has not been implemented')
 
     def act(self, state, table):
+        #return np.random.choice(range(self.action_size))
         return np.argmax(table[state])
 
     def discrete_state(self, sample_state):
@@ -90,7 +98,10 @@ class Tabular:
         return tuple(int(np.digitize(s, g)) for s, g in zip(sample_state, self.state_grid))  
 
     def sample_para(self, weights):
-        return random.choices(self.tables, weights)
+        i = random.choices(range(len(self.tables)), weights)
+        print('Best table', i)
+        return self.tables[i]
+        #return random.choices(self.tables, weights)
 
     def q_value(self, table, s, a):            
         if len(table.shape) > len(s+ (a,)):
@@ -129,21 +140,29 @@ class Tabular:
     def optimal_parameter(self):
         return self.get_parameter()[np.argmax(self._weights)]
 
-    def plot_value(self, title='Value for each state', xlabel=None, ylabel=None, zlabel='Value'):
+    def plot_value(self, title='Value for each state', xlabel=None, ylabel=None, zlabel='Value', show=False):
         para = np.max(self.optimal_parameter(), axis=-1)
-        s0, s1 = uniform_grid(high=self.env.observation_space.high, low=self.env.observation_space.low, bins=self.bins, include_low=0)
+        if self.discrete:
+            s0, s1 = uniform_grid(high=self.env.observation_space.high, low=self.env.observation_space.low, bins=self.bins, include_low=0)
+        else:
+            s0, s1 = uniform_grid(high=self.env.observation_space_high, low=self.env.observation_space_low, bins = self.bins, include_low=0)
         S0, S1 = np.meshgrid(s0, s1)
-        plot_3d(S0, S1, para, title=title, xlabel=xlabel, ylabel=ylabel, zlabel=zlabel)
+        print(para)
+        #plot_3d(S0, S1, para, title=title, xlabel=xlabel, ylabel=ylabel, zlabel=zlabel)
 
-    def plot_policy(self, title='Policy for each state', xlabel=None, ylabel=None, zlabel='Policy'):
+    def plot_policy(self, title='Policy for each state', xlabel=None, ylabel=None, zlabel='Policy', show=False):
         para = np.argmax(self.optimal_parameter(), axis=-1)
-        s0, s1 = uniform_grid(high=self.env.observation_space.high, low=self.env.observation_space.low, bins=self.bins, include_low=0)
+        if self.discrete:
+            s0, s1 = uniform_grid(high=self.env.observation_space.high, low=self.env.observation_space.low, bins=self.bins, include_low=0)
+        else:
+            s0, s1 = uniform_grid(high=self.env.observation_space_high, low=self.env.observation_space_low, bins = self.bins, include_low=0)
         S0, S1 = np.meshgrid(s0, s1)
-        plot_3d(S0, S1, para, title=title, xlabel=xlabel, ylabel=ylabel, zlabel=zlabel)
+        print(para)
+        #plot_3d(S0, S1, para, title=title, xlabel=xlabel, ylabel=ylabel, zlabel=zlabel)
 
-    def save(self, episode, file_path='', horizon=200):
+    def save(self, episode, file_path='', horizon=200, env_name=''):
         if file_path == '':
-            file_path=f'Models/MountainCar_H_{horizon}_P{self.n_particle}_B{self.bins[0]}_E{episode}'
+            file_path=f'Models/{env_name}_H{horizon}_P{self.n_particle}_B{self.bins[0]}_E{episode}'
         with open(f'{file_path}_tables.npy', 'wb') as f:
             np.save(f, self.tables)
         with open(f'{file_path}_weights.npy', 'wb') as f:

@@ -51,13 +51,15 @@ class RandomWalk(Kernel):
         super(RandomWalk, self).__init__(*args)   
         self.model=model
 
-    def move(self, current_para, sigma=0.1):
+    def move(self, current_para, sigma=0):
         move_ratio = 1
-        return current_para + np.random.normal(size=(current_para.shape), scale=sigma), move_ratio
+        return current_para , move_ratio
+        #+ np.random.normal(size=(current_para.shape), scale=sigma), move_ratio
 
     def accept(self, current_para, obs, samples):
         proposed_para, move_ratio = self.move(current_para)
         proposed_samples = generate_samples(self.model, obs, proposed_para)
+        print(proposed_samples, samples)
         current_log_posterior = self.posterior(current_para, obs, samples)
         proposed_log_posterior = self.posterior(proposed_para, obs, proposed_samples)
         return proposed_log_posterior - current_log_posterior - np.log(move_ratio), proposed_para
@@ -67,6 +69,10 @@ class MCMC:
     def __init__(self, steps = 10, kernal=RandomWalk()):
         self.steps = steps
         self.kernel = kernal
+        self.accepted = 0
+
+    def reset(self):
+        self.accepted = 0
 
     def update(self, paras, obs, samples):
         for i, current_para in enumerate(paras):
@@ -79,6 +85,27 @@ class MCMC:
                 accept = alpha < np.exp(acceptance_ratio)
             if accept:
                 new_paras[i] = proposed_para
-                #print('accept with ratio ', np.exp(acceptance_ratio))
+                self.accepted += 1
+                print('accept with ratio ', np.exp(acceptance_ratio))
+        
         return new_paras
         
+
+if __name__ == '__main__':
+    from GridWrold import *
+    from model import *
+    n_particle = 5    
+    r = []
+    env = GridWorld(5, 2, 4)
+    model = Tabular(env=env, n_particle=n_particle, prior='normal')
+    s0 = (1, 2)
+    s1 = (2, 3)
+    action = 1
+    obs = {'rewards':[1,2,3], 'state0':[(1,2),(1,2),(1,2)],'state1':[(7,5),(8,2),(1,8)], 'action':[-1,0,1]}
+    samples_l = []
+    for j in range(len(obs['state0'])):
+        samples_l.append(model.r_hat(obs['state0'][j], obs['state1'][j], obs['action'][j]))
+    samples_l = np.array(samples_l)
+    for i in range(n_particle):
+        propsed_samples = generate_samples(model, obs, model.get_parameter()[i])
+        print(samples_l[:, i], propsed_samples)
