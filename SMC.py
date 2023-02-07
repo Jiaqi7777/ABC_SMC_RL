@@ -3,8 +3,9 @@ from MCMC import *
 from MountainCar import *
 from model import *
 
+
 class SMC:
-    def __init__(self, model, min_ess=1, kernel=None):
+    def __init__(self, model, min_ess=0.5, kernel=None):
         self.n_particle = model.n_particle
         self.min_ess = min_ess 
         self._weights = model._weights
@@ -24,6 +25,7 @@ class SMC:
         new_parameter = self._mcmc.update(self.model.get_parameter(), obs, samples_l)
         self.model.set_parameter(new_parameter)
         if self.ESS() < self.min_ess:
+            print('Resampled')
             self.resample(self.model)
 
     def ESS(self):

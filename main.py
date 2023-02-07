@@ -43,6 +43,7 @@ if __name__ == '__main__':
 
     obs = Buffer(['state0', 'state1', 'action', 'rewards', 'done'])
     samples_l = []
+    pre_p = model.get_parameter()
     for e in range(episodes):
         
         sampler._mcmc.reset()
@@ -51,6 +52,7 @@ if __name__ == '__main__':
         if discrete:
             s0 = model.discrete_state(s0)
         for t in range(horizon):
+            
             #print('Time:', t, model.get_parameter())
             action = model.act(s0, para)
             s1, r, done, *info = env.step(action)
@@ -66,9 +68,12 @@ if __name__ == '__main__':
             if done:
                 print("Done!!")
                 break
-        print(obs._buffers['state0'][-horizon:])
+            # print('tables:', (model.get_parameter()==pre_p).all())
+            # pre_p = model.get_parameter
+        # print(obs._buffers['state0'][-horizon:])
         print(f'total accepted for episode {e}:', sampler._mcmc.accepted)
-        # model.plot_policy(title=f'{env_name} Policy for Episode={e + last_episode + 1}', xlabel='position', ylabel='velocity', show=show)
-        # model.plot_value(title=f'{env_name} Value for Episode={e + last_episode + 1}', xlabel='position', ylabel='velocity', show=show)
+        
+    model.plot_policy(title=f'{env_name} Policy for Episode={e + last_episode + 1}', xlabel='position', ylabel='velocity', show=show)
+    model.plot_value(title=f'{env_name} Value for Episode={e + last_episode + 1}', xlabel='position', ylabel='velocity', show=show)
     #     model.save(e + last_episode + 1, args.output, horizon=horizon, env_name=env_name)
     # replace_line('parameter.py', 'last_episode', e + last_episode + 1)
