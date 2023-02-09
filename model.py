@@ -148,7 +148,7 @@ class Tabular:
     
     def policy(self):
         idx = np.argmax(self.tables, axis=-1).T.reshape(-1)
-        thp_matrix = coo_array((np.ones(int(self.n_particle * np.prod(self.state_size))), (idx, np.array(range(self.n_particle * np.prod(self.state_size))))))
+        thp_matrix = coo_array((np.ones(self.n_particle * np.prod(self.state_size)), (idx, np.array(range(self.n_particle * np.prod(self.state_size))))), shape=(self.action_size, self.n_particle * np.prod(self.state_size)))
         thp_matrix = thp_matrix.toarray().reshape(thp_matrix.shape[0],-1, self.n_particle).swapaxes(0,1).reshape(-1, self.n_particle)
         thp_vec = thp_matrix @ self._weights
         thp_weights = np.moveaxis(thp_vec.reshape(self.state_size[::-1]+ (self.action_size,)),range(len(self.state_size)),range(len(self.state_size))[::-1])

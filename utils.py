@@ -45,7 +45,7 @@ def plot_return_for_epsiodes(r_all_episodes):
     plt.title('Return for episodes')
     plt.show()
     
-def plot_return_vs_episodes(r_all_episodes, smooth=0):
+def plot_return_vs_episodes(r_all_episodes, smooth=1):
     r_all_episodes = np.convolve(np.array(r_all_episodes), np.ones(smooth)/smooth, mode='valid')
     plt.plot(r_all_episodes)
     plt.xlabel('episodes')
