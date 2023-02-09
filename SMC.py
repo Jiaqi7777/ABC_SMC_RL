@@ -24,7 +24,7 @@ class SMC:
         self._weights /= sum(self._weights)
         self.model.set_weights(self._weights)
         if self.ESS() < self.min_ess * self.n_particle:
-            print('Resampled')
+            # print('Resampled')
             samples_l = self.resample(self.model, samples_l)
         new_parameter, samples_l = self._mcmc.update(self.model.get_parameter(), obs, samples_l)
         self.model.set_parameter(new_parameter)
@@ -41,12 +41,6 @@ class SMC:
         self.model.set_parameter(paras)
         self.model.set_weights(self._weights)
         return samples_l[:, idx]
-        
-        
-        paras = np.array(random.choices(model.get_parameter(), self._weights, k=self.n_particle))
-        self._weights = np.ones(self.n_particle) / self.n_particle
-        self.model.set_parameter(paras)
-        self.model.set_weights(self._weights)
         
 
 

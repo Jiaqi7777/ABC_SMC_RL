@@ -35,20 +35,43 @@ def replace_line(file_path, variable, new_value):
             f.write(line)
     f.close()
     
-def plot_return_for_epsiodes(r_all_episodes):
+def plot_return_for_epsiodes(r_all_episodes, figure_path='Figures/', show=False):
     colors = plt.cm.rainbow(np.linspace(0, 1, len(r_all_episodes)))
     for t, r in enumerate(r_all_episodes):
         plt.plot(r, label=f'Time {t}', color=colors[t])
     plt.legend()
     plt.xlabel('timesteps')
     plt.ylabel('Return')
-    plt.title('Return for episodes')
-    plt.show()
+    title = 'Return for episodes'
+    plt.title(title)
+    plt.savefig(f'{figure_path+title}.png')
+    if show:
+        plt.show()
+    plt.clf()
     
-def plot_return_vs_episodes(r_all_episodes, smooth=1):
+def plot_return_vs_episodes(r_all_episodes, smooth=1, figure_path='Figures/', show=False):
     r_all_episodes = np.convolve(np.array(r_all_episodes), np.ones(smooth)/smooth, mode='valid')
     plt.plot(r_all_episodes)
     plt.xlabel('episodes')
     plt.ylabel('Return')
-    plt.title('Return for each episodes')
-    plt.show()
+    title = 'Return for each episodes'
+    plt.title(title)
+    plt.savefig(f'{figure_path+title}.png')
+    if show:
+        plt.show()
+    plt.clf()
+    
+def plot_return_vs_episodes_repeat(r_all_episodes_repeat, figure_path='Figures/', show=False):
+    N = len(r_all_episodes_repeat)
+    r_mean = np.mean(r_all_episodes_repeat, axis=0)
+    r_std = np.std(r_all_episodes_repeat, axis=0)
+    plt.plot(r_mean, label = f'Mean of the return')
+    plt.fill_between(range(len(r_all_episodes_repeat[0])), r_mean-r_std/np.sqrt(N), r_mean+r_std/np.sqrt(N), alpha=0.2)
+    plt.xlabel('episodes')
+    plt.ylabel('Return')
+    title = f'Return for each episodes averaging over {N} random runs'
+    plt.title(title)
+    plt.savefig(f'{figure_path+title}.png')
+    if show:
+        plt.show()
+    plt.clf()

@@ -1,9 +1,10 @@
 #Env 
 env_name = 'GridWorld'
 #env_name = 'MountainCar'
-horizon = 40
+horizon = 30
 #Number of Episodes
-episodes = 300
+repeat_experiment = 20
+episodes = 100
 discrete = False
 bins = (10, )
 last_episode = 1
