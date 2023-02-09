@@ -9,6 +9,7 @@ from parameter import *
 from utils import *
 import argparse
 from tqdm import tqdm
+import datetime
 
 
 #Tabular method
@@ -21,6 +22,9 @@ if __name__ == '__main__':
     continue_training = args.continue_train
     file_path = args.file
     # np.random.seed(seed)
+    
+    time =  datetime.datetime.now()
+    time = time.strftime("%f")
 
     #Environment
     #env = gym.make('MountainCar-v0')
@@ -83,7 +87,7 @@ if __name__ == '__main__':
             # model.plot_policy(title=f'{env_name} Policy for Episode={e + last_episode + 1}', xlabel='position', ylabel='velocity', show=show)
             R_l.append(R)
         R_all_experiment.append(R_l)
-    plot_return_vs_episodes_repeat(R_all_experiment)
+    plot_return_vs_episodes_repeat(R_all_experiment, title=f'{env_name}_Return_{time}')
     model.plot_value(title=f'{env_name} Value for Episode={e + last_episode + 1}', xlabel='position', ylabel='velocity', show=show)
     #     model.save(e + last_episode + 1, args.output, horizon=horizon, env_name=env_name)
     # replace_line('parameter.py', 'last_episode', e + last_episode + 1)
