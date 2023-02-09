@@ -3,16 +3,16 @@ env_name = 'GridWorld'
 #env_name = 'MountainCar'
 horizon = 40
 #Number of Episodes
-episodes = 40
+episodes = 300
 discrete = False
 bins = (10, )
-last_episode = 10
+last_episode = 1
 seed = 555
 
 #SMC parameters
 prior = 'normal'
 lld = 'normal'
-n_particle = 5
+n_particle = 4
 min_ess = 0.5
 
 #MCMC

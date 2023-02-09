@@ -34,3 +34,21 @@ def replace_line(file_path, variable, new_value):
                 print("Replace to ", line)
             f.write(line)
     f.close()
+    
+def plot_return_for_epsiodes(r_all_episodes):
+    colors = plt.cm.rainbow(np.linspace(0, 1, len(r_all_episodes)))
+    for t, r in enumerate(r_all_episodes):
+        plt.plot(r, label=f'Time {t}', color=colors[t])
+    plt.legend()
+    plt.xlabel('timesteps')
+    plt.ylabel('Return')
+    plt.title('Return for episodes')
+    plt.show()
+    
+def plot_return_vs_episodes(r_all_episodes, smooth=0):
+    r_all_episodes = np.convolve(np.array(r_all_episodes), np.ones(smooth)/smooth, mode='valid')
+    plt.plot(r_all_episodes)
+    plt.xlabel('episodes')
+    plt.ylabel('Return')
+    plt.title('Return for each episodes')
+    plt.show()

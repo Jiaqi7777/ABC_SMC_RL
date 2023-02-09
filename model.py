@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import scipy.stats as stats
 import random
 from utils import plot_3d
+from scipy.sparse import csr_matrix, coo_array
 
 def uniform_grid(low, high, bins=(10,10), include_low=1, verbose=False):
     """Define a uniformly-spaced grid that can be used to discretize a space.
@@ -36,7 +37,6 @@ def uniform_grid(low, high, bins=(10,10), include_low=1, verbose=False):
 class Buffer:
     def __init__(self, entry_keys, seed=555):
         self._buffers = {key: [] for key in entry_keys}
-        self.seed = random.seed(seed)
 
     def insert(self, items):
         if set(items.keys()) != set(self._buffers.keys()):
@@ -70,7 +70,7 @@ class Tabular:
             self.state_grid = uniform_grid(high=self.env.observation_space.high, low=self.env.observation_space.low, bins=self.bins, verbose=verbose)
             self.state_size = tuple(len(splits) + 1 for splits in self.state_grid)  # n-dimensional state space
         else:
-            self.bins = (env.observation_space.n, )
+            self.state_size = self.bins = (env.observation_space.n, )
             self.observation_shape = (1, )
         self.action_size = self.env.action_space.n  # 1-dimensional discrete action space 
         if verbose:
@@ -89,11 +89,15 @@ class Tabular:
         else:
             raise NotImplementedError(f'The prior method corresponds to {prior} has not been implemented')
 
-    def act(self, state, table=None):
-        thompson_weights = np.zeros(self.action_size)
-        for i, t in enumerate(self.tables):
-            thompson_weights[np.argmax(table[state])] += self._weights[i]
-        return np.argmax(thompson_weights)
+    def act(self, state, table=[]):
+        if table == []:
+            '''Thompson Sampling'''
+            action_idx = np.argmax(self.tables[(slice(None), *state)], axis=-1)
+            thompson_matrix = csr_matrix((np.ones(self.n_particle), (action_idx, np.array(range(self.n_particle)))), shape=(self.action_size, self.n_particle))
+            thompson_weights = thompson_matrix @ self._weights
+            return random.choices(range(self.action_size), thompson_weights)[0]
+        '''Greedy Action'''
+        return np.argmax(table[state])
 
     def discrete_state(self, sample_state):
         """Discretize a sample as per given grid."""
@@ -140,19 +144,31 @@ class Tabular:
 
     def optimal_parameter(self):
         return self.get_parameter()[np.argmax(self._weights)]
+    
+    def policy(self):
+        idx = np.argmax(self.tables, axis=-1).T.reshape(-1)
+        thp_matrix = coo_array((np.ones(int(self.n_particle * np.prod(self.state_size))), (idx, np.array(range(self.n_particle * np.prod(self.state_size))))))
+        thp_matrix = thp_matrix.toarray().reshape(thp_matrix.shape[0],-1, self.n_particle).swapaxes(0,1).reshape(-1, self.n_particle)
+        thp_vec = thp_matrix @ self._weights
+        thp_weights = np.moveaxis(thp_vec.reshape(self.state_size[::-1]+ (self.action_size,)),range(len(self.state_size)),range(len(self.state_size))[::-1])
+        return np.argmax(thp_weights, axis=-1)
+        
 
     def plot_value(self, title='Value for each state', xlabel=None, ylabel=None, zlabel='Value', show=False):
-        para = np.max(self.optimal_parameter(), axis=-1)
+        para = np.average(np.max(self.tables, axis=-1), weights=self._weights, axis=0)
         if self.discrete:
             s0, s1 = uniform_grid(high=self.env.observation_space.high, low=self.env.observation_space.low, bins=self.bins, include_low=0)
         else:
-            s0, s1 = uniform_grid(high=self.env.observation_space_high, low=self.env.observation_space_low, bins = self.bins, include_low=0)
+            s0, s1 = uniform_grid(high=self.env.observation_space_high, low=self.env.observation_space_low, bins=self.bins, include_low=0)
+            s0 = np.array(s0).astype('int32')
+            s1 = np.array(s1).astype('int32')
         S0, S1 = np.meshgrid(s0, s1)
         print('Value', para)
         #plot_3d(S0, S1, para, title=title, xlabel=xlabel, ylabel=ylabel, zlabel=zlabel)
 
     def plot_policy(self, title='Policy for each state', xlabel=None, ylabel=None, zlabel='Policy', show=False):
-        para = np.argmax(self.optimal_parameter(), axis=-1)
+        # for s in range(self.state_size):
+        para = self.policy()
         if self.discrete:
             s0, s1 = uniform_grid(high=self.env.observation_space.high, low=self.env.observation_space.low, bins=self.bins, include_low=0)
         else:

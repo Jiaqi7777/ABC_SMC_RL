@@ -19,7 +19,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     continue_training = args.continue_train
     file_path = args.file
-    np.random.seed(seed)
+    # np.random.seed(seed)
 
     #Environment
     #env = gym.make('MountainCar-v0')
@@ -48,15 +48,15 @@ if __name__ == '__main__':
         
         sampler._mcmc.reset()
         para = model.sample_para(sampler._weights)[0]
+        # print('table 0',model.get_parameter()[0])
         s0, _ = env.reset()
         if discrete:
             s0 = model.discrete_state(s0)
         for t in range(horizon):
-            
             #print('Time:', t, model.get_parameter())
-            action = model.act(s0, para)
+            action = model.act(s0)
             s1, r, done, *info = env.step(action)
-            #print(s1,r,action)
+            # print('s1',s1,r,action)
             if discrete:
                 s1 = model.discrete_state(s1)
             obs.insert({'state0': s0, 'state1': s1, 'action': action, 'rewards': r, 'done': done})
@@ -64,16 +64,17 @@ if __name__ == '__main__':
             samples_l.append(samples)
             s0 = s1
             if ( t + 1 ) % update_frequency == 0:
-                sampler.update(obs._buffers, samples_l, update_frequency)
+                samplse_l = sampler.update(obs._buffers, samples_l, update_frequency)
             if done:
                 print("Done!!")
+                print('============================================')
                 break
             # print('tables:', (model.get_parameter()==pre_p).all())
             # pre_p = model.get_parameter
-        # print(obs._buffers['state0'][-horizon:])
-        print(f'total accepted for episode {e}:', sampler._mcmc.accepted)
+        print(t, obs._buffers['state0'][-t-1:])
+        print(f'total accepted for episode {e}:', round(sampler._mcmc.accepted / n_particle / horizon * update_frequency, 2))
         
-    model.plot_policy(title=f'{env_name} Policy for Episode={e + last_episode + 1}', xlabel='position', ylabel='velocity', show=show)
+        model.plot_policy(title=f'{env_name} Policy for Episode={e + last_episode + 1}', xlabel='position', ylabel='velocity', show=show)
     model.plot_value(title=f'{env_name} Value for Episode={e + last_episode + 1}', xlabel='position', ylabel='velocity', show=show)
     #     model.save(e + last_episode + 1, args.output, horizon=horizon, env_name=env_name)
     # replace_line('parameter.py', 'last_episode', e + last_episode + 1)

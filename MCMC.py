@@ -49,6 +49,7 @@ class Kernel:
 
 class RandomWalk(Kernel):
     def __init__(self, *args, model=None, sigma=0.5):
+        print('sigma', sigma)
         super(RandomWalk, self).__init__(*args)   
         self.model=model
         self.sigma = sigma
@@ -63,7 +64,7 @@ class RandomWalk(Kernel):
         #print(proposed_samples-samples)
         current_log_posterior = self.posterior(current_para, obs, samples)
         proposed_log_posterior = self.posterior(proposed_para, obs, proposed_samples)
-        return proposed_log_posterior - current_log_posterior - np.log(move_ratio), proposed_para
+        return proposed_log_posterior - current_log_posterior - np.log(move_ratio), proposed_para, proposed_samples
         
 
 class MCMC:
@@ -76,9 +77,9 @@ class MCMC:
         self.accepted = 0
 
     def update(self, paras, obs, samples):
+        new_paras = deepcopy(paras)
         for i, current_para in enumerate(paras):
-            new_paras = deepcopy(paras)
-            acceptance_ratio, proposed_para = self.kernel.accept(current_para, obs, samples[:, i])
+            acceptance_ratio, proposed_para, proposed_samples = self.kernel.accept(current_para, obs, samples[:, i])
             if acceptance_ratio > 1:
                 accept = True
             else:
@@ -87,8 +88,9 @@ class MCMC:
             if accept:
                 new_paras[i] = proposed_para
                 self.accepted += 1
+                samples[:, i] = proposed_samples
                 # print('accept with ratio ', np.exp(acceptance_ratio))
-        return new_paras
+        return new_paras, samples
         
 
 if __name__ == '__main__':

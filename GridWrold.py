@@ -1,5 +1,6 @@
 import numpy as np
 from gym import spaces
+import random
 
 class GridWorld:
     def __init__(self, n_cell, starting_position, goal_position):
@@ -21,16 +22,23 @@ class GridWorld:
 
     def reset(self):
         self.state = self.starting_position
+        #self.state = random.choice(range(self.n_cell))
+        self.done = False
         return (self.state, ), None
 
-    def step(self, action):
-        
-        reward = 0
-        self.state += action - 1
-        self.state = max(0, self.state)
-        self.state = min(self.state, self.n_cell-1)
-        if self.state == self.goal_position:
-            self.done = True
-            reward = 1
-       
-        return (self.state, ), reward, self.done, None
+    def step(self, action, state=None):
+        done = False
+        reward = -1
+        if state == None:
+            new_state = self.state + action - 1
+        else:
+            new_state = state + action - 1
+        new_state = max(0, new_state)
+        new_state = min(new_state, self.n_cell-1)
+        if new_state == self.goal_position:
+            done = True
+            reward = 0
+        if state == None:
+            self.state = new_state
+            self.done = done
+        return (new_state, ), reward, done, None
