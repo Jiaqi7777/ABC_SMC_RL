@@ -40,7 +40,7 @@ class SMC:
         self._weights = np.ones(self.n_particle) / self.n_particle
         self.model.set_parameter(paras)
         self.model.set_weights(self._weights)
-        return samples_l
+        return samples_l[:, idx]
         
         
         paras = np.array(random.choices(model.get_parameter(), self._weights, k=self.n_particle))

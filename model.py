@@ -95,6 +95,7 @@ class Tabular:
             action_idx = np.argmax(self.tables[(slice(None), *state)], axis=-1)
             thompson_matrix = csr_matrix((np.ones(self.n_particle), (action_idx, np.array(range(self.n_particle)))), shape=(self.action_size, self.n_particle))
             thompson_weights = thompson_matrix @ self._weights
+            # return np.argmax(thompson_weights)
             return random.choices(range(self.action_size), thompson_weights)[0]
         '''Greedy Action'''
         return np.argmax(table[state])
