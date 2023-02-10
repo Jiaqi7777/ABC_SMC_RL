@@ -71,7 +71,6 @@ class Tabular:
             self.state_size = tuple(len(splits) + 1 for splits in self.state_grid)  # n-dimensional state space
         else:
             self.state_size = self.bins = (env.observation_space.n, )
-            self.observation_shape = (1, )
         self.action_size = self.env.action_space.n  # 1-dimensional discrete action space 
         if verbose:
                 print("Environment:", self.env)

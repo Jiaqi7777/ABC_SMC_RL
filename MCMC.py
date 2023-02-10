@@ -96,6 +96,7 @@ class MCMC:
 if __name__ == '__main__':
     from GridWrold import *
     from model import *
+    from QLearning import *
     n_particle = 5    
     r = []
     env = GridWorld(n_cell=9, starting_position=5, goal_position=8)
