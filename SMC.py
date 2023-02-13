@@ -2,6 +2,8 @@ import numpy as np
 from MCMC import *
 from MountainCar import *
 from model import *
+from parameter import *
+
 
 class SMC:
     def __init__(self, model, min_ess=0.5, kernel=None):
@@ -11,7 +13,7 @@ class SMC:
         self.model = model
         self._parameter = model.get_parameter()
         if kernel == None:
-            kernel = RandomWalk(model=model)
+            kernel = RandomWalk(model=model, sigma=sigma)
         self._mcmc = MCMC(kernal=kernel)
 
     def update(self, obs, samples_l, update_frequency=5):
@@ -21,19 +23,24 @@ class SMC:
             self._weights[j] *= lld
         self._weights /= sum(self._weights)
         self.model.set_weights(self._weights)
-        new_parameter = self._mcmc.update(self.model.get_parameter(), obs, samples_l)
+        if self.ESS() < self.min_ess * self.n_particle:
+            # print('Resampled')
+            samples_l = self.resample(self.model, samples_l)
+        new_parameter, samples_l = self._mcmc.update(self.model.get_parameter(), obs, samples_l)
         self.model.set_parameter(new_parameter)
-        if self.ESS() < self.min_ess:
-            self.resample(self.model)
+        return samples_l
 
     def ESS(self):
+        return 1 / np.sum(self._weights**2)
         return 1 / ( 1 + np.var(self._weights) )
 
-    def resample(self, model):
-        paras = random.choices(model.get_parameter(), self._weights, self.n_particle)
+    def resample(self, model, samples_l):
+        idx = random.choices(range(self.n_particle), self._weights, k=self.n_particle)
+        paras = model.get_parameter()[idx]
         self._weights = np.ones(self.n_particle) / self.n_particle
         self.model.set_parameter(paras)
         self.model.set_weights(self._weights)
+        return samples_l[:, idx]
         
 
 

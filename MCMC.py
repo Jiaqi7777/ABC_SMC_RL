@@ -1,6 +1,7 @@
 import numpy as np
 import scipy.stats as stats
 from copy import deepcopy
+from parameter import *
    
 def generate_samples(model, obs, para):
     samples = []
@@ -47,31 +48,38 @@ class Kernel:
         raise NotImplementedError
 
 class RandomWalk(Kernel):
-    def __init__(self, *args, model=None):
+    def __init__(self, *args, model=None, sigma=0.5):
+        print('sigma', sigma)
         super(RandomWalk, self).__init__(*args)   
         self.model=model
+        self.sigma = sigma
 
-    def move(self, current_para, sigma=0.1):
+    def move(self, current_para):
         move_ratio = 1
-        return current_para + np.random.normal(size=(current_para.shape), scale=sigma), move_ratio
+        return current_para + np.random.normal(size=(current_para.shape), scale=self.sigma), move_ratio
 
     def accept(self, current_para, obs, samples):
         proposed_para, move_ratio = self.move(current_para)
         proposed_samples = generate_samples(self.model, obs, proposed_para)
+        #print(proposed_samples-samples)
         current_log_posterior = self.posterior(current_para, obs, samples)
         proposed_log_posterior = self.posterior(proposed_para, obs, proposed_samples)
-        return proposed_log_posterior - current_log_posterior - np.log(move_ratio), proposed_para
+        return proposed_log_posterior - current_log_posterior - np.log(move_ratio), proposed_para, proposed_samples
         
 
 class MCMC:
-    def __init__(self, steps = 10, kernal=RandomWalk()):
+    def __init__(self, steps = 10, kernal=RandomWalk(sigma=sigma)):
         self.steps = steps
         self.kernel = kernal
+        self.accepted = 0
+
+    def reset(self):
+        self.accepted = 0
 
     def update(self, paras, obs, samples):
+        new_paras = deepcopy(paras)
         for i, current_para in enumerate(paras):
-            new_paras = deepcopy(paras)
-            acceptance_ratio, proposed_para = self.kernel.accept(current_para, obs, samples[:, i])
+            acceptance_ratio, proposed_para, proposed_samples = self.kernel.accept(current_para, obs, samples[:, i])
             if acceptance_ratio > 1:
                 accept = True
             else:
@@ -79,6 +87,28 @@ class MCMC:
                 accept = alpha < np.exp(acceptance_ratio)
             if accept:
                 new_paras[i] = proposed_para
-                #print('accept with ratio ', np.exp(acceptance_ratio))
-        return new_paras
+                self.accepted += 1
+                samples[:, i] = proposed_samples
+                # print('accept with ratio ', np.exp(acceptance_ratio))
+        return new_paras, samples
         
+
+if __name__ == '__main__':
+    from GridWorld import *
+    from model import *
+    from QLearning import *
+    n_particle = 5    
+    r = []
+    env = GridWorld(n_cell=9, starting_position=5, goal_position=8)
+    model = Tabular(env=env, n_particle=n_particle, prior='normal')
+    s0 = (1, 2)
+    s1 = (2, 3)
+    action = 1
+    obs = {'rewards':[1,2,3], 'state0':[(1,),(1,),(2,)],'state1':[(7,),(8,),(8,)], 'action':[-1,0,1]}
+    samples_l = []
+    for j in range(len(obs['state0'])):
+        samples_l.append(model.r_hat(obs['state0'][j], obs['state1'][j], obs['action'][j]))
+    samples_l = np.array(samples_l)
+    for i in range(n_particle):
+        propsed_samples = generate_samples(model, obs, model.get_parameter()[i])
+        print(i, samples_l[:, i], propsed_samples)

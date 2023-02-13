@@ -1,15 +1,24 @@
 #Env 
-horizon = 2000
+env_name = 'GridWorld'
+#env_name = 'MountainCar'
+horizon = 30
 #Number of Episodes
-episodes = 10
-bins = (10, 10)
-last_episode = 18
+repeat_experiment = 20
+episodes = 100
+discrete = False
+bins = (10, )
+last_episode = 1
 seed = 555
 
 #SMC parameters
 prior = 'normal'
 lld = 'normal'
-n_particle = 5
+n_particle = 4
+min_ess = 0.5
 
 #MCMC
 update_frequency = 5
+sigma = 1
+
+#Results
+show = True

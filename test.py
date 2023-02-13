@@ -3,13 +3,12 @@ import gym
 import numpy as np
 from MountainCar import*
 import gym
-from IPython import display
 import matplotlib.pyplot as plt 
 
 from parameter import *
 
 
-file_path=f'Models/MountainCar_P{n_particle}_B{bins[0]}_E{last_episode}'
+file_path=f'Models/MountainCar_H_{horizon}_P{n_particle}_B{bins[0]}_E{last_episode}'
 env = MountainCar()
 test_env = gym.make('MountainCar-v0', render_mode='human')
 render = lambda : plt.imshow(test_env.render())
