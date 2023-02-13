@@ -94,7 +94,7 @@ class MCMC:
         
 
 if __name__ == '__main__':
-    from GridWrold import *
+    from GridWorld import *
     from model import *
     from QLearning import *
     n_particle = 5    

@@ -19,8 +19,8 @@ class GridWorld:
         self.action_space = spaces.Discrete(4)
         print('goal: ', goal_position)
         print('start: ', starting_position)
-        print('length: ', n_cell)
-        self.P = np.zeros((n_cell[0], n_cell[1], self.action_space.n))
+        print('World Scale: ', f'{n_cell[0]}x{n_cell[1]}')
+        self.P = np.zeros((n_cell[0], n_cell[1], self.action_space.n, 2), dtype='int32')
         # any action taken in terminal state has no effect
         gridworld = np.arange(
                 self.observation_space.n
@@ -34,9 +34,8 @@ class GridWorld:
                     ):
                 next_row = max(0, min(row + d[0], n_cell[0]-1))
                 next_col = max(0, min(col + d[1], n_cell[1]-1))
-                s_prime = (next_row, next_col) #gridworld[next_row, next_col]
+                s_prime = [next_row, next_col] #gridworld[next_row, next_col]
                 self.P[row, col, a] = s_prime
-
         self.R = np.full((n_cell[0], n_cell[1]), -1)
         self.R[goal_position] = 0
 
@@ -44,14 +43,14 @@ class GridWorld:
         self.state = self.starting_position
         #self.state = random.choice(range(self.n_cell))
         self.done = False
-        return (self.state, ), None
+        return self.state, None
     
     def step(self, action, state=None):
         done = False
         if state == None:
-            new_state = self.P[state, action]
+            self.state = new_state = tuple(self.P[self.state + (action, )])
         else:
-            self.state = new_state = self.P[self.state, action]
+            new_state = tuple(self.P[state + (action, )])
         if new_state == self.goal_position:
             done = True
             if state == None:
@@ -75,3 +74,8 @@ class GridWorld:
             self.state = new_state
             self.done = done
         return (new_state, ), reward, done, None
+    
+if __name__ == '__main__':
+    env = GridWorld((3,4), (1,2), (2,3))
+    print(env.reset())
+    assert(env.step(1, (2,2)) == ((2,3), 0, True, None))

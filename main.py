@@ -2,7 +2,7 @@ from SMC import *
 from model import *
 from MCMC import *
 from MountainCar import *
-from GridWrold import *
+from GridWorld import *
 import gym 
 import numpy as np
 from parameter import *

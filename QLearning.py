@@ -53,7 +53,7 @@ def QLearning(Q, env, n_episodes=10, horizon=40, gamma=0.95):
     return pi
     
 if __name__ == '__main__':
-    from GridWrold import *
+    from GridWorld import *
     env = GridWorld(11,6,9)
     V = np.ones(env.n_cell)/env.n_cell
     Q = np.ones(shape=(env.n_cell, env.action_space.n))
