@@ -1,9 +1,13 @@
 import numpy as np
 from gym import spaces
 import random
+from matplotlib import colors, colormaps
+import matplotlib.pyplot as plt
+'''module import'''
+from model import *
 
 class GridWorld:
-    def __init__(self, n_cell, starting_position=(0,0), goal_position=(-1,-1)):
+    def __init__(self, n_cell, starting_position=(0,0), goal_position=(-1,-1), obstacles=False):
         '''
         actions: [1,-1]
         '''
@@ -36,7 +40,15 @@ class GridWorld:
                 next_col = max(0, min(col + d[1], n_cell[1]-1))
                 s_prime = [next_row, next_col] #gridworld[next_row, next_col]
                 self.P[row, col, a] = s_prime
+                
         self.R = np.full((n_cell[0], n_cell[1]), -1)
+        if obstacles:
+            n_obs = min(self.n_cell) - 2
+            self.R[random.sample(range(1, n_cell[0]), n_obs), random.sample(range(1, n_cell[1]), n_obs)] = -20
+            # self.R[:, range(1, n_cell[1], 4)] = -2
+            # self.R[range(1, n_cell[0], 5), :]  = -2
+            # self.R[n_cell[0]//2, n_cell[1]//2] = -2
+        self.R[starting_position] = -1
         self.R[goal_position] = 0
 
     def reset(self):
@@ -75,7 +87,63 @@ class GridWorld:
             self.done = done
         return (new_state, ), reward, done, None
     
+    def plot_env(self, value=[]):
+        print(self.R)
+        cmap = colors.ListedColormap(['red', 'blue'])
+        bounds = [0,10,20]
+        # norm = colors.BoundaryNorm(bounds, cmap.N)
+        value = self.R if value == [] else value
+        fig, ax = plt.subplots()
+        ax.imshow(value, cmap=colormaps['pink'])
+
+        # draw gridlines
+        ax.grid(which='major', axis='both', linestyle='-.', color='k', linewidth=0.2)
+        ax.set_xticks(np.arange(0, self.n_cell[1], 1))
+        ax.set_yticks(np.arange(0, self.n_cell[0], 1))
+        ax.set_xlabel('x1')
+        ax.set_ylabel('x2')
+        plt.show()
+
+    def expert(self):
+        self.expert_obs = Buffer(['state0', 'state1', 'action', 'rewards', 'done'])
+        self.expert_traj = np.zeros(shape=self.R.shape)
+        s0 = self.starting_position
+        self.expert_traj[s0] = 10
+        done  = False
+        epsilon = 0.2
+        while done is False:
+            distance = list(map(lambda i, j: i - j, self.goal_position, s0))
+            if np.random.uniform(0, 1)< 0.5:
+                action = 1 if distance[1] > 0 else 3                       
+            else:
+                action = 2 if distance[0] > 0 else 0
+            if np.random.uniform(0, 1) < epsilon:
+                action = (action + 2) % 4
+            s1, r, done, _ = self.step(action, s0)
+            if self.R[s1] < -1:
+                if action % 2 == 0:
+                    action = random.choice([1, 3])
+                else:
+                    action = random.choice([0, 2])
+                s1, r, done, _ = self.step(action, s0)
+            self.expert_traj[s1] = 5
+            print(distance, s1, action)
+            self.expert_obs.insert({'state0': s0, 'state1': s1, 'action': action, 'rewards': r, 'done': done})
+            s0 = s1
+        self.expert_traj[s1] = 15
+        
+        
+            
+      
+    
+
 if __name__ == '__main__':
-    env = GridWorld((3,4), (1,2), (2,3))
+    random.seed(10)
+    env = GridWorld((10,12), (1,2), obstacles=True)
     print(env.reset())
-    assert(env.step(1, (2,2)) == ((2,3), 0, True, None))
+    env.plot_env()
+    env.expert()
+    env.plot_env(env.expert_traj + env.R)
+    print(env.expert_obs._buffers['state1'])
+    # env = GridWorld((3,4), (1,2), (2,3), obstacles=True)
+    # assert(env.step(1, (2,2)) == ((2,3), 0, True, None))
