@@ -89,8 +89,6 @@ class GridWorld:
     
     def plot_env(self, value=[]):
         print(self.R)
-        cmap = colors.ListedColormap(['red', 'blue'])
-        bounds = [0,10,20]
         # norm = colors.BoundaryNorm(bounds, cmap.N)
         value = self.R if value == [] else value
         fig, ax = plt.subplots()

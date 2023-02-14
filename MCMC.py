@@ -119,10 +119,10 @@ if __name__ == '__main__':
     for j in range(1, len(obs['state0'])):
         samples_l = np.append(samples_l, np.expand_dims(model.r_hat(obs['state0'][j], obs['state1'][j], obs['action'][j]), axis=0), axis=0)
         R += obs['rewards'][j]
-        if j % 3 == 0:
+        if j % 1 == 0:
             new_parameter, samples_l = mcmc.update(model.get_parameter(), obs, samples_l)
             model.set_parameter(new_parameter)
-    model.plot_policy(show=True)
+    model.plot_policy(show=True, additional_info = env.R)
     
         
     
