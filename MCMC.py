@@ -24,7 +24,8 @@ def get_log_likelihood(obs, samples, sigma=1, tractability=False):
         return log_likelihood
     else:
         #sigma = sigma * np.identity(len(samples))
-        lld = stats.norm.logpdf(obs['rewards'], loc=samples, scale=sigma).sum()
+        data_length = min(len(obs['rewards']), len(samples))
+        lld = stats.norm.logpdf(obs['rewards'][:data_length], loc=samples[:data_length], scale=sigma).sum()
         return lld
         
     
@@ -98,17 +99,30 @@ if __name__ == '__main__':
     from model import *
     from QLearning import *
     n_particle = 5    
+    sigma = 1
     r = []
-    env = GridWorld(n_cell=9, starting_position=5, goal_position=8)
+    random.seed(10)
+    env = GridWorld((10,12), (1,2), obstacles=True)
     model = Tabular(env=env, n_particle=n_particle, prior='normal')
-    s0 = (1, 2)
-    s1 = (2, 3)
-    action = 1
-    obs = {'rewards':[1,2,3], 'state0':[(1,),(1,),(2,)],'state1':[(7,),(8,),(8,)], 'action':[-1,0,1]}
-    samples_l = []
-    for j in range(len(obs['state0'])):
-        samples_l.append(model.r_hat(obs['state0'][j], obs['state1'][j], obs['action'][j]))
-    samples_l = np.array(samples_l)
-    for i in range(n_particle):
-        propsed_samples = generate_samples(model, obs, model.get_parameter()[i])
-        print(i, samples_l[:, i], propsed_samples)
+    kernel = RandomWalk(model=model, sigma=sigma)
+    mcmc = MCMC(kernal=kernel)
+    
+    
+    print(env.reset())
+    # env.plot_env()
+    env.expert()
+    # env.plot_env(env.expert_traj + env.R)
+    
+    obs = env.expert_obs._buffers
+    R = [obs['rewards'][0]]
+    samples_l = np.expand_dims(model.r_hat(obs['state0'][0], obs['state1'][0], obs['action'][0]), axis=0)
+    for j in range(1, len(obs['state0'])):
+        samples_l = np.append(samples_l, np.expand_dims(model.r_hat(obs['state0'][j], obs['state1'][j], obs['action'][j]), axis=0), axis=0)
+        R += obs['rewards'][j]
+        if j % 3 == 0:
+            new_parameter, samples_l = mcmc.update(model.get_parameter(), obs, samples_l)
+            model.set_parameter(new_parameter)
+    model.plot_policy(show=True)
+    
+        
+    

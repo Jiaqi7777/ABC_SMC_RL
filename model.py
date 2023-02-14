@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import scipy.stats as stats
 import random
-from utils import plot_3d
+from utils import *
 from scipy.sparse import csr_matrix, coo_array
 
 def uniform_grid(low, high, bins=(10,10), include_low=1, verbose=False):
@@ -70,7 +70,7 @@ class Tabular:
             self.state_grid = uniform_grid(high=self.env.observation_space.high, low=self.env.observation_space.low, bins=self.bins, verbose=verbose)
             self.state_size = tuple(len(splits) + 1 for splits in self.state_grid)  # n-dimensional state space
         else:
-            self.state_size = self.bins = (env.observation_space.n, )
+            self.state_size = self.bins = env.n_cell
         self.action_size = self.env.action_space.n  # 1-dimensional discrete action space 
         if verbose:
                 print("Environment:", self.env)
@@ -164,7 +164,7 @@ class Tabular:
             s1 = np.array(s1).astype('int32')
         S0, S1 = np.meshgrid(s0, s1)
         print('Value', para)
-        #plot_3d(S0, S1, para, title=title, xlabel=xlabel, ylabel=ylabel, zlabel=zlabel)
+        plot_3d(S0, S1, para, title=title, xlabel=xlabel, ylabel=ylabel, zlabel=zlabel)
 
     def plot_policy(self, title='Policy for each state', xlabel=None, ylabel=None, zlabel='Policy', show=False):
         # for s in range(self.state_size):
@@ -172,10 +172,13 @@ class Tabular:
         if self.discrete:
             s0, s1 = uniform_grid(high=self.env.observation_space.high, low=self.env.observation_space.low, bins=self.bins, include_low=0)
         else:
-            s0, s1 = uniform_grid(high=self.env.observation_space_high, low=self.env.observation_space_low, bins = self.bins, include_low=0)
+            s0, s1 = uniform_grid(high=self.env.observation_space_high, low=self.env.observation_space_low, bins=self.bins, include_low=0)
+        
         S0, S1 = np.meshgrid(s0, s1)
+        print(s0, s1)
         print('policy:', para)
-        #plot_3d(S0, S1, para, title=title, xlabel=xlabel, ylabel=ylabel, zlabel=zlabel)
+        plot_2d(s0, s1, para, title=title, xlabel=xlabel, ylabel=ylabel, zlabel=zlabel, show=show)
+        # plot_3d(S0, S1, para.T, title=title, xlabel=xlabel, ylabel=ylabel, zlabel=zlabel, show=show)
 
     def save(self, episode, file_path='', horizon=200, env_name=''):
         if file_path == '':

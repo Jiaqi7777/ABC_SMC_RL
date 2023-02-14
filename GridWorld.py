@@ -18,7 +18,7 @@ class GridWorld:
         self.goal_position = goal_position
         self.done = False
         self.observation_space = spaces.Discrete(n_cell[0] * n_cell[1])
-        self.observation_space_high = (n_cell, 0)
+        self.observation_space_high = (n_cell[0], n_cell[1])
         self.observation_space_low = (0, 0)
         self.action_space = spaces.Discrete(4)
         print('goal: ', goal_position)
@@ -141,9 +141,10 @@ if __name__ == '__main__':
     random.seed(10)
     env = GridWorld((10,12), (1,2), obstacles=True)
     print(env.reset())
-    env.plot_env()
-    env.expert()
-    env.plot_env(env.expert_traj + env.R)
-    print(env.expert_obs._buffers['state1'])
+    print(env.observation_space.n)
+    # env.plot_env()
+    # env.expert()
+    # env.plot_env(env.expert_traj + env.R)
+    # print(env.expert_obs._buffers['state1'])
     # env = GridWorld((3,4), (1,2), (2,3), obstacles=True)
     # assert(env.step(1, (2,2)) == ((2,3), 0, True, None))
