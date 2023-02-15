@@ -94,7 +94,7 @@ class MALA(Kernel):
         self.stepsize = stepsize
         self.sigma = self.prior.sigma
         
-    def gradient(self):
+    def gradient(self, para):
         return
     
     def move(self, current_para):
@@ -143,10 +143,13 @@ if __name__ == '__main__':
     from mcmcplot import mcmcplot as mcp
     from tqdm import tqdm
     from arviz import ess, plot_autocorr, plot_trace
+    import datetime
+    time =  datetime.datetime.now()
+    time = time.strftime("%f")
     training_steps = 1000
     repeat = 100
     n_particle = 1
-    stepsize = 0.05
+    stepsize = 0.03
     r = []
     random.seed(10)
     env = GridWorld((3,4), obstacles=True)
@@ -178,6 +181,8 @@ if __name__ == '__main__':
     print('accepted ratio:', mcmc.accepted / training_steps)
     model.plot_policy(paras=np.array(paras), show=True, additional_info = env.R)
     print('ESS:', ess(chain[:,0]))
+    with open(f'Models/MCMC/chains_T{training_steps}_{time}.npy', 'wb') as f:
+        np.save(f, chain)
     #mcmc chain plots
     # f = mcp.plot_chain_panel(chains=chain[training_steps // 10:, :6],settings=dict(add_pm2std=True,
     #                                                     mean=dict(color='b'),
@@ -217,10 +222,13 @@ if __name__ == '__main__':
     #     chains=chain[training_steps // 10:, :6],
     #     settings=settings)
     # plt.show()
+    figure_path = 'Figures/MCMC/'
     plot_trace(chain[training_steps // 10:, :].T, compact=False)
-    plt.show()
+    # plt.show()
+    plt.savefig(f'{figure_path}trace_T{training_steps}_{time}.png')
     plot_autocorr(chain[training_steps // 10 :: training_steps // 100, :].T)
-    plt.show()
+    # plt.show()
+    plt.savefig(f'{figure_path}corrT{training_steps}_{time}.png')
 
     
     
