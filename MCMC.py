@@ -146,7 +146,7 @@ if __name__ == '__main__':
     import datetime
     time =  datetime.datetime.now()
     time = time.strftime("%f")
-    training_steps = 10000
+    training_steps = 10000000
     repeat = 100
     n_particle = 1
     stepsize = 0.03
@@ -185,7 +185,7 @@ if __name__ == '__main__':
         np.save(f, chain)
     figure_path = 'Figures/MCMC/'
     #mcmc chain plots
-    f = mcp.plot_chain_panel(chains=chain[training_steps // 10:, :6],settings=dict(add_pm2std=True,
+    f = mcp.plot_chain_panel(chains=chain[training_steps // 10:, :4],settings=dict(add_pm2std=True,
                                                         mean=dict(color='b'),
                                                         plot=dict(color='k')))
     # plt.show()
@@ -227,7 +227,8 @@ if __name__ == '__main__':
     plot_trace(chain[training_steps // 10:, :].T, compact=False)
     # plt.show()
     plt.savefig(f'{figure_path}trace_T{training_steps}_{time}.png')
-    plot_autocorr(chain[training_steps // 10 :: training_steps // 100, :].T)
+    corr_chain = chain[training_steps // 10 :: training_steps // 100, :].T
+    plot_autocorr(corr_chain, max_lag=min(200, len(corr_chain)))
     # plt.show()
     plt.savefig(f'{figure_path}corrT{training_steps}_{time}.png')
 
