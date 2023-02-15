@@ -145,11 +145,18 @@ class Tabular:
     def optimal_parameter(self):
         return self.get_parameter()[np.argmax(self._weights)]
     
-    def policy(self):
-        idx = np.argmax(self.tables, axis=-1).T.reshape(-1)
-        thp_matrix = coo_array((np.ones(self.n_particle * np.prod(self.state_size)), (idx, np.array(range(self.n_particle * np.prod(self.state_size))))), shape=(self.action_size, self.n_particle * np.prod(self.state_size)))
-        thp_matrix = thp_matrix.toarray().reshape(thp_matrix.shape[0],-1, self.n_particle).swapaxes(0,1).reshape(-1, self.n_particle)
-        thp_vec = thp_matrix @ self._weights
+    def policy(self, paras=[]):
+        if paras==[]:
+            paras = self.tables
+            n = self.n_particle
+            weights = self._weights
+        else:
+            n = len(paras)
+            weights = np.ones(n) / n
+        idx = np.argmax(paras, axis=-1).T.reshape(-1)
+        thp_matrix = coo_array((np.ones(n * np.prod(self.state_size)), (idx, np.array(range(n * np.prod(self.state_size))))), shape=(self.action_size, n * np.prod(self.state_size)))
+        thp_matrix = thp_matrix.toarray().reshape(thp_matrix.shape[0],-1, n).swapaxes(0,1).reshape(-1, n)
+        thp_vec = thp_matrix @ weights
         thp_weights = np.moveaxis(thp_vec.reshape(self.state_size[::-1]+ (self.action_size,)),range(len(self.state_size)),range(len(self.state_size))[::-1])
         return np.argmax(thp_weights, axis=-1)
         
@@ -166,9 +173,9 @@ class Tabular:
         print('Value', para)
         plot_3d(S0, S1, para, title=title, xlabel=xlabel, ylabel=ylabel, zlabel=zlabel)
 
-    def plot_policy(self, title='Policy for each state', xlabel=None, ylabel=None, zlabel='Policy', show=False, additional_info=[]):
+    def plot_policy(self, paras=[], title='Policy for each state', xlabel=None, ylabel=None, zlabel='Policy', show=False, additional_info=[]):
         # for s in range(self.state_size):
-        para = self.policy()
+        para = self.policy(paras=paras)
         if self.discrete:
             s0, s1 = uniform_grid(high=self.env.observation_space.high, low=self.env.observation_space.low, bins=self.bins, include_low=0)
         else:

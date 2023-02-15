@@ -102,8 +102,9 @@ class GridWorld:
         ax.set_ylabel('x2')
         plt.show()
 
-    def expert(self):
-        self.expert_obs = Buffer(['state0', 'state1', 'action', 'rewards', 'done'])
+    def expert(self, reset=False):
+        if reset:
+            self.expert_obs = Buffer(['state0', 'state1', 'action', 'rewards', 'done'])
         self.expert_traj = np.zeros(shape=self.R.shape)
         s0 = self.starting_position
         self.expert_traj[s0] = 10
@@ -125,7 +126,7 @@ class GridWorld:
                     action = random.choice([0, 2])
                 s1, r, done, _ = self.step(action, s0)
             self.expert_traj[s1] = 5
-            print(distance, s1, action)
+            # print(distance, s1, action)
             self.expert_obs.insert({'state0': s0, 'state1': s1, 'action': action, 'rewards': r, 'done': done})
             s0 = s1
         self.expert_traj[s1] = 15

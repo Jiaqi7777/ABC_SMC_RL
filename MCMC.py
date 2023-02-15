@@ -98,31 +98,89 @@ if __name__ == '__main__':
     from GridWorld import *
     from model import *
     from QLearning import *
-    n_particle = 5    
-    sigma = 1
+    import mcmcplot
+    from mcmcplot import mcmcplot as mcp
+    from tqdm import tqdm
+    training_steps = 1000
+    n_particle = 1
+    sigma = 0.3
     r = []
     random.seed(10)
-    env = GridWorld((10,12), (1,2), obstacles=True)
+    env = GridWorld((3,4), obstacles=True)
     model = Tabular(env=env, n_particle=n_particle, prior='normal')
     kernel = RandomWalk(model=model, sigma=sigma)
     mcmc = MCMC(kernal=kernel)
-    
+    chain = np.zeros([training_steps, env.observation_space.n * env.action_space.n])
     
     print(env.reset())
     # env.plot_env()
-    env.expert()
+    env.expert(reset=True)
     # env.plot_env(env.expert_traj + env.R)
     
     obs = env.expert_obs._buffers
     R = [obs['rewards'][0]]
-    samples_l = np.expand_dims(model.r_hat(obs['state0'][0], obs['state1'][0], obs['action'][0]), axis=0)
-    for j in range(1, len(obs['state0'])):
-        samples_l = np.append(samples_l, np.expand_dims(model.r_hat(obs['state0'][j], obs['state1'][j], obs['action'][j]), axis=0), axis=0)
-        R += obs['rewards'][j]
-        if j % 1 == 0:
-            new_parameter, samples_l = mcmc.update(model.get_parameter(), obs, samples_l)
-            model.set_parameter(new_parameter)
-    model.plot_policy(show=True, additional_info = env.R)
+    samples_l = []
+    paras = []
+    for j in range(len(obs['state0'])):
+        samples_l.append(model.r_hat(obs['state0'][j], obs['state1'][j], obs['action'][j]))
+    samples_l = np.array(samples_l)
+    for t in tqdm(range(training_steps)):
+        new_parameter, samples_l = mcmc.update(model.get_parameter(), obs, samples_l)
+        model.set_parameter(new_parameter)
+        chain[t] = new_parameter.flat
+        if t > training_steps * 0.1:
+            if t % 10 == 0:
+                paras.append(new_parameter)
+    print('accepted ratio:', mcmc.accepted / training_steps)
+    model.plot_policy(paras=np.array(paras), show=True, additional_info = env.R)
+    #mcmc chain plots
+    f = mcp.plot_chain_panel(chains=chain[:, :6],settings=dict(add_pm2std=True,
+                                                        mean=dict(color='b'),
+                                                        plot=dict(color='k')))
+    plt.show()
+    
+    #density panel
+    user_settings = dict(
+    plot=dict(
+        marker='s',
+        mfc='none',
+        linestyle='none'),
+    fig=dict(figsize=(6, 6)))
+    names = ['a', 'b', 'c']
+    f = mcp.plot_density_panel(
+        chains=chain[:, :6],
+        names=names,
+        settings=user_settings)
+    plt.show()
+    f = plt.figure(figsize=(19, 15))
+    plt.matshow(df.corr(), fignum=f.number)
+    plt.xticks(range(chain.shape[1]).columns, fontsize=14, rotation=45)
+    plt.yticks(range(df.select_dtypes(['number']).shape[1]), df.select_dtypes(['number']).columns, fontsize=14)
+    cb = plt.colorbar()
+    cb.ax.tick_params(labelsize=14)
+    plt.title('Correlation Matrix', fontsize=16)
+    plt.show()
+    #correlation
+    settings = dict(
+    add_5095_contours=True,
+    plot_95=dict(
+        color='r',
+        linewidth=3),
+    plot_50=dict(
+        color='c',
+        linewidth=3),
+    add_legend=True,
+    legend=dict(
+        loc='upper right',
+        fontsize=10,
+        bbox_to_anchor=(0.85, 0.75)),
+    fig=dict(figsize=(4,4)))
+    fp = mcp.plot_pairwise_correlation_panel(
+        chains=chain[:, :6],
+        settings=settings)
+    plt.show()
+
+    
     
         
     
