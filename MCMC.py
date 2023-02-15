@@ -54,7 +54,7 @@ class Kernel:
 
 class RandomWalk(Kernel):
     def __init__(self, *args, model=None, stepsize=0.5):
-        print('stepsize', stepsize)
+        print('RandomWalk stepsize', stepsize)
         super(RandomWalk, self).__init__(*args)   
         self.model=model
         self.stepsize = stepsize
@@ -73,7 +73,7 @@ class RandomWalk(Kernel):
     
 class pCN(Kernel):
     def __init__(self, *args, model=None, stepsize=0.5):
-        print('stepsize', stepsize)
+        print('pCN stepsize', stepsize)
         super(pCN, self).__init__(*args)   
         self.model=model
         self.stepsize = stepsize
@@ -88,7 +88,7 @@ class pCN(Kernel):
     
 class MALA(Kernel):
     def __init__(self, *args, model=None, stepsize=0.5):
-        print('stepsize', stepsize)
+        print('MALA stepsize', stepsize)
         super(pCN, self).__init__(*args)   
         self.model=model
         self.stepsize = stepsize

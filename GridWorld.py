@@ -102,7 +102,7 @@ class GridWorld:
         ax.set_ylabel('x2')
         plt.show()
 
-    def expert(self, reset=False):
+    def expert(self, reset=True):
         if reset:
             self.expert_obs = Buffer(['state0', 'state1', 'action', 'rewards', 'done'])
         self.expert_traj = np.zeros(shape=self.R.shape)
@@ -131,8 +131,8 @@ class GridWorld:
             s0 = s1
         self.expert_traj[s1] = 15
         
-        
-            
+    def plot_env_with_R(self):
+        self.plot_env(self.expert_traj + self.R)         
       
     
 
