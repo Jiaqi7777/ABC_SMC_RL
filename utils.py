@@ -5,7 +5,7 @@ def argmaxs(arr):
     mask = arr == arr.max()
     return random.choice(np.array(range(len(arr)))[mask])
 
-def plot_2d(X, Y, Z, title=None, xlabel='s0', ylabel='s1', zlabel='Value', show=False, additional_info=[]):
+def plot_2d(X, Y, Z, title=None, xlabel='s0', ylabel='s1', zlabel='Value', show=False, additional_info=[], figure_path = 'Figures/MCMC/'):
     arrows = {2:(1,0), 0:(-1,0),1:(0,1),3:(0,-1)}
     scale = 0.25
     fig, ax = plt.subplots()
@@ -23,6 +23,7 @@ def plot_2d(X, Y, Z, title=None, xlabel='s0', ylabel='s1', zlabel='Value', show=
     fig.tight_layout()
     if show:
         plt.show()
+    plt.savefig(f'{figure_path+title}.png')
     
 def plot_3d(X, Y, Z, title=None, xlabel='s0', ylabel='s1', zlabel='Value', show=False):
     if len(Z.shape) == 1:
