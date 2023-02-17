@@ -40,13 +40,13 @@ def QLearning(Q, env, n_episodes=10, horizon=40, gamma=0.95):
             R += r
             Q[s0][a] = r + gamma * max(Q[s1])
             if done:
-                print('Done!!!')
+                print('Done in ', t + 1, 'steps')
                 break
             s0 = s1
             
         r_all_episodes.append(R)
-    print('Value', np.max(Q, axis=1))
-    pi = np.argmax(Q, axis=1)
+    print('Value', np.max(Q, axis=-1))
+    pi = np.argmax(Q, axis=-1)
     # print('Value', V)
     print('Policy:', pi)
     plot_return_vs_episodes(r_all_episodes, smooth=10)
@@ -54,11 +54,21 @@ def QLearning(Q, env, n_episodes=10, horizon=40, gamma=0.95):
     
 if __name__ == '__main__':
     from GridWorld import *
-    env = GridWorld(11,6,9)
-    V = np.ones(env.n_cell)/env.n_cell
-    Q = np.ones(shape=(env.n_cell, env.action_space.n))
+    import datetime
+    time =  datetime.datetime.now()
+    time = time.strftime("%f")
+    training_steps = 100000
+    repeat = 100
+    n_particle = 1
+    stepsize = 0.03
+    r = []
+    random.seed(10)
+    env = GridWorld((3,4), obstacles=True)
+
+    V = np.ones(env.n_cell)/env.observation_space.n
+    Q = np.ones(shape=(env.n_cell + (env.action_space.n, )))
     print('Q table with shape', Q.shape, Q)
-    S = range(env.n_cell)
-    A = range(env.action_space.n)
+    # S = range(env.n_cell)
+    # A = range(env.action_space.n)
     # DynamicProgramming(V, A, S, env)
-    QLearning(Q, env, n_episodes=50, horizon=40)
+    pi = QLearning(Q, env, n_episodes=20, horizon=40)

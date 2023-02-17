@@ -146,7 +146,7 @@ if __name__ == '__main__':
     import datetime
     time =  datetime.datetime.now()
     time = time.strftime("%f")
-    training_steps = 10000000
+    training_steps = 100000
     repeat = 100
     n_particle = 1
     stepsize = 0.03
@@ -160,11 +160,11 @@ if __name__ == '__main__':
     
     print(env.reset())
     # env.plot_env()
-    env.expert(reset=True)
-    for _ in range(repeat):
-    # env.plot_env(env.expert_traj + env.R)
-        env.expert()
-    obs = env.expert_obs._buffers
+    # env.expert(reset=True)
+    # for _ in range(repeat):
+    #     env.expert(reset=False)
+    env.uniform_policy()
+    obs = env.uniform_obs._buffers
     R = [obs['rewards'][0]]
     samples_l = []
     paras = []
@@ -174,7 +174,7 @@ if __name__ == '__main__':
     for t in tqdm(range(training_steps)):
         new_parameter, samples_l = mcmc.update(model.get_parameter(), obs, samples_l)
         model.set_parameter(new_parameter)
-        chain[t] = new_parameter.flat
+        chain[t] = new_parameter.flatten()
         if t > training_steps * 0.1:
             if t % 10 == 0:
                 paras.append(new_parameter)
@@ -190,6 +190,8 @@ if __name__ == '__main__':
                                                         plot=dict(color='k')))
     # plt.show()
     plt.savefig(f'{figure_path}traces_T{training_steps}_{time}')
+    print('Figure saved at ', f'{figure_path}traces_T{training_steps}_{time}')
+    plt.clf()
     #density panel
     # user_settings = dict(
     # plot=dict(
@@ -227,10 +229,14 @@ if __name__ == '__main__':
     plot_trace(chain[training_steps // 10:, :].T, compact=False)
     # plt.show()
     plt.savefig(f'{figure_path}trace_T{training_steps}_{time}.png')
+    print('Figure saved at ', f'{figure_path}trace_T{training_steps}_{time}')
+    plt.clf()
     corr_chain = chain[training_steps // 10 :: training_steps // 100, :].T
     plot_autocorr(corr_chain, max_lag=min(200, len(corr_chain)))
     # plt.show()
-    plt.savefig(f'{figure_path}corrT{training_steps}_{time}.png')
+    plt.savefig(f'{figure_path}corr_T{training_steps}_{time}.png')
+    print('Figure saved at ', f'{figure_path}corr_T{training_steps}_{time}')
+    plt.clf()
 
     
     

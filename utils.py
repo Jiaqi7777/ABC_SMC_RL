@@ -5,7 +5,7 @@ def argmaxs(arr):
     mask = arr == arr.max()
     return random.choice(np.array(range(len(arr)))[mask])
 
-def plot_2d(X, Y, Z, title=None, xlabel='s0', ylabel='s1', zlabel='Value', show=False, additional_info=[], figure_path = 'Figures/MCMC/'):
+def plot_2d(X, Y, Z, title=None, xlabel='s0', ylabel='s1', zlabel='Value', show=False, additional_info=[], save=True, figure_path = 'Figures/MCMC/'):
     arrows = {2:(1,0), 0:(-1,0),1:(0,1),3:(0,-1)}
     scale = 0.25
     fig, ax = plt.subplots()
@@ -18,12 +18,15 @@ def plot_2d(X, Y, Z, title=None, xlabel='s0', ylabel='s1', zlabel='Value', show=
     for i in range(len(X)):
         for j in range(len(Y)):
             # text = ax.text(j, i, Z[i, j], ha="center", va="center", color="w")
-            ax.arrow(j, i, scale*arrows[Z[i, j]][0], scale*arrows[Z[i, j]][1], head_width=0.1)
+            ax.arrow(j, i, scale*arrows[Z[i, j]][1], scale*arrows[Z[i, j]][0], head_width=0.1)
     ax.set_title(title)
     fig.tight_layout()
     if show:
         plt.show()
-    plt.savefig(f'{figure_path+title}.png')
+    if save:
+        plt.savefig(f'{figure_path+title}.png')
+        plt.clf()
+        print('figure saved at ', f'{figure_path+title}.png')
     
 def plot_3d(X, Y, Z, title=None, xlabel='s0', ylabel='s1', zlabel='Value', show=False):
     if len(Z.shape) == 1:
@@ -41,6 +44,7 @@ def plot_3d(X, Y, Z, title=None, xlabel='s0', ylabel='s1', zlabel='Value', show=
     if show:
         plt.show()
     plt.savefig(f'{figure_path+title}.png')
+    print('figure saved at ', f'{figure_path+title}.png')
     plt.clf()
 
 def replace_line(file_path, variable, new_value):
@@ -65,6 +69,7 @@ def plot_return_for_epsiodes(r_all_episodes, figure_path='Figures/', show=False)
     title = 'Return for episodes'
     plt.title(title)
     plt.savefig(f'{figure_path+title}.png')
+    print('figure saved at ', f'{figure_path+title}.png')
     if show:
         plt.show()
     plt.clf()
@@ -77,6 +82,7 @@ def plot_return_vs_episodes(r_all_episodes, smooth=1, figure_path='Figures/', sh
     title = 'Return for each episodes'
     plt.title(title)
     plt.savefig(f'{figure_path+title}.png')
+    print('figure saved at ', f'{figure_path+title}.png')
     if show:
         plt.show()
     plt.clf()
@@ -91,6 +97,7 @@ def plot_return_vs_episodes_repeat(r_all_episodes_repeat, figure_path='Figures/'
     plt.ylabel('Return')
     plt.title(f'Return for each episodes averaging over {N} random runs')
     plt.savefig(f'{figure_path+title}.png')
+    print('figure saved at ', f'{figure_path+title}.png')
     if show:
         plt.show()
     plt.clf()
