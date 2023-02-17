@@ -136,12 +136,12 @@ class GridWorld:
       
     def uniform_policy(self):
         self.uniform_obs = Buffer(['state0', 'state1', 'action', 'rewards', 'done'])
-        for r in self.n_cell[0]:
-            for c in self.n_cell[1]:
+        for r in range(self.n_cell[0]):
+            for c in range(self.n_cell[1]):
                 for a in range(self.action_space.n):
                     done = False
                     s0 = (r, c)
-                    s1 = self.P[s0]
+                    s1 = tuple(self.P[s0 + (a, )])
                     if s1 == self.goal_position:
                         done = True
                     self.uniform_obs.insert({'state0': s0, 'state1': s1, 'action': a, 'rewards': self.R[s1], 'done': done})
