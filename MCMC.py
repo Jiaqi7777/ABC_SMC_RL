@@ -144,9 +144,14 @@ if __name__ == '__main__':
     from tqdm import tqdm
     from arviz import ess, plot_autocorr, plot_trace
     import datetime
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-T', '--training_step', default=1000, type=int)
+    args = parser.parse_args()
+    
     time =  datetime.datetime.now()
     time = time.strftime("%f")
-    training_steps = 100000
+    training_steps = args.training_step
     repeat = 100
     n_particle = 1
     stepsize = 0.03
