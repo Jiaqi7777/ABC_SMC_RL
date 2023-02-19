@@ -145,6 +145,7 @@ if __name__ == '__main__':
     from arviz import ess, plot_autocorr, plot_trace
     import datetime
     import argparse
+    import pandas as pd
     parser = argparse.ArgumentParser()
     parser.add_argument('-T', '--training_step', default=1000, type=int)
     args = parser.parse_args()
@@ -186,6 +187,7 @@ if __name__ == '__main__':
     print('accepted ratio:', mcmc.accepted / training_steps)
     model.plot_policy(paras=np.array(paras), title=f'policy_T{training_steps}_{time}', additional_info = env.R)
     print('ESS:', ess(chain[:,0]))
+    pd.DataFrame(chain, columns=env.names)
     with open(f'Models/MCMC/chains_T{training_steps}_{time}.npy', 'wb') as f:
         np.save(f, chain)
         print('model saved at', f'Models/MCMC/chains_T{training_steps}_{time}.npy')

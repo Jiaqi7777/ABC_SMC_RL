@@ -50,7 +50,7 @@ def QLearning(Q, env, n_episodes=10, horizon=40, gamma=0.95):
     # print('Value', V)
     print('Policy:', pi)
     plot_return_vs_episodes(r_all_episodes, smooth=10)
-    return pi
+    return pi, Q
     
 if __name__ == '__main__':
     from GridWorld import *

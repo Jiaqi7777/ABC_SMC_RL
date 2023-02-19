@@ -1,5 +1,5 @@
 *.pyc
-
+*checkpoint.ipynb
 *.DS_Store
 .vscode
 *.yml

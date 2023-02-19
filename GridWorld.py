@@ -50,6 +50,7 @@ class GridWorld:
             # self.R[n_cell[0]//2, n_cell[1]//2] = -2
         self.R[starting_position] = -1
         self.R[goal_position] = 0
+        self.names = [f'{i,j,a}' for a in range(4) for j in range(n_cell[1]) for i in range(n_cell[0])]
 
     def reset(self):
         self.state = self.starting_position
