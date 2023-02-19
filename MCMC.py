@@ -188,6 +188,7 @@ if __name__ == '__main__':
     print('ESS:', ess(chain[:,0]))
     with open(f'Models/MCMC/chains_T{training_steps}_{time}.npy', 'wb') as f:
         np.save(f, chain)
+        print('model saved at', f'Models/MCMC/chains_T{training_steps}_{time}.npy')
     figure_path = 'Figures/MCMC/'
     #mcmc chain plots
     f = mcp.plot_chain_panel(chains=chain[training_steps // 10:, :4],settings=dict(add_pm2std=True,
