@@ -148,10 +148,9 @@ if __name__ == '__main__':
     import pandas as pd
     parser = argparse.ArgumentParser()
     parser.add_argument('-T', '--training_step', default=1000, type=int)
+    parser.add_argument('-t', '--time', default=datetime.datetime.now().strftime("%f"))
     args = parser.parse_args()
-    
-    time =  datetime.datetime.now()
-    time = time.strftime("%f")
+    time = args.time
     training_steps = args.training_step
     repeat = 100
     n_particle = 1
