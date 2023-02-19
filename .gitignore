@@ -1,5 +1,6 @@
 *.pyc
 *checkpoint.ipynb
+MountainCar.ipynb
 *.DS_Store
 .vscode
 *.yml
