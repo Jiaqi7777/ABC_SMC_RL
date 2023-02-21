@@ -18,7 +18,7 @@ min_ess = 0.5
 
 #MCMC
 update_frequency = 5
-stepsize = 1
+stepsize = 1.5
 
 #Results
 show = True

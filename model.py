@@ -173,7 +173,7 @@ class Tabular:
         print('Value', para)
         plot_3d(S0, S1, para, title=title, xlabel=xlabel, ylabel=ylabel, zlabel=zlabel)
 
-    def plot_policy(self, paras=[], title='Policy for each state', xlabel=None, ylabel=None, zlabel='Policy', show=False, additional_info=[]):
+    def plot_policy(self, paras=[], title='Policy for each state', xlabel=None, ylabel=None, zlabel='Policy', show=False, additional_info=[], save=False):
         # for s in range(self.state_size):
         para = self.policy(paras=paras)
         if self.discrete:
@@ -185,7 +185,7 @@ class Tabular:
         print(s0, s1)
         print('policy:', para)
         para = para
-        plot_2d(s0, s1, para, title=title, xlabel=xlabel, ylabel=ylabel, zlabel=zlabel, show=show, additional_info=additional_info)
+        plot_2d(s0, s1, para, title=title, xlabel=xlabel, ylabel=ylabel, zlabel=zlabel, show=show, additional_info=additional_info, save=save)
         # plot_3d(S0, S1, para.T, title=title, xlabel=xlabel, ylabel=ylabel, zlabel=zlabel, show=show)
 
     def save(self, episode, file_path='', horizon=200, env_name=''):

@@ -95,6 +95,7 @@ class MALA(Kernel):
         self.sigma = self.prior.sigma
         
     def gradient(self, para):
+        raise NotImplementedError
         return
     
     def move(self, current_para):
@@ -149,9 +150,11 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-T', '--training_step', default=1000, type=int)
     parser.add_argument('-t', '--time', default=datetime.datetime.now().strftime("%f"))
+    parser.add_argument('-s', '--save', default=False)
     args = parser.parse_args()
     time = args.time
     training_steps = args.training_step
+    save = args.save
     repeat = 100
     n_particle = 1
     stepsize = 0.03
@@ -184,21 +187,23 @@ if __name__ == '__main__':
             if t % 10 == 0:
                 paras.append(new_parameter)
     print('accepted ratio:', mcmc.accepted / training_steps)
-    model.plot_policy(paras=np.array(paras), title=f'policy_T{training_steps}_{time}', additional_info = env.R)
+    model.plot_policy(paras=np.array(paras), title=f'policy_T{training_steps}_{time}', additional_info = env.R, save=save)
     print('ESS:', ess(chain[:,0]))
-    pd.DataFrame(chain, columns=env.names)
-    with open(f'Models/MCMC/chains_T{training_steps}_{time}.npy', 'wb') as f:
-        np.save(f, chain)
-        print('model saved at', f'Models/MCMC/chains_T{training_steps}_{time}.npy')
+
+    if save:
+        with open(f'Models/MCMC/chains_T{training_steps}_{time}.npy', 'wb') as f:
+            np.save(f, chain)
+            print('model saved at', f'Models/MCMC/chains_T{training_steps}_{time}.npy')
     figure_path = 'Figures/MCMC/'
     #mcmc chain plots
     f = mcp.plot_chain_panel(chains=chain[training_steps // 10:, :4],settings=dict(add_pm2std=True,
                                                         mean=dict(color='b'),
                                                         plot=dict(color='k')))
     # plt.show()
-    plt.savefig(f'{figure_path}traces_T{training_steps}_{time}')
-    print('Figure saved at ', f'{figure_path}traces_T{training_steps}_{time}')
-    plt.clf()
+    if save:
+        plt.savefig(f'{figure_path}traces_T{training_steps}_{time}')
+        print('Figure saved at ', f'{figure_path}traces_T{training_steps}_{time}')
+        plt.clf()
     #density panel
     # user_settings = dict(
     # plot=dict(
@@ -235,15 +240,17 @@ if __name__ == '__main__':
 
     plot_trace(chain[training_steps // 10:, :].T, compact=False)
     # plt.show()
-    plt.savefig(f'{figure_path}trace_T{training_steps}_{time}.png')
-    print('Figure saved at ', f'{figure_path}trace_T{training_steps}_{time}')
-    plt.clf()
+    if save:
+        plt.savefig(f'{figure_path}trace_T{training_steps}_{time}.png')
+        print('Figure saved at ', f'{figure_path}trace_T{training_steps}_{time}')
+        plt.clf()
     corr_chain = chain[training_steps // 10 :: training_steps // 100, :].T
     plot_autocorr(corr_chain, max_lag=min(200, len(corr_chain)))
     # plt.show()
-    plt.savefig(f'{figure_path}corr_T{training_steps}_{time}.png')
-    print('Figure saved at ', f'{figure_path}corr_T{training_steps}_{time}')
-    plt.clf()
+    if save:
+        plt.savefig(f'{figure_path}corr_T{training_steps}_{time}.png')
+        print('Figure saved at ', f'{figure_path}corr_T{training_steps}_{time}')
+        plt.clf()
 
     
     
