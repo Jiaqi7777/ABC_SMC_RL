@@ -108,8 +108,11 @@ class Tabular:
         # print('Best table', i)
         return random.choices(self.tables, weights)
 
-    def q_value(self, table, s, a):            
-        if len(table.shape) > len(s+ (a,)):
+    def q_value(self, table, s, a): 
+        if hasattr(a, "__len__"):
+            if len(table.shape) > len(s) + len(a[0]):
+                return table[(slice(None), *s, a)]
+        elif len(table.shape) > len(s+ (a,)):
             return table[(slice(None), *(s+ (a,)))]
         return table[s][a]
 

@@ -4,15 +4,16 @@ from copy import deepcopy
 from parameter import *
    
 def generate_samples(model, obs, para):
-    s0 = obs['state0']
-    s1 = obs['state1']
-    a = obs['action']
-    r_hat = model.q_value(para, np.array(s0).T) - model.gamma * model.v_value(para, np.array(s1).T) #n_particle x time x action
-    return np.swapaxes(r_hat, 0, 1) # t x n_particle x action
     samples = []
     for s0, a, s1 in zip(obs['state0'], obs['action'], obs['state1']):
         samples.append(model.q_value(para, s0, a) - model.gamma * model.v_value(para, s1))
     return np.array(samples)# t x n_particle x action
+    s0 = obs['state0']
+    s1 = obs['state1']
+    a = obs['action']
+    r_hat = model.q_value(para, np.array(s0).T, a) - model.gamma * model.v_value(para, np.array(s1).T) #n_particle x time x action
+    return np.swapaxes(r_hat, 0, 1) # t x n_particle x action
+
 
 class Prior:
     def __init__(self, sigma=1):
@@ -113,7 +114,7 @@ class MALA(Kernel):
         self.sigma = self.prior.sigma
         
     def gradient(self, para, obs, samples_l):
-        Sum = (obs['rewards'] + self.model.gamma * self.model.v_value()) @ ()#TODO
+        Sum = (obs['rewards'] + self.model.gamma * self.model.v_value(para)) @ ()#TODO
         raise NotImplementedError
         return 1 / self.sigma ** 2 + 1 / self.likelihood.epsilon ** 2 * Sum
     
