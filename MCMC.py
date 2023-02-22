@@ -4,10 +4,15 @@ from copy import deepcopy
 from parameter import *
    
 def generate_samples(model, obs, para):
+    s0 = obs['state0']
+    s1 = obs['state1']
+    a = obs['action']
+    r_hat = model.q_value(para, np.array(s0).T) - model.gamma * model.v_value(para, np.array(s1).T) #n_particle x time x action
+    return np.swapaxes(r_hat, 0, 1) # t x n_particle x action
     samples = []
     for s0, a, s1 in zip(obs['state0'], obs['action'], obs['state1']):
         samples.append(model.q_value(para, s0, a) - model.gamma * model.v_value(para, s1))
-    return np.array(samples)
+    return np.array(samples)# t x n_particle x action
 
 class Prior:
     def __init__(self, sigma=1):
@@ -19,18 +24,31 @@ class Prior:
         sigma = self.sigma * np.identity(len(parameters))
         return stats.multivariate_normal.logpdf(parameters, cov=sigma).sum()
 
-def get_log_likelihood(obs, samples, epsilon=1, tractability=False):
+class Likelihood:
     """log(p(evidence|para))"""
-    if tractability:
-        raise NotImplementedError("Not implemented for tractable likelihood")
-        likelihood = stats.norm.pdf(evidence, loc=9.8, scale=epsilon)
-        log_likelihood = np.log(likelihood).sum()
-        return log_likelihood
-    else:
-        #epsilon = epsilon * np.identity(len(samples))
-        data_length = min(len(obs['rewards']), len(samples))
-        lld = stats.norm.logpdf(obs['rewards'][:data_length], loc=samples[:data_length], scale=epsilon).sum()
-        return lld
+    def __init__(self, epsilon=epsilon):
+        self.epsilon = epsilon 
+        
+    def get_log_likelihood(self):
+        raise NotImplementedError
+        
+class ABCLikelihood(Likelihood):
+    def __init__(self, epsilon=epsilon):
+        super().__init__(epsilon)
+        print('abc epsilon', epsilon)
+    
+    def get_log_likelihood(self, obs, samples, tractability=False):
+        """log(p(evidence|para))"""
+        if tractability:
+            raise NotImplementedError("Not implemented for tractable likelihood")
+            likelihood = stats.norm.pdf(evidence, loc=9.8, scale=epsilon)
+            log_likelihood = np.log(likelihood).sum()
+            return log_likelihood
+        else:
+            #epsilon = epsilon * np.identity(len(samples))
+            data_length = min(len(obs['rewards']), len(samples))
+            lld = stats.norm.logpdf(obs['rewards'][:data_length], loc=samples[:data_length], scale=self.epsilon).sum()
+            return lld
         
     
 # def get_log_posterior(para, *args):
@@ -39,7 +57,7 @@ def get_log_likelihood(obs, samples, epsilon=1, tractability=False):
 #     return log_prior + log_likelihood
 
 class Kernel:
-    def __init__(self, model=None, stepsize=0.1, prior=Prior(sigma=1), likelihood=get_log_likelihood, tractability=False):
+    def __init__(self, model=None, stepsize=0.1, prior=Prior(sigma=1), likelihood=ABCLikelihood(epsilon=epsilon), tractability=False):
         self.stepsize = stepsize
         self.model=model
         self.prior = prior
@@ -47,7 +65,7 @@ class Kernel:
         self.tractability = tractability
 
     def posterior(self, para, *args):
-        return self.prior.get_log_prior(para) + self.likelihood(*args, tractability=self.tractability)
+        return self.prior.get_log_prior(para) + self.likelihood.get_log_likelihood(*args, tractability=self.tractability)
 
     def move(self):
         raise NotImplementedError
@@ -82,8 +100,8 @@ class pCN(Kernel):
     def accept(self, current_para, obs, samples):
         proposed_para = np.sqrt(1 - self.stepsize ** 2) * current_para + self.stepsize * np.random.normal(size=(current_para.shape), scale=self.sigma)
         proposed_samples = generate_samples(self.model, obs, proposed_para)
-        current_log_posterior = self.likelihood(obs, samples)
-        proposed_log_posterior = self.likelihood(obs, proposed_samples)
+        current_log_posterior = self.likelihood.get_log_likelihood(obs, samples)
+        proposed_log_posterior = self.likelihood.get_log_likelihood(obs, proposed_samples)
         return proposed_log_posterior - current_log_posterior, proposed_para, proposed_samples
     
 class MALA(Kernel):
@@ -94,16 +112,17 @@ class MALA(Kernel):
         self.stepsize = stepsize
         self.sigma = self.prior.sigma
         
-    def gradient(self, para):
+    def gradient(self, para, obs, samples_l):
+        Sum = (obs['rewards'] + self.model.gamma * self.model.v_value()) @ ()#TODO
         raise NotImplementedError
-        return
+        return 1 / self.sigma ** 2 + 1 / self.likelihood.epsilon ** 2 * Sum
     
-    def move(self, current_para):
+    def move(self, current_para, obs, samples_l):
         move_ratio = 1
-        return np.sqrt(2 * self.stepsize) *  np.random.normal(size=(current_para.shape), scale=self.sigma) + current_para + self.gradient(current_para), move_ratio
+        return np.sqrt(2 * self.stepsize) *  np.random.normal(size=(current_para.shape), scale=self.sigma) + current_para + self.gradient(current_para, obs, samples_l), move_ratio
     
     def accept(self, current_para, obs, samples):
-        proposed_para, move_ratio = self.move(current_para)
+        proposed_para, move_ratio = self.move(current_para, obs, samples_l)
         proposed_samples = generate_samples(self.model, obs, proposed_para)
         current_log_posterior = self.posterior(current_para, obs, samples)
         proposed_log_posterior = self.posterior(proposed_para, obs, proposed_samples)
