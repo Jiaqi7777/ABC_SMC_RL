@@ -120,16 +120,20 @@ class MALA(Kernel):
         a = obs['action']
         s01, s02 = np.array(s0).T
         s11, s12 = np.array(s1).T
-        a_prime = np.max(para[s11, s12], axis=-1)
-        Indicator = np.zeros(shape=(len(samples_l), ) + para.shape)
-        Indicator[range(len(samples_l)), s01, s02, a] = 1
-        Indicator[range(len(samples_l)), s11, s12, a_prime] -= self.model.gamma
-        Sum = (np.array(obs['rewards']) + samples) @ Indicator
+        a_prime = np.argmax(para[s11, s12], axis=-1)
+        Indicator = np.zeros(shape=(len(samples), ) + para.shape)
+        Indicator[range(len(samples)), s01, s02, a] = 1
+        Indicator[range(len(samples)), s11, s12, a_prime] -= self.model.gamma
+        Sum = np.matmul(Indicator.T, (np.array(obs['rewards']) + samples)).T
         return para / self.sigma ** 2 + 1 / self.likelihood.epsilon ** 2 * Sum
     
     def move(self, current_para, obs, samples):
-        move_ratio = 1
-        return np.sqrt(2 * self.stepsize) *  np.random.normal(size=(current_para.shape), scale=self.sigma) + current_para + self.gradient(current_para, obs, samples), move_ratio
+        current_gradient = self.gradient(current_para, obs, samples)
+        proposed_para = np.sqrt(2 * self.stepsize) *  np.random.normal(size=(current_para.shape), scale=self.sigma) + current_para + current_gradient
+        proposed_gradient = self.gradient(proposed_para, obs, samples)
+        move_ratio = stats.norm.logpdf(current_para + current_gradient, loc=proposed_para, scale=self.stepsize).sum() - \
+                                                                    stats.norm.logpdf(proposed_para + proposed_gradient, loc=proposed_para, scale=self.stepsize).sum()
+        return proposed_para, move_ratio
     
     def accept(self, current_para, obs, samples):
         proposed_para, move_ratio = self.move(current_para, obs, samples)
@@ -180,10 +184,12 @@ if __name__ == '__main__':
     parser.add_argument('-T', '--training_step', default=1000, type=int)
     parser.add_argument('-t', '--time', default=datetime.datetime.now().strftime("%f"))
     parser.add_argument('-s', '--save', default=False)
+    parser.add_argument('-p', '--show', default=False)
     args = parser.parse_args()
     time = args.time
     training_steps = args.training_step
     save = args.save
+    show = args.show
     repeat = 100
     n_particle = 1
     stepsize = 0.03
@@ -191,7 +197,7 @@ if __name__ == '__main__':
     random.seed(10)
     env = GridWorld((3,4), obstacles=True)
     model = Tabular(env=env, n_particle=n_particle, prior='normal')
-    kernel = pCN(model=model, stepsize=stepsize)
+    kernel = MALA(model=model, stepsize=stepsize)
     mcmc = MCMC(kernal=kernel)
     chain = np.zeros([training_steps, env.observation_space.n * env.action_space.n])
     
@@ -228,7 +234,8 @@ if __name__ == '__main__':
     f = mcp.plot_chain_panel(chains=chain[training_steps // 10:, :4],settings=dict(add_pm2std=True,
                                                         mean=dict(color='b'),
                                                         plot=dict(color='k')))
-    # plt.show()
+    if show:
+        plt.show()
     if save:
         plt.savefig(f'{figure_path}traces_T{training_steps}_{time}')
         print('Figure saved at ', f'{figure_path}traces_T{training_steps}_{time}')
@@ -268,14 +275,16 @@ if __name__ == '__main__':
     # plt.show()
 
     plot_trace(chain[training_steps // 10:, :].T, compact=False)
-    # plt.show()
+    if show:
+        plt.show()
     if save:
         plt.savefig(f'{figure_path}trace_T{training_steps}_{time}.png')
         print('Figure saved at ', f'{figure_path}trace_T{training_steps}_{time}')
         plt.clf()
     corr_chain = chain[training_steps // 10 :: training_steps // 100, :].T
     plot_autocorr(corr_chain, max_lag=min(200, len(corr_chain)))
-    # plt.show()
+    if show:
+        plt.show()
     if save:
         plt.savefig(f'{figure_path}corr_T{training_steps}_{time}.png')
         print('Figure saved at ', f'{figure_path}corr_T{training_steps}_{time}')
