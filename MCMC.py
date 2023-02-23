@@ -12,7 +12,7 @@ def generate_samples(model, obs, para):
     samples = []
     for s0, a, s1 in zip(obs['state0'], obs['action'], obs['state1']):
         samples.append(model.q_value(para, s0, a) - model.gamma * model.v_value(para, s1))
-    return np.array(samples)# t x n_particle x action
+    return np.array(samples)# t x action
 
 
 
@@ -114,7 +114,7 @@ class MALA(Kernel):
         self.stepsize = stepsize
         self.sigma = self.prior.sigma
         
-    def gradient(self, para, obs, samples_l):
+    def gradient(self, para, obs, samples):
         s0 = obs['state0']
         s1 = obs['state1']
         a = obs['action']
@@ -124,15 +124,15 @@ class MALA(Kernel):
         Indicator = np.zeros(shape=(len(samples_l), ) + para.shape)
         Indicator[range(len(samples_l)), s01, s02, a] = 1
         Indicator[range(len(samples_l)), s11, s12, a_prime] -= self.model.gamma
-        Sum = (np.array(obs['rewards']) + self.model.gamma * self.model.v_value(para)) @ Indicator
+        Sum = (np.array(obs['rewards']) + samples) @ Indicator
         return para / self.sigma ** 2 + 1 / self.likelihood.epsilon ** 2 * Sum
     
-    def move(self, current_para, obs, samples_l):
+    def move(self, current_para, obs, samples):
         move_ratio = 1
-        return np.sqrt(2 * self.stepsize) *  np.random.normal(size=(current_para.shape), scale=self.sigma) + current_para + self.gradient(current_para, obs, samples_l), move_ratio
+        return np.sqrt(2 * self.stepsize) *  np.random.normal(size=(current_para.shape), scale=self.sigma) + current_para + self.gradient(current_para, obs, samples), move_ratio
     
     def accept(self, current_para, obs, samples):
-        proposed_para, move_ratio = self.move(current_para, obs, samples_l)
+        proposed_para, move_ratio = self.move(current_para, obs, samples)
         proposed_samples = generate_samples(self.model, obs, proposed_para)
         current_log_posterior = self.posterior(current_para, obs, samples)
         proposed_log_posterior = self.posterior(proposed_para, obs, proposed_samples)
