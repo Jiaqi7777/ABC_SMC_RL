@@ -4,15 +4,16 @@ from copy import deepcopy
 from parameter import *
    
 def generate_samples(model, obs, para):
-    samples = []
-    for s0, a, s1 in zip(obs['state0'], obs['action'], obs['state1']):
-        samples.append(model.q_value(para, s0, a) - model.gamma * model.v_value(para, s1))
-    return np.array(samples)# t x n_particle x action
     s0 = obs['state0']
     s1 = obs['state1']
     a = obs['action']
     r_hat = model.q_value(para, np.array(s0).T, a) - model.gamma * model.v_value(para, np.array(s1).T) #n_particle x time x action
     return np.swapaxes(r_hat, 0, 1) # t x n_particle x action
+    samples = []
+    for s0, a, s1 in zip(obs['state0'], obs['action'], obs['state1']):
+        samples.append(model.q_value(para, s0, a) - model.gamma * model.v_value(para, s1))
+    return np.array(samples)# t x n_particle x action
+
 
 
 class Prior:
@@ -114,9 +115,17 @@ class MALA(Kernel):
         self.sigma = self.prior.sigma
         
     def gradient(self, para, obs, samples_l):
-        Sum = (obs['rewards'] + self.model.gamma * self.model.v_value(para)) @ ()#TODO
-        raise NotImplementedError
-        return 1 / self.sigma ** 2 + 1 / self.likelihood.epsilon ** 2 * Sum
+        s0 = obs['state0']
+        s1 = obs['state1']
+        a = obs['action']
+        s01, s02 = np.array(s0).T
+        s11, s12 = np.array(s1).T
+        a_prime = np.max(para[s11, s12], axis=-1)
+        Indicator = np.zeros(shape=(len(samples_l), ) + para.shape)
+        Indicator[range(len(samples_l)), s01, s02, a] = 1
+        Indicator[range(len(samples_l)), s11, s12, a_prime] -= self.model.gamma
+        Sum = (np.array(obs['rewards']) + self.model.gamma * self.model.v_value(para)) @ Indicator
+        return para / self.sigma ** 2 + 1 / self.likelihood.epsilon ** 2 * Sum
     
     def move(self, current_para, obs, samples_l):
         move_ratio = 1

@@ -18,7 +18,7 @@ min_ess = 0.5
 
 #MCMC
 update_frequency = 5
-stepsize = 2.0
+stepsize = 1.8
 
 #ABC
 epsilon = 0.1
