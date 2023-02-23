@@ -121,18 +121,18 @@ class MALA(Kernel):
         s01, s02 = np.array(s0).T
         s11, s12 = np.array(s1).T
         a_prime = np.argmax(para[s11, s12], axis=-1)
-        Indicator = np.zeros(shape=(len(samples), ) + para.shape)
+        Indicator = np.zeros(shape=(len(samples), ) + para.shape) #TxTheta
         Indicator[range(len(samples)), s01, s02, a] = 1
         Indicator[range(len(samples)), s11, s12, a_prime] -= self.model.gamma
-        Sum = np.matmul(Indicator.T, (np.array(obs['rewards']) + samples)).T
+        Sum = np.matmul(Indicator.T, (np.array(obs['rewards']) + samples)).T #ThetaxT, Tx1
         return para / self.sigma ** 2 + 1 / self.likelihood.epsilon ** 2 * Sum
     
     def move(self, current_para, obs, samples):
         current_gradient = self.gradient(current_para, obs, samples)
         proposed_para = np.sqrt(2 * self.stepsize) *  np.random.normal(size=(current_para.shape), scale=self.sigma) + current_para + current_gradient
         proposed_gradient = self.gradient(proposed_para, obs, samples)
-        move_ratio = stats.norm.logpdf(current_para + current_gradient, loc=proposed_para, scale=self.stepsize).sum() - \
-                                                                    stats.norm.logpdf(proposed_para + proposed_gradient, loc=proposed_para, scale=self.stepsize).sum()
+        move_ratio = stats.norm.logpdf(proposed_para + proposed_gradient, loc=proposed_para, scale=self.stepsize).sum() - \
+                                                                    stats.norm.logpdf(current_para + current_gradient, loc=proposed_para, scale=self.stepsize).sum()
         return proposed_para, move_ratio
     
     def accept(self, current_para, obs, samples):
@@ -165,7 +165,7 @@ class MCMC:
                 new_paras[i] = proposed_para
                 self.accepted += 1
                 samples[:, i] = proposed_samples
-                # print('accept with ratio ', np.exp(acceptance_ratio))
+        print('accept with ratio ', np.exp(acceptance_ratio))
         return new_paras, samples
         
 
