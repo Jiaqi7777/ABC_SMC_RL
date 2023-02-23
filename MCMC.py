@@ -7,8 +7,8 @@ def generate_samples(model, obs, para):
     s0 = obs['state0']
     s1 = obs['state1']
     a = obs['action']
-    r_hat = model.q_value(para, np.array(s0).T, a) - model.gamma * model.v_value(para, np.array(s1).T) #n_particle x time x action
-    return np.swapaxes(r_hat, 0, 1) # t x n_particle x action
+    return model.q_value(para, np.array(s0).T, a) - model.gamma * model.v_value(para, np.array(s1).T) #time x action
+
     samples = []
     for s0, a, s1 in zip(obs['state0'], obs['action'], obs['state1']):
         samples.append(model.q_value(para, s0, a) - model.gamma * model.v_value(para, s1))
@@ -109,7 +109,7 @@ class pCN(Kernel):
 class MALA(Kernel):
     def __init__(self, *args, model=None, stepsize=0.5):
         print('MALA stepsize', stepsize)
-        super(pCN, self).__init__(*args)   
+        super(MALA, self).__init__(*args)   
         self.model=model
         self.stepsize = stepsize
         self.sigma = self.prior.sigma

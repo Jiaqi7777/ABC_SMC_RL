@@ -110,15 +110,19 @@ class Tabular:
 
     def q_value(self, table, s, a): 
         if hasattr(a, "__len__"):
-            if len(table.shape) > len(s) + len(a[0]):
+            if len(table.shape) > len(s) + len(a):
                 return table[(slice(None), *s, a)]
         elif len(table.shape) > len(s+ (a,)):
             return table[(slice(None), *(s+ (a,)))]
+        if hasattr(s[0], "__len__"):
+            return table[s[0], s[1], a]
         return table[s][a]
 
     def v_value(self, table, s):
         if len(table.shape) > len(s) + 1:
             return np.max(table[(slice(None), *s)], axis = 1)
+        if hasattr(s[0], "__len__"):
+            return np.max(table[s[0], s[1]], axis=-1)
         return max(table[s])
 
     def r_hat(self, s0, s1, a):
