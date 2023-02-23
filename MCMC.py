@@ -140,7 +140,7 @@ class MALA(Kernel):
         proposed_samples = generate_samples(self.model, obs, proposed_para)
         current_log_posterior = self.posterior(current_para, obs, samples)
         proposed_log_posterior = self.posterior(proposed_para, obs, proposed_samples)
-        return proposed_log_posterior - current_log_posterior - np.log(move_ratio), proposed_para, proposed_samples
+        return proposed_log_posterior - current_log_posterior + move_ratio, proposed_para, proposed_samples
         
 
 class MCMC:
