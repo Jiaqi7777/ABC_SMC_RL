@@ -24,7 +24,7 @@ class Prior:
     def get_log_prior(self, parameters):
         parameters = parameters.reshape(-1)
         sigma = self.sigma * np.identity(len(parameters))
-        return stats.multivariate_normal.logpdf(parameters, cov=sigma).sum()
+        return stats.multivariate_normal.logpdf(parameters, cov=sigma**2)
 
 class Likelihood:
     """log(p(evidence|para))"""
@@ -131,8 +131,8 @@ class MALA(Kernel):
         current_gradient = self.gradient(current_para, obs, samples)
         proposed_para = np.sqrt(2 * self.stepsize) *  np.random.normal(size=(current_para.shape), scale=1) + current_para + self.stepsize * current_gradient
         proposed_gradient = self.gradient(proposed_para, obs, samples)
-        move_ratio = stats.norm.logpdf(proposed_para, loc=current_para + self.stepsize * current_gradient, scale=2*self.stepsize).sum() - \
-                                                                    stats.norm.logpdf(current_para, loc=proposed_para + self.stepsize * proposed_gradient, scale=2*self.stepsize).sum()
+        move_ratio = stats.norm.logpdf(proposed_para, loc=current_para + self.stepsize * current_gradient, scale=np.sqrt(2*self.stepsize)).sum() - \
+                                                                    stats.norm.logpdf(current_para, loc=proposed_para + self.stepsize * proposed_gradient, scale=np.sqrt(2*self.stepsize)).sum()
         # plt.imshow(proposed_gradient.reshape(3,16))
         # plt.show()
         # print('move ratio')
@@ -170,7 +170,7 @@ class MCMC:
                 new_paras[i] = proposed_para
                 self.accepted += 1
                 samples[:, i] = proposed_samples
-        print('accept with ratio ', np.exp(acceptance_ratio))
+        # print('accept with ratio ', np.exp(acceptance_ratio))
         return new_paras, samples
         
 
@@ -186,7 +186,7 @@ if __name__ == '__main__':
     import argparse
     import pandas as pd
     parser = argparse.ArgumentParser()
-    parser.add_argument('-T', '--training_step', default=1000, type=int)
+    parser.add_argument('-T', '--training_step', default=MCMC_T, type=int)
     parser.add_argument('-t', '--time', default=datetime.datetime.now().strftime("%f"))
     parser.add_argument('-s', '--save', default=False)
     parser.add_argument('-p', '--show', default=False)
