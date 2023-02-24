@@ -59,7 +59,7 @@ class ABCLikelihood(Likelihood):
 #     return log_prior + log_likelihood
 
 class Kernel:
-    def __init__(self, model=None, stepsize=0.1, prior=Prior(sigma=1), likelihood=ABCLikelihood(epsilon=epsilon), tractability=False):
+    def __init__(self, model=None, stepsize=0.1, prior=Prior(sigma=prior_sigma), likelihood=ABCLikelihood(epsilon=epsilon), tractability=False):
         self.stepsize = stepsize
         self.model=model
         self.prior = prior
