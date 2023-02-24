@@ -199,9 +199,9 @@ if __name__ == '__main__':
     n_particle = 1
     r = []
     random.seed(10)
-    env = GridWorld((3,4), obstacles=True)
+    env = GridWorld((1,2), obstacles=False)
     model = Tabular(env=env, n_particle=n_particle, prior='normal')
-    kernel = MALA(model=model, stepsize=stepsize)
+    kernel = pCN(model=model, stepsize=stepsize)
     mcmc = MCMC(kernal=kernel)
     chain = np.zeros([training_steps, env.observation_space.n * env.action_space.n])
     
