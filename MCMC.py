@@ -124,15 +124,17 @@ class MALA(Kernel):
         Indicator = np.zeros(shape=(len(samples), ) + para.shape) #TxTheta
         Indicator[range(len(samples)), s01, s02, a] = 1
         Indicator[range(len(samples)), s11, s12, a_prime] -= self.model.gamma
-        Sum = np.matmul(Indicator.T, (np.array(obs['rewards']) + samples)).T #ThetaxT, Tx1
+        Sum = np.matmul(Indicator.T, (np.array(obs['rewards']) + samples)).T #Theta x T, Tx1
         return para / self.sigma ** 2 + 1 / self.likelihood.epsilon ** 2 * Sum
     
     def move(self, current_para, obs, samples):
         current_gradient = self.gradient(current_para, obs, samples)
-        proposed_para = np.sqrt(2 * self.stepsize) *  np.random.normal(size=(current_para.shape), scale=self.sigma) + current_para + current_gradient
+        proposed_para = np.sqrt(2 * self.stepsize) *  np.random.normal(size=(current_para.shape), scale=1) + current_para + self.stepsize * current_gradient
         proposed_gradient = self.gradient(proposed_para, obs, samples)
-        move_ratio = stats.norm.logpdf(proposed_para + proposed_gradient, loc=proposed_para, scale=self.stepsize).sum() - \
-                                                                    stats.norm.logpdf(current_para + current_gradient, loc=proposed_para, scale=self.stepsize).sum()
+        move_ratio = stats.norm.logpdf(current_para + self.stepsize * current_gradient, loc=proposed_para, scale=2*self.stepsize).sum() - \
+                                                                    stats.norm.logpdf(proposed_para + self.stepsize * proposed_gradient, loc=current_para, scale=2*self.stepsize).sum()
+        # plt.imshow(proposed_gradient.reshape(3,16))
+        # plt.show()
         return proposed_para, move_ratio
     
     def accept(self, current_para, obs, samples):
@@ -140,7 +142,8 @@ class MALA(Kernel):
         proposed_samples = generate_samples(self.model, obs, proposed_para)
         current_log_posterior = self.posterior(current_para, obs, samples)
         proposed_log_posterior = self.posterior(proposed_para, obs, proposed_samples)
-        return proposed_log_posterior - current_log_posterior + move_ratio, proposed_para, proposed_samples
+        print(proposed_log_posterior-current_log_posterior  - move_ratio)
+        return proposed_log_posterior - current_log_posterior - move_ratio, proposed_para, proposed_samples
         
 
 class MCMC:
@@ -165,7 +168,7 @@ class MCMC:
                 new_paras[i] = proposed_para
                 self.accepted += 1
                 samples[:, i] = proposed_samples
-        print('accept with ratio ', np.exp(acceptance_ratio))
+        # print('accept with ratio ', np.exp(acceptance_ratio))
         return new_paras, samples
         
 

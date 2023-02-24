@@ -18,10 +18,10 @@ min_ess = 0.5
 
 #MCMC
 update_frequency = 5
-stepsize = 0.01
+stepsize = 0.1
 
 #ABC
-epsilon = 0.1
+epsilon = 1
 
 #Results
 show = True
