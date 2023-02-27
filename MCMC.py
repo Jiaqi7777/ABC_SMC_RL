@@ -158,7 +158,9 @@ class AM(Kernel):
         
     def move(self, current_para, para_history):
         current_para = current_para.reshape(-1)
-        if paras != []:
+        if para_history == []:
+            paras = para_history
+        else:
             paras = np.array(para_history).reshape(len(para_history), -1)
         current_cov = self.cov(paras)
         proposed_para = current_para + stats.multivariate_normal(current_para, cov=current_cov)
