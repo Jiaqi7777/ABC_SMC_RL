@@ -147,6 +147,32 @@ class MALA(Kernel):
         # print(proposed_log_posterior, current_log_posterior,  - move_ratio)
         return proposed_log_posterior - current_log_posterior - move_ratio, proposed_para, proposed_samples
         
+class AM(Kernel):
+    def __init__(self, model=None, stepsize=0.1, prior=Prior(sigma=prior_sigma), likelihood=ABCLikelihood(epsilon=epsilon), tractability=False):
+        super().__init__(model, stepsize, prior, likelihood, tractability)
+        
+    def move(self, para_history):
+        current_para = para_history[-1].reshape(-1)
+        current_cov = self.cov(paras)
+        proposed_para = current_para + stats.multivariate_normal(current_para, cov=current_cov)
+        paras[-1] = proposed_para
+        proposed_cov = self.cov(paras)
+        move_ratio = stats.multivariate_normal.logpdf(proposed_para, mean=current_para, cov=current_cov) - \
+                                        stats.multivariate_normal.logpdf(current_para, mean=proposed_para, cov=proposed_cov)
+        return proposed_para.reshape(para_history[0].shape), move_ratio                                
+        
+        
+    def cov(self, para_history):
+        paras = para_history.reshape(len(para_history), -1)
+        return np.cov(paras)
+        
+    def accept(self, current_para, obs, samples, para_history):
+        proposed_para, move_ratio = self.move(current_para, para_history)
+        proposed_samples = generate_samples(self.model, obs, proposed_para)
+        current_log_posterior = self.posterior(current_para, obs, samples)
+        proposed_log_posterior = self.posterior(proposed_para, obs, proposed_samples)
+        return proposed_log_posterior - current_log_posterior - move_ratio, proposed_para, proposed_samples
+        
 
 class MCMC:
     def __init__(self, steps = 10, kernal=pCN(stepsize=stepsize)):
