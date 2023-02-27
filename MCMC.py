@@ -151,8 +151,10 @@ class MALA(Kernel):
         return proposed_log_posterior - current_log_posterior - move_ratio, proposed_para, proposed_samples
         
 class AM(Kernel):
-    def __init__(self, model=None, stepsize=0.1, prior=Prior(sigma=prior_sigma), likelihood=ABCLikelihood(epsilon=epsilon), tractability=False):
+    def __init__(self, model=None, stepsize=0.1, prior=Prior(sigma=prior_sigma), likelihood=ABCLikelihood(epsilon=epsilon), tractability=False, sd=1, epsilon=1e-5):
         super().__init__(model, stepsize, prior, likelihood, tractability)
+        self.sd = sd
+        self.epsilon=epsilon
         
     def move(self, para_history):
         current_para = para_history[-1].reshape(-1)
@@ -167,7 +169,7 @@ class AM(Kernel):
         
     def cov(self, para_history):
         paras = para_history.reshape(len(para_history), -1)
-        return np.cov(paras)
+        return self.sd * np.cov(paras) + self.sd * self.epsilon * np.eye(len(para_history))
         
     def accept(self, current_para, obs, samples, para_history):
         proposed_para, move_ratio = self.move(current_para, para_history)
