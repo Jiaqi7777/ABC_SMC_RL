@@ -201,7 +201,7 @@ if __name__ == '__main__':
     random.seed(10)
     env = GridWorld((1,2), obstacles=False)
     model = Tabular(env=env, n_particle=n_particle, prior='normal')
-    kernel = pCN(model=model, stepsize=stepsize)
+    kernel = RandomWalk(model=model, stepsize=stepsize)
     mcmc = MCMC(kernal=kernel)
     chain = np.zeros([training_steps, env.observation_space.n * env.action_space.n])
     
@@ -227,7 +227,7 @@ if __name__ == '__main__':
                 paras.append(new_parameter)
     print('accepted ratio:', mcmc.accepted / training_steps)
     model.plot_policy(paras=np.array(paras), title=f'policy_T{training_steps}_{time}', additional_info = env.R, save=save)
-    print('ESS:', ess(chain[:,0]))
+    print('ESS:', ess(chain.T))
 
     if save:
         with open(f'Models/MCMC/chains_T{training_steps}_{time}.npy', 'wb') as f:

@@ -19,7 +19,7 @@ min_ess = 0.5
 #MCMC
 prior_sigma = 10
 update_frequency = 5
-stepsize = 0.008
+stepsize = 0.07
 MCMC_T = 1000000
 
 #ABC
