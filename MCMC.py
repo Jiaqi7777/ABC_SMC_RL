@@ -98,9 +98,12 @@ class pCN(Kernel):
         self.model=model
         self.stepsize = stepsize
         self.sigma = self.prior.sigma
+        
+    def move(self, current_para):
+        return np.sqrt(1 - self.stepsize ** 2) * current_para + self.stepsize * np.random.normal(size=(current_para.shape), scale=self.sigma)
     
     def accept(self, current_para, obs, samples):
-        proposed_para = np.sqrt(1 - self.stepsize ** 2) * current_para + self.stepsize * np.random.normal(size=(current_para.shape), scale=self.sigma)
+        proposed_para = self.move(current_para)
         proposed_samples = generate_samples(self.model, obs, proposed_para)
         current_log_posterior = self.likelihood.get_log_likelihood(obs, samples)
         proposed_log_posterior = self.likelihood.get_log_likelihood(obs, proposed_samples)
@@ -145,6 +148,34 @@ class MALA(Kernel):
         current_log_posterior = self.posterior(current_para, obs, samples)
         proposed_log_posterior = self.posterior(proposed_para, obs, proposed_samples)
         # print(proposed_log_posterior, current_log_posterior,  - move_ratio)
+        return proposed_log_posterior - current_log_posterior - move_ratio, proposed_para, proposed_samples
+        
+class AM(Kernel):
+    def __init__(self, model=None, stepsize=0.1, prior=Prior(sigma=prior_sigma), likelihood=ABCLikelihood(epsilon=epsilon), tractability=False, sd=1, epsilon=1e-5):
+        super().__init__(model, stepsize, prior, likelihood, tractability)
+        self.sd = sd
+        self.epsilon=epsilon
+        
+    def move(self, para_history):
+        current_para = para_history[-1].reshape(-1)
+        current_cov = self.cov(paras)
+        proposed_para = current_para + stats.multivariate_normal(current_para, cov=current_cov)
+        paras[-1] = proposed_para
+        proposed_cov = self.cov(paras)
+        move_ratio = stats.multivariate_normal.logpdf(proposed_para, mean=current_para, cov=current_cov) - \
+                                        stats.multivariate_normal.logpdf(current_para, mean=proposed_para, cov=proposed_cov)
+        return proposed_para.reshape(para_history[0].shape), move_ratio                                
+        
+        
+    def cov(self, para_history):
+        paras = para_history.reshape(len(para_history), -1)
+        return self.sd * np.cov(paras) + self.sd * self.epsilon * np.eye(len(para_history))
+        
+    def accept(self, current_para, obs, samples, para_history):
+        proposed_para, move_ratio = self.move(current_para, para_history)
+        proposed_samples = generate_samples(self.model, obs, proposed_para)
+        current_log_posterior = self.posterior(current_para, obs, samples)
+        proposed_log_posterior = self.posterior(proposed_para, obs, proposed_samples)
         return proposed_log_posterior - current_log_posterior - move_ratio, proposed_para, proposed_samples
         
 
