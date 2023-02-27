@@ -98,9 +98,12 @@ class pCN(Kernel):
         self.model=model
         self.stepsize = stepsize
         self.sigma = self.prior.sigma
+        
+    def move(self, current_para):
+        return np.sqrt(1 - self.stepsize ** 2) * current_para + self.stepsize * np.random.normal(size=(current_para.shape), scale=self.sigma)
     
     def accept(self, current_para, obs, samples):
-        proposed_para = np.sqrt(1 - self.stepsize ** 2) * current_para + self.stepsize * np.random.normal(size=(current_para.shape), scale=self.sigma)
+        proposed_para = self.move(current_para)
         proposed_samples = generate_samples(self.model, obs, proposed_para)
         current_log_posterior = self.likelihood.get_log_likelihood(obs, samples)
         proposed_log_posterior = self.likelihood.get_log_likelihood(obs, proposed_samples)
