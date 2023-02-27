@@ -21,6 +21,8 @@ prior_sigma = 10
 update_frequency = 5
 stepsize = 0.07
 MCMC_T = 1000000
+BURN_IN = 0.1
+skip = 10
 
 #ABC
 epsilon = 0.1

@@ -156,8 +156,9 @@ class AM(Kernel):
         self.sd = sd
         self.epsilon=epsilon
         
-    def move(self, para_history):
-        current_para = para_history[-1].reshape(-1)
+    def move(self, current_para, para_history):
+        paras = np.array(para_history).reshape(len(para_history), -1)
+        current_para = current_para.reshape(-1)
         current_cov = self.cov(paras)
         proposed_para = current_para + stats.multivariate_normal(current_para, cov=current_cov)
         paras[-1] = proposed_para
@@ -168,8 +169,9 @@ class AM(Kernel):
         
         
     def cov(self, para_history):
-        paras = para_history.reshape(len(para_history), -1)
-        return self.sd * np.cov(paras) + self.sd * self.epsilon * np.eye(len(para_history))
+        if para_history == []:
+            return self.stepsize ** 2
+        return self.sd * np.cov(para_history) + self.sd * self.epsilon * np.eye(len(para_history))
         
     def accept(self, current_para, obs, samples, para_history):
         proposed_para, move_ratio = self.move(current_para, para_history)
@@ -188,10 +190,10 @@ class MCMC:
     def reset(self):
         self.accepted = 0
 
-    def update(self, paras, obs, samples):
+    def update(self, paras, obs, samples, para_history=[]):
         new_paras = deepcopy(paras)
         for i, current_para in enumerate(paras):
-            acceptance_ratio, proposed_para, proposed_samples = self.kernel.accept(current_para, obs, samples[:, i])
+            acceptance_ratio, proposed_para, proposed_samples = self.kernel.accept(current_para, obs, samples[:, i], para_history)
             if acceptance_ratio > 1:
                 accept = True
             else:
@@ -232,7 +234,7 @@ if __name__ == '__main__':
     random.seed(10)
     env = GridWorld((1,2), obstacles=False)
     model = Tabular(env=env, n_particle=n_particle, prior='normal')
-    kernel = RandomWalk(model=model, stepsize=stepsize)
+    kernel = AM(model=model, stepsize=stepsize)
     mcmc = MCMC(kernal=kernel)
     chain = np.zeros([training_steps, env.observation_space.n * env.action_space.n])
     
@@ -245,19 +247,19 @@ if __name__ == '__main__':
     obs = env.uniform_obs._buffers
     R = [obs['rewards'][0]]
     samples_l = []
-    paras = []
+    paras_history = []
     for j in range(len(obs['state0'])):
         samples_l.append(model.r_hat(obs['state0'][j], obs['state1'][j], obs['action'][j]))
     samples_l = np.array(samples_l)
     for t in tqdm(range(training_steps)):
-        new_parameter, samples_l = mcmc.update(model.get_parameter(), obs, samples_l)
+        new_parameter, samples_l = mcmc.update(model.get_parameter(), obs, samples_l, paras_history)#paras_history for AM
         model.set_parameter(new_parameter)
         chain[t] = new_parameter.flatten()
-        if t > training_steps * 0.1:
-            if t % 10 == 0:
-                paras.append(new_parameter)
+        if t > training_steps * BURN_IN:
+            if t % skip == 0:
+                paras_history.append(new_parameter)
     print('accepted ratio:', mcmc.accepted / training_steps)
-    model.plot_policy(paras=np.array(paras), title=f'policy_T{training_steps}_{time}', additional_info = env.R, save=save)
+    model.plot_policy(paras=np.array(paras_history), title=f'policy_T{training_steps}_{time}', additional_info = env.R, save=save)
     print('ESS:', ess(chain.T))
 
     if save:
