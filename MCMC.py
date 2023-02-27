@@ -151,30 +151,31 @@ class MALA(Kernel):
         return proposed_log_posterior - current_log_posterior - move_ratio, proposed_para, proposed_samples
         
 class AM(Kernel):
-    def __init__(self, model=None, stepsize=0.1, prior=Prior(sigma=prior_sigma), likelihood=ABCLikelihood(epsilon=epsilon), tractability=False, sd=1, epsilon=1e-5):
+    def __init__(self, model=None, stepsize=0.1, prior=Prior(sigma=prior_sigma), likelihood=ABCLikelihood(epsilon=epsilon), tractability=False, sd=1, am_epsilon=1e-5):
         super().__init__(model, stepsize, prior, likelihood, tractability)
         self.sd = sd
-        self.epsilon=epsilon
+        self.am_epsilon=am_epsilon
         
     def move(self, current_para, para_history):
+        shape = current_para.shape
+        # print(current_para)
         current_para = current_para.reshape(-1)
         if para_history == []:
-            paras = para_history
+            paras = [current_para]
         else:
             paras = np.array(para_history).reshape(len(para_history), -1)
         current_cov = self.cov(paras)
-        proposed_para = current_para + stats.multivariate_normal(current_para, cov=current_cov)
+        proposed_para = current_para + np.random.multivariate_normal(current_para, cov=current_cov)
         paras[-1] = proposed_para
         proposed_cov = self.cov(paras)
         move_ratio = stats.multivariate_normal.logpdf(proposed_para, mean=current_para, cov=current_cov) - \
                                         stats.multivariate_normal.logpdf(current_para, mean=proposed_para, cov=proposed_cov)
-        return proposed_para.reshape(para_history[0].shape), move_ratio                                
-        
+        return proposed_para.reshape(shape), move_ratio                                
         
     def cov(self, para_history):
-        if para_history == []:
-            return self.stepsize ** 2
-        return self.sd * np.cov(para_history) + self.sd * self.epsilon * np.eye(len(para_history))
+        if len(para_history) == 1:
+            return self.stepsize ** 2 * np.eye(len(para_history[0]))
+        return self.sd * np.cov(para_history, rowvar=False) + self.sd * self.am_epsilon * np.eye(len(para_history[0]))
         
     def accept(self, current_para, obs, samples, para_history):
         proposed_para, move_ratio = self.move(current_para, para_history)
