@@ -1,5 +1,14 @@
+*.pyc
 *.ipynb
-Figures
+*.DS_Store
+.vscode
+*.yml
+
+#Models
 Models
-*pyc
-*.json
+
+#Figures
+Figures
+
+#Not used
+bandits.py
