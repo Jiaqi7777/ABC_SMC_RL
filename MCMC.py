@@ -264,7 +264,7 @@ if __name__ == '__main__':
             if t % skip == 0:
                 paras_history.append(new_parameter)
     print('accepted ratio:', mcmc.accepted / training_steps)
-    model.plot_policy(paras=np.array(paras_history), title=f'policy_T{training_steps}_{time}', additional_info = env.R, save=save)
+    model.plot_policy(paras=np.array(paras_history), title=f'policy_T{training_steps}_{time}', additional_info = env.R, save=save, show=show)
     print('ESS:', ess(chain.T))
 
     if save:
