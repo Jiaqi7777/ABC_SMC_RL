@@ -3,16 +3,17 @@ import scipy.stats as stats
 from copy import deepcopy
 from parameter import *
    
-def generate_samples(model, obs, para):
+def generate_samples(para, model, obs):
+    para = para.reshape(model.state_size + (model.action_size, ))
     s0 = obs['state0']
     s1 = obs['state1']
     a = obs['action']
-    return model.q_value(para, np.array(s0).T, a) - model.gamma * model.v_value(para, np.array(s1).T) #time x action
+    return model.q_value(para, np.array(s0).T, a) - model.gamma * model.v_value(para, np.array(s1).T).values #time 
 
     samples = []
     for s0, a, s1 in zip(obs['state0'], obs['action'], obs['state1']):
         samples.append(model.q_value(para, s0, a) - model.gamma * model.v_value(para, s1))
-    return np.array(samples)# t x action
+    return np.array(samples)# t
 
 
 

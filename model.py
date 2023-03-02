@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import scipy.stats as stats
 import random
+import torch
 from utils import *
 from scipy.sparse import csr_matrix, coo_array
 
@@ -120,10 +121,10 @@ class Tabular:
 
     def v_value(self, table, s):
         if len(table.shape) > len(s) + 1:
-            return np.max(table[(slice(None), *s)], axis = 1)
+            return torch.max(table[(slice(None), *s)], 1)
         if hasattr(s[0], "__len__"):
-            return np.max(table[s[0], s[1]], axis=-1)
-        return max(table[s])
+            return torch.max(table[s[0], s[1]], -1)
+        return torch.max(table[s])
 
     def r_hat(self, s0, s1, a):
         '''
@@ -177,7 +178,7 @@ class Tabular:
             s0 = np.array(s0).astype('int32')
             s1 = np.array(s1).astype('int32')
         S0, S1 = np.meshgrid(s0, s1)
-        print('Value', para)
+        print('Value', '\n', para)
         plot_3d(S0, S1, para, title=title, xlabel=xlabel, ylabel=ylabel, zlabel=zlabel)
 
     def plot_policy(self, paras=[], title='Policy for each state', xlabel=None, ylabel=None, zlabel='Policy', show=False, additional_info=[], save=False):
@@ -190,7 +191,7 @@ class Tabular:
         
         S0, S1 = np.meshgrid(s0, s1)
         print(s0, s1)
-        print('policy:', para)
+        print('policy:', '\n',  para)
         para = para
         plot_2d(s0, s1, para, title=title, xlabel=xlabel, ylabel=ylabel, zlabel=zlabel, show=show, additional_info=additional_info, save=save)
         # plot_3d(S0, S1, para.T, title=title, xlabel=xlabel, ylabel=ylabel, zlabel=zlabel, show=show)

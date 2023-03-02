@@ -3,6 +3,7 @@ env_name = 'GridWorld'
 #env_name = 'MountainCar'
 horizon = 30
 #Number of Episodes
+gamma = 0.95
 repeat_experiment = 20
 episodes = 100
 discrete = False
@@ -20,7 +21,7 @@ min_ess = 0.5
 prior_sigma = 10
 update_frequency = 5
 stepsize = 0.01
-MCMC_T = 1000000
+MCMC_T = 100
 BURN_IN = 0.1
 skip = 10
 
