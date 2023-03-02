@@ -19,13 +19,13 @@ min_ess = 0.5
 #MCMC
 prior_sigma = 10
 update_frequency = 5
-stepsize = 0.07
+stepsize = 0.01
 MCMC_T = 1000000
 BURN_IN = 0.1
 skip = 10
 
 #ABC
-epsilon = 0.1
+epsilon = 0.01
 
 #Results
 show = True

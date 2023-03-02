@@ -197,7 +197,7 @@ class MCMC:
     def update(self, paras, obs, samples, para_history=[]):
         new_paras = deepcopy(paras)
         for i, current_para in enumerate(paras):
-            acceptance_ratio, proposed_para, proposed_samples = self.kernel.accept(current_para, obs, samples[:, i], para_history)
+            acceptance_ratio, proposed_para, proposed_samples = self.kernel.accept(current_para, obs, samples[:, i])#para_history for AM
             if acceptance_ratio > 1:
                 accept = True
             else:
@@ -236,9 +236,9 @@ if __name__ == '__main__':
     n_particle = 1
     r = []
     random.seed(10)
-    env = GridWorld((1,2), obstacles=False)
+    env = GridWorld((3,4), obstacles=True)
     model = Tabular(env=env, n_particle=n_particle, prior='normal')
-    kernel = AM(model=model, stepsize=stepsize)
+    kernel = pCN(model=model, stepsize=stepsize)
     mcmc = MCMC(kernal=kernel)
     chain = np.zeros([training_steps, env.observation_space.n * env.action_space.n])
     
@@ -256,7 +256,7 @@ if __name__ == '__main__':
         samples_l.append(model.r_hat(obs['state0'][j], obs['state1'][j], obs['action'][j]))
     samples_l = np.array(samples_l)
     for t in tqdm(range(training_steps)):
-        new_parameter, samples_l = mcmc.update(model.get_parameter(), obs, samples_l, paras_history)#paras_history for AM
+        new_parameter, samples_l = mcmc.update(model.get_parameter(), obs, samples_l)#paras_history for AM
         model.set_parameter(new_parameter)
         chain[t] = new_parameter.flatten()
         if t > training_steps * BURN_IN:
