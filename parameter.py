@@ -1,14 +1,16 @@
+#RL
 #Env 
 env_name = 'GridWorld'
 #env_name = 'MountainCar'
-horizon = 30
+horizon = 10
 #Number of Episodes
+episodes = 100
 gamma = 0.95
 repeat_experiment = 20
-episodes = 100
 discrete = False
 bins = (10, )
 last_episode = 1
+ONLINE_LEARNING = True
 seed = 555
 
 #SMC parameters
