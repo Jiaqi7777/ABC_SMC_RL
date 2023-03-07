@@ -12,6 +12,7 @@ bins = (10, )
 last_episode = 1
 ONLINE_LEARNING = True
 seed = 555
+FROZEN_T = 10
 
 #SMC parameters
 prior = 'normal'

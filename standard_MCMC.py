@@ -63,13 +63,14 @@ if __name__ == '__main__':
         s0, _ = env.reset()
         posterior_samples = model.get_parameter()
         for h in tqdm(range(horizon)):
-            print(s0)
             action = model.act(s0, posterior_samples)
             s1, r, done, *info = env.step(action)
             obs.insert({'state0': s0, 'state1': s1, 'action': action, 'rewards': r, 'done': done})
             r_hat = partial(generate_samples, model=model, obs=obs._buffers)
             mcmc_run = mcmc(torch.tensor(obs._buffers['rewards']), torch.tensor(posterior_samples[-1].reshape(-1)), num_samples=training_steps)
-            posterior_samples = mcmc_run.get_samples()["prior_parameter"].reshape((-1, ) + env.n_cell + (env.action_space.n, ))
+            new_posterior_samples = mcmc_run.get_samples()["prior_parameter"].reshape((-1, ) + env.n_cell + (env.action_space.n, ))
+            if h // FROZEN_T == 0:
+                posterior_samples = new_posterior_samples
             s0 = s1
             if done:
                 print("done with", h + 1, 'steps')
