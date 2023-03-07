@@ -9,10 +9,12 @@ from functools import partial
 
 
 def likelihood(data):
+    global r_hat
+    # print(obs._buffers)
     prior_parameter = pyro.sample("prior_parameter", dist.MultivariateNormal(torch.zeros(dim), prior_sigma **2 * torch.eye(dim)))
     mean = r_hat(prior_parameter).reshape(-1)
     with pyro.plate("data_plate"):
-        pyro.sample("obs", dist.MultivariateNormal(mean, abc_epsilon ** 2 * torch.eye(dim)), obs=data)
+        pyro.sample("obs", dist.MultivariateNormal(mean, abc_epsilon ** 2 * torch.eye(len(data))), obs=data)
 
 
 def mcmc(data, prior_parameter, num_samples=MCMC_T, warmup_steps=MCMC_T//10):
@@ -53,27 +55,44 @@ if __name__ == '__main__':
     random.seed(10)
     
     env = GridWorld((3,4), obstacles=True)
+    dim = env.observation_space.n * env.action_space.n
     model = Tabular(env=env, n_particle=n_particle, prior='normal')
     print(env.reset())
-    # env.plot_env()
-    # env.expert(reset=True)
-    # for _ in range(repeat):
-    #     env.expert(reset=False)
-    env.uniform_policy()
-    obs = env.uniform_obs._buffers
-    r_hat = partial(generate_samples, model=model, obs=obs)
-    dim = env.observation_space.n * env.action_space.n
-    mcmc_run = mcmc(torch.tensor(obs['rewards']), torch.tensor(model.get_parameter()[0].reshape(-1)), num_samples=training_steps)
-    posterior_samples = mcmc_run.get_samples()["prior_parameter"]
-    print(posterior_samples.shape)
+    if ONLINE_LEARNING:
+        obs = Buffer(['state0', 'state1', 'action', 'rewards', 'done'])
+        s0, _ = env.reset()
+        posterior_samples = model.get_parameter()
+        for h in tqdm(range(horizon)):
+            print(s0)
+            action = model.act(s0, posterior_samples)
+            s1, r, done, *info = env.step(action)
+            obs.insert({'state0': s0, 'state1': s1, 'action': action, 'rewards': r, 'done': done})
+            r_hat = partial(generate_samples, model=model, obs=obs._buffers)
+            mcmc_run = mcmc(torch.tensor(obs._buffers['rewards']), torch.tensor(posterior_samples[-1].reshape(-1)), num_samples=training_steps)
+            posterior_samples = mcmc_run.get_samples()["prior_parameter"].reshape((-1, ) + env.n_cell + (env.action_space.n, ))
+            s0 = s1
+            if done:
+                print("done with", h + 1, 'steps')
+                break
+            
+    else:
+        env.uniform_policy()
+        obs = env.uniform_obs._buffers
+        r_hat = partial(generate_samples, model=model, obs=obs)
+        mcmc_run = mcmc(torch.tensor(obs['rewards']), torch.tensor(model.get_parameter()[0].reshape(-1)), num_samples=training_steps)
+        posterior_samples = mcmc_run.get_samples()["prior_parameter"]
+        print(posterior_samples.shape)
 
-    model.plot_policy(paras=posterior_samples.numpy().reshape((-1, ) + env.n_cell + (env.action_space.n, )), title=f'policy_T{training_steps}_{time}', additional_info = env.R, save=save, show=show)
-    # print('ESS:', ess(chain.T))
-    f = mcp.plot_chain_panel(chains=posterior_samples.numpy()[training_steps // 10:, :4],settings=dict(add_pm2std=True,
-                                                        mean=dict(color='b'),
-                                                        plot=dict(color='k')))
-    if show:
-        plt.show()
+        model.plot_policy(paras=posterior_samples.numpy().reshape((-1, ) + env.n_cell + (env.action_space.n, )), title=f'policy_T{training_steps}_{time}', additional_info = env.R, save=save, show=show)
+        # print('ESS:', ess(chain.T))
+        f = mcp.plot_chain_panel(chains=posterior_samples.numpy()[training_steps // 10:, :4],settings=dict(add_pm2std=True,
+                                                            mean=dict(color='b'),
+                                                            plot=dict(color='k')))
+        if show:
+            plt.show()
+        
+
+        
     
     
 
