@@ -102,7 +102,7 @@ class Tabular:
             # thompson_weights = thompson_matrix @ weights
             # return np.argmax(thompson_weights)
             # return random.choices(range(self.action_size), thompson_weights)[0]
-            table = random.choices(tables, weights)[0]
+            table = random.choice(tables)
             return np.argmax(table[state])
         '''Greedy Action'''
         return np.argmax(table[state])

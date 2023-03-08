@@ -87,7 +87,7 @@ def plot_return_vs_episodes(r_all_episodes, smooth=1, figure_path='Figures/', sh
         plt.show()
     plt.clf()
     
-def plot_return_vs_episodes_repeat(r_all_episodes_repeat, figure_path='Figures/', show=False, title=''):
+def plot_return_vs_episodes_repeat(r_all_episodes_repeat, figure_path='Figures/', show=False, title='', save=False):
     N = len(r_all_episodes_repeat)
     r_mean = np.mean(r_all_episodes_repeat, axis=0)
     r_std = np.std(r_all_episodes_repeat, axis=0)
@@ -96,7 +96,8 @@ def plot_return_vs_episodes_repeat(r_all_episodes_repeat, figure_path='Figures/'
     plt.xlabel('episodes')
     plt.ylabel('Return')
     plt.title(f'Return for each episodes averaging over {N} random runs')
-    plt.savefig(f'{figure_path+title}.png')
+    if save:
+        plt.savefig(f'{figure_path+title}.png')
     print('figure saved at ', f'{figure_path+title}.png')
     if show:
         plt.show()
