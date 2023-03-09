@@ -1,5 +1,6 @@
 import numpy as np
 from utils import *
+from parameter import *
 def DynamicProgramming(Q, A, S, env, thresh = 1e-4, gamma=0.95):
     loop = 0
     delta = thresh + 0.01
@@ -44,7 +45,7 @@ def QLearning(Q, env, n_episodes=10, horizon=50, gamma=0.95, epsilon=0.4):
     pi = np.argmax(Q, axis=-1)
     # print('Value', V)
     print('Policy:', pi)
-    # plot_return_vs_episodes(r_all_episodes, smooth=10)
+    plot_return_vs_episodes(r_all_episodes, smooth=10)
     print(np.round(Q,3))
     return pi, Q
     
@@ -67,9 +68,9 @@ if __name__ == '__main__':
     # S = range(env.n_cell)
     A = range(env.action_space.n)
     # DynamicProgramming(V, A, S, env)
-    # pi = QLearning(Q, env, n_episodes=20, horizon=150)
-    S = []
-    for i in range(env.n_cell[0]):
-        for j in range(env.n_cell[1]):
-            S.append((i,j)) 
-    DynamicProgramming(Q, A, S, env)
+    pi = QLearning(Q, env, n_episodes=episodes, horizon=horizon)
+    # S = []
+    # for i in range(env.n_cell[0]):
+    #     for j in range(env.n_cell[1]):
+    #         S.append((i,j)) 
+    # DynamicProgramming(Q, A, S, env)

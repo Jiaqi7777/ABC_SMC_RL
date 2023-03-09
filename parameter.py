@@ -2,9 +2,9 @@
 #Env 
 env_name = 'GridWorld'
 #env_name = 'MountainCar'
-horizon = 10
+horizon = 15
 #Number of Episodes
-episodes = 100
+episodes = 10
 gamma = 0.95
 repeat_experiment = 20
 discrete = False
