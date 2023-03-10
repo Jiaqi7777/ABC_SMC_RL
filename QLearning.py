@@ -4,7 +4,6 @@ from parameter import *
 def DynamicProgramming(Q, A, S, env, thresh = 1e-4, gamma=0.95):
     loop = 0
     delta = thresh + 0.01
-    pi = np.zeros(V.shape)
     while delta > thresh:
         loop += 1
     # for i in range(2):
@@ -21,7 +20,8 @@ def DynamicProgramming(Q, A, S, env, thresh = 1e-4, gamma=0.95):
     print(f'Converged with loop {loop}')
     print('Value', np.max(Q, axis=-1))
     print('Policy:', np.argmax(Q, axis=-1))
-    return pi
+    pi = np.argmax(Q, axis=-1)
+    return pi, Q
 
 def QLearning(Q, env, n_episodes=10, horizon=50, gamma=0.95, epsilon=0.4):
     # while delta > thresh:

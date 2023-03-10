@@ -2,17 +2,32 @@
 #Env 
 env_name = 'GridWorld'
 #env_name = 'MountainCar'
+
+#Test parameters
+# horizon = 15
+# #Number of Episodes
+# episodes = 2
+# gamma = 0.95
+# repeat_experiment = 2
+# discrete = False
+# bins = (10, )
+# last_episode = 1
+# ONLINE_LEARNING = True
+# seed = 555
+# FROZEN_T = 3
+
+#Long Experiment
 horizon = 15
 #Number of Episodes
 episodes = 10
 gamma = 0.95
-repeat_experiment = 20
+repeat_experiment = 10
 discrete = False
 bins = (10, )
 last_episode = 1
 ONLINE_LEARNING = True
 seed = 555
-FROZEN_T = 3
+FROZEN_T = 5
 
 #SMC parameters
 prior = 'normal'

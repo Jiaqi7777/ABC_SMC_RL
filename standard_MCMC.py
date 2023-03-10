@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from parameter import *
 from MCMC import *
 from functools import partial
-
+from QLearning import *
 
 
 def likelihood(data):
@@ -60,39 +60,57 @@ if __name__ == '__main__':
     env = GridWorld((3,4), obstacles=True)
     dim = env.observation_space.n * env.action_space.n
     model = Tabular(env=env, n_particle=n_particle, prior='normal')
+    
+    S = []
+    for i in range(env.n_cell[0]):
+        for j in range(env.n_cell[1]):
+            S.append((i,j)) 
+    Q = np.ones(shape=(env.n_cell + (env.action_space.n, )))/env.observation_space.n / env.action_space.n
+    A = range(env.action_space.n)
+    pi_star, Q_star = DynamicProgramming(Q, A, S, env)
+    
     print(env.reset())
     results = []
     if ONLINE_LEARNING:
         r_all_iter = []
-        for r in range(repeat_experiment):
+        for repeat in range(repeat_experiment):
             r_all_epi = []
             obs = Buffer(['state0', 'state1', 'action', 'rewards', 'done'])
             s0, _ = env.reset()
             posterior_samples = model.get_parameter()
             for e in range(episodes):
-                print(f'Episode {e} in repeat {r}')
+                env.reset()
+                print(f'Episode {e} in repeat {repeat}')
                 R = 0
                 for h in tqdm(range(horizon)):
                     action = model.act(s0, posterior_samples)
                     s1, r, done, *info = env.step(action)
-                    R += r
+                    #Optimal action
+                    r_optimal = env.R[tuple(env.P[s0 + (int(pi_star[s0]), )])]
+                    R += r_optimal - r
                     obs.insert({'state0': s0, 'state1': s1, 'action': action, 'rewards': r, 'done': done})
-                    r_hat = partial(generate_samples, model=model, obs=obs._buffers)
-                    mcmc_run = mcmc(torch.tensor(obs._buffers['rewards']), torch.tensor(posterior_samples[-1].reshape(-1)), num_samples=training_steps)
-                    new_posterior_samples = mcmc_run.get_samples()["prior_parameter"].reshape((-1, ) + env.n_cell + (env.action_space.n, ))
+                    
                     s0 = s1
-                    if h // FROZEN_T == 0 or done:
-                        posterior_samples = new_posterior_samples
-                        model.plot_policy(paras=new_posterior_samples.numpy(), title=f'policy_T{training_steps}_{time}', additional_info = env.R, save=save, show=show)
-                        f = mcp.plot_chain_panel(chains=new_posterior_samples.numpy().reshape(new_posterior_samples.shape[0], -1)[training_steps // 10:, :4], settings=dict(add_pm2std=True,
+                    if h % FROZEN_T == 0 or done:
+                        #MCMC
+                        r_hat = partial(generate_samples, model=model, obs=obs._buffers)
+                        mcmc_run = mcmc(torch.tensor(obs._buffers['rewards']), torch.tensor(posterior_samples[-1].reshape(-1)), num_samples=training_steps)
+                        posterior_samples = mcmc_run.get_samples()["prior_parameter"].reshape((-1, ) + env.n_cell + (env.action_space.n, ))
+                        # posterior_samples = new_posterior_samples
+                        model.plot_policy(paras=posterior_samples.numpy(), title=f'policy_T{training_steps}_{time}', additional_info = env.R, save=save, show=show)
+                        f = mcp.plot_chain_panel(chains=posterior_samples.numpy().reshape(posterior_samples.shape[0], -1)[training_steps // 10:, :4], settings=dict(add_pm2std=True,
                                                                         mean=dict(color='b'),
                                                                         plot=dict(color='k')))
-                        plt.show()
+                        # if show:
+                        #     plt.show()
                     if done:
                         print("done with", h + 1, 'steps')
                         break
                 r_all_epi.append(R)
             r_all_iter.append(r_all_epi)
+        with open(f'Models/MCMC/chains_T{training_steps}_{time}.npy', 'wb') as f:
+            np.save(f, r_all_iter)
+            print('model saved at', f'Models/MCMC/chains_T{training_steps}_{time}.npy')
             
         plt.plot(R)
         if show:
