@@ -21,7 +21,7 @@ horizon = 15
 #Number of Episodes
 episodes = 10
 gamma = 0.95
-repeat_experiment = 10
+repeat_experiment = 4
 discrete = False
 bins = (10, )
 last_episode = 1

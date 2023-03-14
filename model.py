@@ -97,11 +97,11 @@ class Tabular:
             if weights == []:
                 weights = torch.ones(len(tables)) / len(tables)
             '''Thompson Sampling'''
-            # action_idx = np.argmax(tables[(slice(None), *state)], axis=-1)
-            # thompson_matrix = csr_matrix((np.ones(len(tables)), (action_idx, np.array(range(len(tables))))), shape=(self.action_size, len(tables)))
-            # thompson_weights = thompson_matrix @ weights
-            # return np.argmax(thompson_weights)
-            # return random.choices(range(self.action_size), thompson_weights)[0]
+            action_idx = np.argmax(tables[(slice(None), *state)], axis=-1)
+            thompson_matrix = csr_matrix((np.ones(len(tables)), (action_idx, np.array(range(len(tables))))), shape=(self.action_size, len(tables)))
+            thompson_weights = thompson_matrix @ weights
+            return np.argmax(thompson_weights)
+            return random.choices(range(self.action_size), thompson_weights)[0]
             table = random.choice(tables)
             return np.argmax(table[state])
         '''Greedy Action'''
