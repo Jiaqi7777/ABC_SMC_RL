@@ -50,7 +50,6 @@ if __name__ == '__main__':
     save = args.save
     show = args.show
     abc_epsilon = args.epsilon
-    repeat = 100
     n_particle = 1
     r = []
     random.seed(seed)
