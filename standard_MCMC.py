@@ -67,7 +67,7 @@ if __name__ == '__main__':
             S.append((i,j)) 
     Q = np.ones(shape=(env.n_cell + (env.action_space.n, )))/env.observation_space.n / env.action_space.n
     A = range(env.action_space.n)
-    pi_star, Q_star = DynamicProgramming(Q, A, S, env)
+    pi_star, Q_star, V_star = DynamicProgramming(Q, A, S, env)
     
     print(env.reset())
     results = []
@@ -86,8 +86,8 @@ if __name__ == '__main__':
                     action = model.act(s0, posterior_samples)
                     s1, r, done, *info = env.step(action)
                     #Optimal action
-                    r_optimal = env.R[tuple(env.P[s0 + (int(pi_star[s0]), )])]
-                    R += r_optimal - r
+                    r_optimal = V_star[s0]#env.R[tuple(env.P[s0 + (int(pi_star[s0]), )])]
+                    R += r_optimal - r + R * gamma
                     obs.insert({'state0': s0, 'state1': s1, 'action': action, 'rewards': r, 'done': done})
                     
                     s0 = s1

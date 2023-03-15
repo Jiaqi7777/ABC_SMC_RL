@@ -15,13 +15,14 @@ def DynamicProgramming(Q, A, S, env, thresh = 1e-4, gamma=0.95):
                 s1, r, done, _ = env.step(a, s)
                 new_q = Q[s + (a,) ] = r + gamma * max(Q[s1])
                 delta = max(delta, abs(pre_q - new_q))
-            
+    
+    V = np.max(Q, axis=-1)
     print('Q', np.round(Q, 3), delta)
     print(f'Converged with loop {loop}')
-    print('Value', np.max(Q, axis=-1))
+    print('Value', V)
     print('Policy:', np.argmax(Q, axis=-1))
     pi = np.argmax(Q, axis=-1)
-    return pi, Q
+    return pi, Q, V
 
 def QLearning(Q, env, n_episodes=10, horizon=50, gamma=0.95, epsilon=0.4):
     # while delta > thresh:
@@ -33,8 +34,8 @@ def QLearning(Q, env, n_episodes=10, horizon=50, gamma=0.95, epsilon=0.4):
         for t in range(horizon):
             a = np.argmax(Q[s0]) if np.random.uniform(0, 1) > epsilon else random.choice(range(env.action_space.n))
             s1, r, done, _ = env.step(a)
-            r_optimal = env.R[tuple(env.P[s0 + (int(pi_star[s0]), )])]
-            R += r_optimal - r
+            r_optimal = V_star[s0]#env.R[tuple(env.P[s0 + (int(pi_star[s0]), )])]
+            R += r_optimal - r + R * gamma
             Q[s0][a] = r + gamma * max(Q[s1])
             if done:
                 print('Done in ', t + 1, 'steps')
@@ -42,13 +43,14 @@ def QLearning(Q, env, n_episodes=10, horizon=50, gamma=0.95, epsilon=0.4):
             s0 = s1
             
         r_all_episodes_qlearning.append(R)
-    print('Value', np.max(Q, axis=-1))
+    V = np.max(Q, axis=-1)
+    print('Value', V)
     pi = np.argmax(Q, axis=-1)
     # print('Value', V)
     print('Policy:', pi)
     # plot_return_vs_episodes(r_all_episodes_qlearning, smooth=10, show=True)
     print(np.round(Q,3))
-    return pi, Q, r_all_episodes_qlearning
+    return pi, Q, V, r_all_episodes_qlearning
     
 if __name__ == '__main__':
     from GridWorld import *
@@ -74,7 +76,7 @@ if __name__ == '__main__':
     r_all_repeat_qlearning = []
     # S = range(env.n_cell)
     A = range(env.action_space.n)
-    pi_star, Q_star = DynamicProgramming(Q, A, S, env)
+    pi_star, Q_star, V_star = DynamicProgramming(Q, A, S, env)
     for repeat in range(repeat_experiment):
         env.reset()
         V = np.ones(env.n_cell)/env.observation_space.n
@@ -83,7 +85,7 @@ if __name__ == '__main__':
         # S = range(env.n_cell)
         A = range(env.action_space.n)
         # DynamicProgramming(V, A, S, env)
-        pi, Q, r_ = QLearning(Q, env, n_episodes=episodes, horizon=horizon)
+        pi, Q, V, r_, = QLearning(Q, env, n_episodes=episodes, horizon=horizon)
         r_all_repeat_qlearning.append(r_)
         # S = []
         # for i in range(env.n_cell[0]):
