@@ -73,6 +73,7 @@ if __name__ == '__main__':
     if ONLINE_LEARNING:
         r_all_iter = []
         for repeat in range(repeat_experiment):
+            model = Tabular(env=env, n_particle=n_particle, prior='normal')
             r_all_epi = []
             obs = Buffer(['state0', 'state1', 'action', 'rewards', 'done'])
             s0, _ = env.reset()
