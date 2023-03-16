@@ -18,10 +18,10 @@ def likelihood(data):
 
 
 def mcmc(data, prior_parameter, num_samples=MCMC_T, warmup_steps=MCMC_T//10):
+    print(MCMC_SHOW_DISABLE, type(MCMC_SHOW_DISABLE))
     pyro.clear_param_store()
-
     kernel = pyro.infer.mcmc.NUTS(likelihood, adapt_step_size=True, adapt_mass_matrix=True)
-    mcmc_run = pyro.infer.mcmc.MCMC(kernel, num_samples=num_samples, warmup_steps=warmup_steps, initial_params={'prior_parameter': prior_parameter}, disable_progbar=True)
+    mcmc_run = pyro.infer.mcmc.MCMC(kernel, num_samples=num_samples, warmup_steps=warmup_steps, initial_params={'prior_parameter': prior_parameter}, disable_progbar=MCMC_SHOW_DISABLE)
     mcmc_run.run(data)
 
     return mcmc_run
@@ -44,6 +44,7 @@ if __name__ == '__main__':
     parser.add_argument('-p', '--show', default=False)
     parser.add_argument('-e', '--epsilon', default=epsilon, type=float)
     parser.add_argument('--seed', default=seed, type=int)
+    parser.add_argument('--MCMC', default=True, action='store_false', help='Bool type')
     args = parser.parse_args()
     time = args.time
     print('time:', time)
@@ -51,8 +52,10 @@ if __name__ == '__main__':
     save = args.save
     show = args.show
     abc_epsilon = args.epsilon
-    n_particle = 1
+    seed = args.seed
+    MCMC_SHOW_DISABLE=args.MCMC
 
+    n_particle = 1
     random.seed(seed)
     pyro.set_rng_seed(seed)
     np.random.seed(seed)
