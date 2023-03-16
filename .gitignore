@@ -4,6 +4,7 @@ MountainCar.ipynb
 *.DS_Store
 .vscode
 *.yml
+log
 
 #Models
 Models
