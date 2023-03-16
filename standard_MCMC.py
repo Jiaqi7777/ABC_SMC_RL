@@ -21,7 +21,7 @@ def mcmc(data, prior_parameter, num_samples=MCMC_T, warmup_steps=MCMC_T//10):
     pyro.clear_param_store()
 
     kernel = pyro.infer.mcmc.NUTS(likelihood, adapt_step_size=True, adapt_mass_matrix=True)
-    mcmc_run = pyro.infer.mcmc.MCMC(kernel, num_samples=num_samples, warmup_steps=warmup_steps, initial_params={'prior_parameter': prior_parameter}, disable_progbar=False)
+    mcmc_run = pyro.infer.mcmc.MCMC(kernel, num_samples=num_samples, warmup_steps=warmup_steps, initial_params={'prior_parameter': prior_parameter}, disable_progbar=True)
     mcmc_run.run(data)
 
     return mcmc_run
