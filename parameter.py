@@ -19,15 +19,15 @@ env_name = 'GridWorld'
 #Long Experiment
 horizon = 15
 #Number of Episodes
-episodes = 100
+episodes = 20
 gamma = 0.95
-repeat_experiment = 5
+repeat_experiment = 2
 discrete = False
 bins = (10, )
 last_episode = 1
 ONLINE_LEARNING = True
 seed = 555
-FROZEN_T = 5
+FROZEN_T = 15
 
 #SMC parameters
 prior = 'normal'
@@ -44,7 +44,7 @@ BURN_IN = 0.1
 skip = 10
 
 #ABC
-epsilon = 0.01
+epsilon = 0.1
 
 #Results
 save=True

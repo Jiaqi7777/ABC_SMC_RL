@@ -21,7 +21,7 @@ def mcmc(data, prior_parameter, num_samples=MCMC_T, warmup_steps=MCMC_T//10):
     pyro.clear_param_store()
 
     kernel = pyro.infer.mcmc.NUTS(likelihood, adapt_step_size=True, adapt_mass_matrix=True)
-    mcmc_run = pyro.infer.mcmc.MCMC(kernel, num_samples=num_samples, warmup_steps=warmup_steps, initial_params={'prior_parameter': prior_parameter}, disable_progbar=True)
+    mcmc_run = pyro.infer.mcmc.MCMC(kernel, num_samples=num_samples, warmup_steps=warmup_steps, initial_params={'prior_parameter': prior_parameter}, disable_progbar=False)
     mcmc_run.run(data)
 
     return mcmc_run
@@ -90,7 +90,7 @@ if __name__ == '__main__':
                     obs.insert({'state0': s0, 'state1': s1, 'action': action, 'rewards': r, 'done': done})
                     
                     s0 = s1
-                    if h % FROZEN_T == 0 or done:
+                    if ( h + 1)  % FROZEN_T == 0 or done:
                         #MCMC
                         r_hat = partial(generate_samples, model=model, obs=obs._buffers)
                         mcmc_run = mcmc(torch.tensor(obs._buffers['rewards']), torch.tensor(posterior_samples[-1].reshape(-1)), num_samples=training_steps)
@@ -106,6 +106,10 @@ if __name__ == '__main__':
                         print("done with", h + 1, 'steps')
                         break
                 r_all_epi.append(R)
+                if e % FROZEN_T == 0 :
+                    with open(f'Models/MCMC/chains_T{training_steps}_{time}.npy', 'wb') as f:
+                        np.save(f, r_all_iter)
+                        print('model saved at', f'Models/MCMC/chains_T{training_steps}_{time}.npy')
             r_all_iter.append(r_all_epi)
         with open(f'Models/MCMC/chains_T{training_steps}_{time}.npy', 'wb') as f:
             np.save(f, r_all_iter)
