@@ -80,13 +80,14 @@ if __name__ == '__main__':
             for e in range(episodes):
                 env.reset()
                 print(f'Episode {e} in repeat {repeat}')
-                R = 0
+                R = []
+                R_star = 0
                 for h in tqdm(range(horizon)):
                     action = model.act(s0, posterior_samples)
                     s1, r, done, *info = env.step(action)
                     #Optimal action
-                    r_optimal = V_star[s0]#env.R[tuple(env.P[s0 + (int(pi_star[s0]), )])]
-                    R = r_optimal - r + R * gamma
+                    R_star = V_star[s0] + gamma * R_star#env.R[tuple(env.P[s0 + (int(pi_star[s0]), )])]
+                    R += [r * gamma ** i for i in range(h + 1)].sum() 
                     obs.insert({'state0': s0, 'state1': s1, 'action': action, 'rewards': r, 'done': done})
                     
                     s0 = s1
@@ -105,7 +106,7 @@ if __name__ == '__main__':
                     if done:
                         print("done with", h + 1, 'steps')
                         break
-                r_all_epi.append(R)
+                r_all_epi.append(R_star - R)
                 if e % FROZEN_T == 0 :
                     with open(f'Models/MCMC/chains_T{training_steps}_{time}.npy', 'wb') as f:
                         np.save(f, r_all_iter)
