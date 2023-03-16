@@ -35,7 +35,7 @@ def QLearning(Q, env, n_episodes=10, horizon=50, gamma=0.95, epsilon=0.4):
             a = np.argmax(Q[s0]) if np.random.uniform(0, 1) > epsilon else random.choice(range(env.action_space.n))
             s1, r, done, _ = env.step(a)
             r_optimal = V_star[s0]#env.R[tuple(env.P[s0 + (int(pi_star[s0]), )])]
-            R += r_optimal - r + R * gamma
+            R = r_optimal - r + R * gamma
             Q[s0][a] = r + gamma * max(Q[s1])
             if done:
                 print('Done in ', t + 1, 'steps')

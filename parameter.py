@@ -14,14 +14,14 @@ env_name = 'GridWorld'
 # last_episode = 1
 # ONLINE_LEARNING = True
 # seed = 555
-# FROZEN_T = 3
+# FROZEN_T = 5
 
 #Long Experiment
 horizon = 15
 #Number of Episodes
-episodes = 10
+episodes = 100
 gamma = 0.95
-repeat_experiment = 4
+repeat_experiment = 5
 discrete = False
 bins = (10, )
 last_episode = 1
@@ -47,4 +47,5 @@ skip = 10
 epsilon = 0.01
 
 #Results
-show = True
+save=True
+show = False

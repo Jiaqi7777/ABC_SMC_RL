@@ -21,7 +21,7 @@ def mcmc(data, prior_parameter, num_samples=MCMC_T, warmup_steps=MCMC_T//10):
     pyro.clear_param_store()
 
     kernel = pyro.infer.mcmc.NUTS(likelihood, adapt_step_size=True, adapt_mass_matrix=True)
-    mcmc_run = pyro.infer.mcmc.MCMC(kernel, num_samples=num_samples, warmup_steps=warmup_steps, initial_params={'prior_parameter': prior_parameter})
+    mcmc_run = pyro.infer.mcmc.MCMC(kernel, num_samples=num_samples, warmup_steps=warmup_steps, initial_params={'prior_parameter': prior_parameter}, disable_progbar=True)
     mcmc_run.run(data)
 
     return mcmc_run
@@ -86,7 +86,7 @@ if __name__ == '__main__':
                     s1, r, done, *info = env.step(action)
                     #Optimal action
                     r_optimal = V_star[s0]#env.R[tuple(env.P[s0 + (int(pi_star[s0]), )])]
-                    R += r_optimal - r + R * gamma
+                    R = r_optimal - r + R * gamma
                     obs.insert({'state0': s0, 'state1': s1, 'action': action, 'rewards': r, 'done': done})
                     
                     s0 = s1
