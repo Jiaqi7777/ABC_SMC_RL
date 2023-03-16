@@ -87,7 +87,7 @@ if __name__ == '__main__':
                     s1, r, done, *info = env.step(action)
                     #Optimal action
                     R_star = V_star[s0] + gamma * R_star#env.R[tuple(env.P[s0 + (int(pi_star[s0]), )])]
-                    R += [r * gamma ** i for i in range(h + 1)].sum() 
+                    R += sum([r * gamma ** i for i in range(h + 1)])
                     obs.insert({'state0': s0, 'state1': s1, 'action': action, 'rewards': r, 'done': done})
                     
                     s0 = s1
