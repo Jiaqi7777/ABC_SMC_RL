@@ -176,8 +176,12 @@ class Tabular:
         return np.argmax(thp_weights, axis=-1)
         
 
-    def plot_value(self, title='Value for each state', xlabel=None, ylabel=None, zlabel='Value', show=False):
-        para = np.average(np.max(self.tables, axis=-1), weights=self._weights, axis=0)
+    def plot_value(self, title='Value for each state', xlabel=None, ylabel=None, zlabel='Value', show=False, paras=[]):
+        weights = np.ones(len(paras))
+        if paras == []:
+            paras = self.tables
+            weights=self._weights
+        para = np.average(np.max(paras, axis=-1), weights=weights, axis=0)
         if self.discrete:
             s0, s1 = uniform_grid(high=self.env.observation_space.high, low=self.env.observation_space.low, bins=self.bins, include_low=0)
         else:
@@ -185,8 +189,8 @@ class Tabular:
             s0 = np.array(s0).astype('int32')
             s1 = np.array(s1).astype('int32')
         S0, S1 = np.meshgrid(s0, s1)
-        print('Value', '\n', para)
-        plot_3d(S0, S1, para, title=title, xlabel=xlabel, ylabel=ylabel, zlabel=zlabel)
+        print('Value', '\n', np.round(para, 1))
+        # plot_3d(S0, S1, para, title=title, xlabel=xlabel, ylabel=ylabel, zlabel=zlabel)
 
     def plot_policy(self, paras=[], title='Policy for each state', xlabel=None, ylabel=None, zlabel='Policy', show=False, additional_info=[], save=False):
         # for s in range(self.state_size):

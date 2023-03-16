@@ -100,6 +100,7 @@ if __name__ == '__main__':
                         posterior_samples = mcmc_run.get_samples()["prior_parameter"].reshape((-1, ) + env.n_cell + (env.action_space.n, ))
                         # posterior_samples = new_posterior_samples
                         model.plot_policy(paras=posterior_samples.numpy(), title=f'policy_T{training_steps}_{time}', additional_info = env.R, save=save, show=show)
+                        model.plot_value(paras=posterior_samples.numpy(), title=f'value_T{training_steps}_{time}')
                         f = mcp.plot_chain_panel(chains=posterior_samples.numpy().reshape(posterior_samples.shape[0], -1)[training_steps // 10:, :4], settings=dict(add_pm2std=True,
                                                                         mean=dict(color='b'),
                                                                         plot=dict(color='k')))
