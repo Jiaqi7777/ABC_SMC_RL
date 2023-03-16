@@ -57,7 +57,7 @@ if __name__ == '__main__':
     import datetime
     time =  datetime.datetime.now()
     time = time.strftime("%f")
-    training_steps = 100000
+    training_steps = 50
     repeat = 100
     n_particle = 1
     stepsize = 0.03
