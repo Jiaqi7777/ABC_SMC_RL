@@ -80,7 +80,7 @@ if __name__ == '__main__':
             for e in range(episodes):
                 env.reset()
                 print(f'Episode {e} in repeat {repeat}')
-                R = []
+                R = 0
                 R_star = 0
                 for h in tqdm(range(horizon)):
                     action = model.act(s0, posterior_samples)
@@ -89,7 +89,7 @@ if __name__ == '__main__':
                     R_star = V_star[s0] + gamma * R_star#env.R[tuple(env.P[s0 + (int(pi_star[s0]), )])]
                     R += sum([r * gamma ** i for i in range(h + 1)])
                     obs.insert({'state0': s0, 'state1': s1, 'action': action, 'rewards': r, 'done': done})
-                    
+                    print(R, r)
                     s0 = s1
                     if ( h + 1)  % FROZEN_T == 0 or done:
                         #MCMC
