@@ -46,12 +46,13 @@ if __name__ == '__main__':
     parser.add_argument('--seed', default=seed, type=int)
     args = parser.parse_args()
     time = args.time
+    print('time:', time)
     training_steps = args.training_step
     save = args.save
     show = args.show
     abc_epsilon = args.epsilon
     n_particle = 1
-    r = []
+
     random.seed(seed)
     pyro.set_rng_seed(seed)
     np.random.seed(seed)
