@@ -25,7 +25,7 @@ repeat_experiment = 1
 discrete = False
 bins = (10, )
 last_episode = 1
-ONLINE_LEARNING = True
+ONLINE_LEARNING = False
 seed = 555
 FROZEN_T = 5
 

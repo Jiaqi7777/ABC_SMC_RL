@@ -17,9 +17,9 @@ def DynamicProgramming(Q, A, S, env, thresh = 1e-4, gamma=0.95):
                 delta = max(delta, abs(pre_q - new_q))
     
     V = np.max(Q, axis=-1)
-    print('Q', np.round(Q, 3), delta)
+    print('Q', np.round(Q, 2), delta)
     print(f'Converged with loop {loop}')
-    print('Value', V)
+    print('Value', np.round(V, 2))
     print('Policy:', np.argmax(Q, axis=-1))
     pi = np.argmax(Q, axis=-1)
     return pi, Q, V
@@ -44,7 +44,7 @@ def QLearning(Q, env, n_episodes=10, horizon=50, gamma=0.95, epsilon=0.4):
             
         r_all_episodes_qlearning.append(R)
     V = np.max(Q, axis=-1)
-    print('Value', V)
+    print('Value', np.round(V, 2))
     pi = np.argmax(Q, axis=-1)
     # print('Value', V)
     print('Policy:', pi)

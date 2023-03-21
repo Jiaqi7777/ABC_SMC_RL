@@ -16,7 +16,7 @@ def likelihood(data):
         pyro.sample("obs", dist.MultivariateNormal(mean, abc_epsilon ** 2 * torch.eye(len(data))), obs=data)
 
 
-def mcmc(data, prior_parameter, num_samples=MCMC_SAMPLE, warmup_steps=training_steps//10):
+def mcmc(data, prior_parameter, num_samples=MCMC_SAMPLE, warmup_steps=MCMC_T//10):
     pyro.clear_param_store()
     kernel = pyro.infer.mcmc.NUTS(likelihood, adapt_step_size=True, adapt_mass_matrix=True)
     mcmc_run = pyro.infer.mcmc.MCMC(kernel, num_samples=num_samples, warmup_steps=warmup_steps, initial_params={'prior_parameter': prior_parameter}, disable_progbar=MCMC_SHOW_DISABLE)
@@ -70,7 +70,7 @@ if __name__ == '__main__':
     A = range(env.action_space.n)
     pi_star, Q_star, V_star = DynamicProgramming(Q, A, S, env)
     
-    print(env.reset())
+    env.reset()
     results = []
     if ONLINE_LEARNING:
         r_all_iter = []
@@ -96,7 +96,7 @@ if __name__ == '__main__':
                     if ( h + 1)  % FROZEN_T == 0 or done:
                         #MCMC
                         r_hat = partial(generate_samples, model=model, obs=obs._buffers)
-                        mcmc_run = mcmc(torch.tensor(obs._buffers['rewards']), torch.tensor(posterior_samples[-1].reshape(-1)), num_samples=training_steps)
+                        mcmc_run = mcmc(torch.tensor(obs._buffers['rewards']), torch.tensor(posterior_samples[-1].reshape(-1)), num_samples=training_steps,  warmup_steps=training_steps//10)
                         posterior_samples = mcmc_run.get_samples()["prior_parameter"].reshape((-1, ) + env.n_cell + (env.action_space.n, ))
                         # posterior_samples = new_posterior_samples
                         # model.plot_policy(paras=posterior_samples.numpy(), title=f'policy_T{training_steps}_{time}', additional_info = env.R, save=save, show=show)
@@ -128,7 +128,7 @@ if __name__ == '__main__':
         env.uniform_policy()
         obs = env.uniform_obs._buffers
         r_hat = partial(generate_samples, model=model, obs=obs)
-        mcmc_run = mcmc(torch.tensor(obs['rewards']), torch.tensor(model.get_parameter()[0].reshape(-1)), num_samples=training_steps)
+        mcmc_run = mcmc(torch.tensor(obs['rewards']), torch.tensor(model.get_parameter()[0].reshape(-1)), num_samples=training_steps, warmup_steps=training_steps//10)
         posterior_samples = mcmc_run.get_samples()["prior_parameter"]
         print(posterior_samples.shape)
 
