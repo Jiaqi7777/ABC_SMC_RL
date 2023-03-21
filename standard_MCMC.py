@@ -10,14 +10,13 @@ from QLearning import *
 
 def likelihood(data):
     global r_hat
-    # print(obs._buffers)
     prior_parameter = pyro.sample("prior_parameter", dist.MultivariateNormal(torch.zeros(dim), prior_sigma **2 * torch.eye(dim)))
     mean = r_hat(prior_parameter).reshape(-1)
     with pyro.plate("data_plate"):
         pyro.sample("obs", dist.MultivariateNormal(mean, abc_epsilon ** 2 * torch.eye(len(data))), obs=data)
 
 
-def mcmc(data, prior_parameter, num_samples=MCMC_T, warmup_steps=MCMC_T//10):
+def mcmc(data, prior_parameter, num_samples=MCMC_SAMPLE, warmup_steps=training_steps//10):
     pyro.clear_param_store()
     kernel = pyro.infer.mcmc.NUTS(likelihood, adapt_step_size=True, adapt_mass_matrix=True)
     mcmc_run = pyro.infer.mcmc.MCMC(kernel, num_samples=num_samples, warmup_steps=warmup_steps, initial_params={'prior_parameter': prior_parameter}, disable_progbar=MCMC_SHOW_DISABLE)
@@ -80,7 +79,7 @@ if __name__ == '__main__':
             r_all_epi = []
             obs = Buffer(['state0', 'state1', 'action', 'rewards', 'done'])
             s0, _ = env.reset()
-            posterior_samples = model.get_parameter()
+            posterior_samples = torch.tensor(model.get_parameter())
             for e in range(episodes):
                 env.reset()
                 print(f'Episode {e} in repeat {repeat}')
@@ -93,7 +92,6 @@ if __name__ == '__main__':
                     R_star = V_star[s0] + gamma * R_star#env.R[tuple(env.P[s0 + (int(pi_star[s0]), )])]
                     R += sum([r * gamma ** i for i in range(h + 1)])
                     obs.insert({'state0': s0, 'state1': s1, 'action': action, 'rewards': r, 'done': done})
-                    print(R, r)
                     s0 = s1
                     if ( h + 1)  % FROZEN_T == 0 or done:
                         #MCMC
@@ -101,16 +99,17 @@ if __name__ == '__main__':
                         mcmc_run = mcmc(torch.tensor(obs._buffers['rewards']), torch.tensor(posterior_samples[-1].reshape(-1)), num_samples=training_steps)
                         posterior_samples = mcmc_run.get_samples()["prior_parameter"].reshape((-1, ) + env.n_cell + (env.action_space.n, ))
                         # posterior_samples = new_posterior_samples
-                        model.plot_policy(paras=posterior_samples.numpy(), title=f'policy_T{training_steps}_{time}', additional_info = env.R, save=save, show=show)
-                        model.plot_value(paras=posterior_samples.numpy(), title=f'value_T{training_steps}_{time}')
+                        # model.plot_policy(paras=posterior_samples.numpy(), title=f'policy_T{training_steps}_{time}', additional_info = env.R, save=save, show=show)
+                        # model.plot_value(paras=posterior_samples.numpy(), title=f'value_T{training_steps}_{time}')
                         f = mcp.plot_chain_panel(chains=posterior_samples.numpy().reshape(posterior_samples.shape[0], -1)[training_steps // 10:, :4], settings=dict(add_pm2std=True,
                                                                         mean=dict(color='b'),
                                                                         plot=dict(color='k')))
-                        # if show:
-                        #     plt.show()
+                        if show:
+                            plt.show()
                     if done:
                         print("done with", h + 1, 'steps')
                         break
+                    
                 r_all_epi.append(R_star - R)
                 if e % FROZEN_T == 0 :
                     with open(f'Models/MCMC/chains_T{training_steps}_{time}.npy', 'wb') as f:
