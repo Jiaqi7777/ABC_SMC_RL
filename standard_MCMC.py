@@ -85,7 +85,9 @@ if __name__ == '__main__':
                 print(f'Episode {e} in repeat {repeat}')
                 R = 0
                 R_star = 0
-                for h in tqdm(range(horizon)):
+                h = 0
+                while True:
+                # for h in tqdm(range(horizon)):
                     action = model.act(s0, posterior_samples)
                     s1, r, done, *info = env.step(action)
                     #Optimal action
@@ -95,8 +97,9 @@ if __name__ == '__main__':
                     s0 = s1
                     if ( h + 1)  % FROZEN_T == 0 or done:
                         #MCMC
-                        r_hat = partial(generate_samples, model=model, obs=obs._buffers)
-                        mcmc_run = mcmc(torch.tensor(obs._buffers['rewards']), torch.tensor(posterior_samples[-1].reshape(-1)), num_samples=training_steps,  warmup_steps=training_steps//10)
+                        batch_indicies = random.choices(range(min(len(obs._buffers['state0']), buffer_size)), k=batch_size)
+                        r_hat = partial(generate_samples, model=model, obs=obs._buffers,  batch_indicies=batch_indicies)
+                        mcmc_run = mcmc(torch.tensor(obs._buffers['rewards'])[batch_indicies], torch.tensor(posterior_samples[-1].reshape(-1)), num_samples=training_steps,  warmup_steps=training_steps//10)
                         posterior_samples = mcmc_run.get_samples()["prior_parameter"].reshape((-1, ) + env.n_cell + (env.action_space.n, ))
                         # posterior_samples = new_posterior_samples
                         # model.plot_policy(paras=posterior_samples.numpy(), title=f'policy_T{training_steps}_{time}', additional_info = env.R, save=save, show=show)
@@ -109,7 +112,7 @@ if __name__ == '__main__':
                     if done:
                         print("done with", h + 1, 'steps')
                         break
-                    
+                    h += 1
                 r_all_epi.append(R_star - R)
                 if e % FROZEN_T == 0 :
                     with open(f'Models/MCMC/chains_T{training_steps}_{time}.npy', 'wb') as f:

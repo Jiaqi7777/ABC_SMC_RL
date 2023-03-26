@@ -17,17 +17,20 @@ env_name = 'GridWorld'
 # FROZEN_T = 5
 
 #Long Experiment
-horizon = 5
+horizon = 50
 #Number of Episodes
-episodes = 3
+episodes = 6
 gamma = 0.95
-repeat_experiment = 1
+repeat_experiment = 10
 discrete = False
 bins = (10, )
 last_episode = 1
-ONLINE_LEARNING = False
+ONLINE_LEARNING = True
 seed = 555
-FROZEN_T = 5
+FROZEN_T = 15
+batch_training = True
+batch_size = 32
+buffer_size = 100
 
 #SMC parameters
 prior = 'normal'

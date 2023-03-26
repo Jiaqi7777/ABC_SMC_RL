@@ -5,6 +5,7 @@ import random
 import torch
 from utils import *
 from scipy.sparse import csr_matrix, coo_array
+from parameter import *
 
 def uniform_grid(low, high, bins=(10,10), include_low=1, verbose=False):
     """Define a uniformly-spaced grid that can be used to discretize a space.
@@ -45,12 +46,14 @@ class Buffer:
 
         for k, v in items.items():
             self._buffers[k].append(v)
-
-    def get_minibatch(self, key, batch_size):
+            # if len(self._buffers[k]) > buffer_size:
+            #     self._buffers[k].pop(0)
+        
+    def get_minibatch(self, batch_size):
         if batch_size == 1:
             minibatch_indices = np.reshape(np.array(-1),(1,))
         else:
-            minibatch_indices = random.choice(key, np.array(range(len(self))),
+            minibatch_indices = random.choice(np.array(range(len(self))),
                                             shape=(batch_size,))
         return self.get(minibatch_indices)
 
