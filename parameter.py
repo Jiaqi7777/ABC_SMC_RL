@@ -51,5 +51,5 @@ skip = 10
 epsilon = 0.1
 
 #Results
-save=True
-show = False
+save=False
+show = True
