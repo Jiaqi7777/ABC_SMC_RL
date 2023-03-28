@@ -46,6 +46,7 @@ MCMC_T = 100
 MCMC_SAMPLE = 10
 BURN_IN = 0.1
 skip = 10
+target_accept_prob = 0.6
 
 #ABC
 epsilon = 0.1
