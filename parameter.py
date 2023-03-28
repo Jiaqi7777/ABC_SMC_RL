@@ -52,5 +52,5 @@ target_accept_prob = 0.6
 epsilon = 0.1
 
 #Results
-save=True
-show = False
+save=False
+show = True

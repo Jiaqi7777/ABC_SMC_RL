@@ -32,15 +32,15 @@ if __name__ == '__main__':
     from QLearning import *
     from tqdm import tqdm
     from mcmcplot import mcmcplot as mcp
-    # from arviz import ess, plot_autocorr, plot_trace
+    from arviz import ess, plot_autocorr, plot_trace
     import datetime
     import argparse
     
     parser = argparse.ArgumentParser()
     parser.add_argument('-T', '--training_step', default=MCMC_T, type=int)
     parser.add_argument('-t', '--time', default=datetime.datetime.now().strftime("%f"))
-    parser.add_argument('-s', '--save', default=False)
-    parser.add_argument('-p', '--show', default=False)
+    parser.add_argument('-s', '--save', default=save)
+    parser.add_argument('-p', '--show', default=show)
     parser.add_argument('-e', '--epsilon', default=epsilon, type=float)
     parser.add_argument('--seed', default=seed, type=int)
     parser.add_argument('--MCMC', default=True, action='store_false', help='Bool type')
@@ -105,9 +105,15 @@ if __name__ == '__main__':
                         # posterior_samples = new_posterior_samples
                         # model.plot_policy(paras=posterior_samples.numpy(), title=f'policy_T{training_steps}_{time}', additional_info = env.R, save=save, show=show)
                         # model.plot_value(paras=posterior_samples.numpy(), title=f'value_T{training_steps}_{time}')
-                        f = mcp.plot_chain_panel(chains=posterior_samples.numpy().reshape(posterior_samples.shape[0], -1)[:, :4], settings=dict(add_pm2std=True,
+                        f = mcp.plot_chain_panel(chains=posterior_samples.numpy().reshape(posterior_samples.shape[0], -1)[:, :4], names=env.names,
+                                                                        settings=dict(add_pm2std=True,
                                                                         mean=dict(color='b'),
                                                                         plot=dict(color='k')))
+                        ax = f.get_axes()
+                        for i, ai in enumerate(ax):
+                            ai.axhline(y = Q_star.flatten()[i], linestyle=':', color = 'g',  label = 'true q')
+                        # reset positions to avoid overlap    
+                        f.tight_layout()
                         if show:
                             plt.show()
                     if done:
