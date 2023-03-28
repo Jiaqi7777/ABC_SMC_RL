@@ -252,24 +252,78 @@ if __name__ == '__main__':
     # env.expert(reset=True)
     # for _ in range(repeat):
     #     env.expert(reset=False)
-    env.uniform_policy()
-    obs = env.uniform_obs._buffers
-    R = [obs['rewards'][0]]
-    samples_l = []
-    paras_history = []
-    for j in range(len(obs['state0'])):
-        samples_l.append(model.r_hat(obs['state0'][j], obs['state1'][j], obs['action'][j]))
-    samples_l = np.array(samples_l)
-    for t in tqdm(range(training_steps)):
-        new_parameter, samples_l = mcmc.update(model.get_parameter(), obs, samples_l)#paras_history for AM
-        model.set_parameter(new_parameter)
-        chain[t] = new_parameter.flatten()
-        if t > training_steps * BURN_IN:
-            if t % skip == 0:
-                paras_history.append(new_parameter)
-    print('accepted ratio:', mcmc.accepted / training_steps)
-    model.plot_policy(paras=np.array(paras_history), title=f'policy_T{training_steps}_{time}', additional_info = env.R, save=save, show=show)
-    print('ESS:', ess(chain.T))
+    if ONLINE_LEARNING:
+        r_all_iter = []
+        for repeat in range(repeat_experiment):
+            model = Tabular(env=env, n_particle=n_particle, prior='normal')
+            r_all_epi = []
+            obs = Buffer(['state0', 'state1', 'action', 'rewards', 'done'])
+            s0, _ = env.reset()
+            posterior_samples = torch.tensor(model.get_parameter())
+            for e in range(episodes):
+                env.reset()
+                print(f'Episode {e} in repeat {repeat}')
+                R = 0
+                R_star = 0
+                h = 0
+                while True:
+                # for h in tqdm(range(horizon)):
+                    action = model.act(s0, posterior_samples)
+                    s1, r, done, *info = env.step(action)
+                    #Optimal action
+                    R_star = V_star[s0] + gamma * R_star#env.R[tuple(env.P[s0 + (int(pi_star[s0]), )])]
+                    R += sum([r * gamma ** i for i in range(h + 1)])
+                    obs.insert({'state0': s0, 'state1': s1, 'action': action, 'rewards': r, 'done': done})
+                    s0 = s1
+                    if ( h + 1)  % FROZEN_T == 0 or done:
+                        #MCMC
+                        batch_indicies = random.sample(range(min(len(obs._buffers['state0']), buffer_size)), k=batch_size)
+                        new_parameter, samples_l = mcmc.update(model.get_parameter(), obs, samples_l)#paras_history for AM
+                        model.set_parameter(new_parameter)
+                        chain[h] = new_parameter.flatten()                        # posterior_samples = new_posterior_samples
+                        # model.plot_policy(paras=posterior_samples.numpy(), title=f'policy_T{training_steps}_{time}', additional_info = env.R, save=save, show=show)
+                        # model.plot_value(paras=posterior_samples.numpy(), title=f'value_T{training_steps}_{time}')
+                        f = mcp.plot_chain_panel(chains=posterior_samples.numpy().reshape(posterior_samples.shape[0], -1)[:, :4], settings=dict(add_pm2std=True,
+                                                                        mean=dict(color='b'),
+                                                                        plot=dict(color='k')))
+                        if show:
+                            plt.show()
+                    if done:
+                        print("done with", h + 1, 'steps')
+                        break
+                    h += 1
+                r_all_epi.append(R_star - R)
+                if e % FROZEN_T == 0 :
+                    with open(f'Models/MCMC/chains_T{training_steps}_{time}.npy', 'wb') as f:
+                        np.save(f, r_all_iter)
+                        print('model saved at', f'Models/MCMC/chains_T{training_steps}_{time}.npy')
+            r_all_iter.append(r_all_epi)
+        with open(f'Models/MCMC/chains_T{training_steps}_{time}.npy', 'wb') as f:
+            np.save(f, r_all_iter)
+            print('model saved at', f'Models/MCMC/chains_T{training_steps}_{time}.npy')
+            
+        plt.plot(R)
+        if show:
+            plt.show()
+    else:
+        env.uniform_policy()
+        obs = env.uniform_obs._buffers
+        R = [obs['rewards'][0]]
+        samples_l = []
+        paras_history = []
+        for j in range(len(obs['state0'])):
+            samples_l.append(model.r_hat(obs['state0'][j], obs['state1'][j], obs['action'][j]))
+        samples_l = np.array(samples_l)
+        for t in tqdm(range(training_steps)):
+            new_parameter, samples_l = mcmc.update(model.get_parameter(), obs, samples_l)#paras_history for AM
+            model.set_parameter(new_parameter)
+            chain[t] = new_parameter.flatten()
+            if t > training_steps * BURN_IN:
+                if t % skip == 0:
+                    paras_history.append(new_parameter)
+        print('accepted ratio:', mcmc.accepted / training_steps)
+        model.plot_policy(paras=np.array(paras_history), title=f'policy_T{training_steps}_{time}', additional_info = env.R, save=save, show=show)
+        print('ESS:', ess(chain.T))
 
     if save:
         with open(f'Models/MCMC/chains_T{training_steps}_{time}.npy', 'wb') as f:

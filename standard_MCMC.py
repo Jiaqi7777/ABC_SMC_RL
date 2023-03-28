@@ -18,7 +18,8 @@ def likelihood(data):
 
 def mcmc(data, prior_parameter, num_samples=MCMC_SAMPLE, warmup_steps=MCMC_T//10, num_chains=2):
     pyro.clear_param_store()
-    kernel = pyro.infer.mcmc.NUTS(likelihood, adapt_step_size=True, adapt_mass_matrix=True)
+    # kernel = pyro.infer.mcmc.HMC(likelihood, step_size=stepsize, adapt_step_size=False, adapt_mass_matrix=True, target_accept_prob=target_accept_prob)
+    kernel = pyro.infer.mcmc.NUTS(likelihood, step_size=stepsize, adapt_step_size=False, adapt_mass_matrix=True, target_accept_prob=target_accept_prob)
     mcmc_run = pyro.infer.mcmc.MCMC(kernel, num_samples=num_samples, warmup_steps=warmup_steps, initial_params={'prior_parameter': prior_parameter}, disable_progbar=MCMC_SHOW_DISABLE)
     mcmc_run.run(data)
 
@@ -97,7 +98,7 @@ if __name__ == '__main__':
                     s0 = s1
                     if ( h + 1)  % FROZEN_T == 0 or done:
                         #MCMC
-                        batch_indicies = random.choices(range(min(len(obs._buffers['state0']), buffer_size)), k=batch_size)
+                        batch_indicies = random.sample(range(min(len(obs._buffers['state0']), buffer_size)), k=batch_size)
                         r_hat = partial(generate_samples, model=model, obs=obs._buffers,  batch_indicies=batch_indicies)
                         mcmc_run = mcmc(torch.tensor(obs._buffers['rewards'])[batch_indicies], torch.tensor(posterior_samples[-1].reshape(-1)), num_samples=training_steps,  warmup_steps=training_steps//10)
                         posterior_samples = mcmc_run.get_samples()["prior_parameter"].reshape((-1, ) + env.n_cell + (env.action_space.n, ))
