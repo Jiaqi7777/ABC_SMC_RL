@@ -106,13 +106,15 @@ if __name__ == '__main__':
                         # model.plot_value(paras=posterior_samples.numpy(), title=f'value_T{training_steps}_{time}')
                         f = mcp.plot_chain_panel(chains=posterior_samples.numpy().reshape(posterior_samples.shape[0], -1)[:, :4], names=env.names,
                                                                         settings=dict(add_pm2std=True,
-                                                                        mean=dict(color='b'),
-                                                                        plot=dict(color='k')))
+                                                                        mean=dict(color='y', label='mean'),
+                                                                        plot=dict(color='k', label='trace')))
                         ax = f.get_axes()
                         for i, ai in enumerate(ax):
-                            ai.axhline(y = Q_star.flatten()[i], linestyle=':', linewidth=2, color = 'g',  label = 'true q')
+                            ai.axhline(y = Q_star.flatten()[i], linestyle=':', linewidth=5, color = 'g',  label = 'true q')
                         # reset positions to avoid overlap    
                         f.tight_layout()
+                        handles, labels = ai.get_legend_handles_labels()
+                        ai.legend(handles, labels, bbox_to_anchor=(2, 1), loc='right')
                         if show:
                             plt.show()
                     if done:
