@@ -16,7 +16,7 @@ def likelihood(data):
         pyro.sample("obs", dist.MultivariateNormal(mean, abc_epsilon ** 2 * torch.eye(len(data))), obs=data)
 
 
-def mcmc(data, prior_parameter, num_samples=MCMC_SAMPLE, warmup_steps=MCMC_T//10):
+def mcmc(data, prior_parameter, num_samples=MCMC_SAMPLE, warmup_steps=MCMC_T//10, num_chains=2):
     pyro.clear_param_store()
     kernel = pyro.infer.mcmc.NUTS(likelihood, adapt_step_size=True, adapt_mass_matrix=True)
     mcmc_run = pyro.infer.mcmc.MCMC(kernel, num_samples=num_samples, warmup_steps=warmup_steps, initial_params={'prior_parameter': prior_parameter}, disable_progbar=MCMC_SHOW_DISABLE)
@@ -110,7 +110,7 @@ if __name__ == '__main__':
                                                                         plot=dict(color='k')))
                         ax = f.get_axes()
                         for i, ai in enumerate(ax):
-                            ai.axhline(y = Q_star.flatten()[i], linestyle=':', color = 'g',  label = 'true q')
+                            ai.axhline(y = Q_star.flatten()[i], linestyle=':', linewidth=2, color = 'g',  label = 'true q')
                         # reset positions to avoid overlap    
                         f.tight_layout()
                         if show:
@@ -146,6 +146,11 @@ if __name__ == '__main__':
         f = mcp.plot_chain_panel(chains=posterior_samples.numpy()[0 * training_steps // 10:, :4],settings=dict(add_pm2std=True,
                                                             mean=dict(color='b'),
                                                             plot=dict(color='k')))
+        ax = f.get_axes()
+        for i, ai in enumerate(ax):
+            ai.axhline(y = Q_star.flatten()[i], linestyle=':', color = 'g', linewidth=2, label = 'true q')
+        # reset positions to avoid overlap    
+        f.tight_layout()
         if show:
             plt.show()
         
