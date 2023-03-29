@@ -86,7 +86,7 @@ class Tabular:
         self.n_particle = n_particle
         self._weights = np.ones(n_particle) / n_particle
         if prior == 'normal':
-            self.tables = np.random.normal(size=((n_particle,) + self.bins + (self.action_size,)))
+            self.tables = torch.normal(mean=0, std=1, size=((n_particle,) + self.bins + (self.action_size,)))
             if verbose:
                 print("Q table size:", self.tables[-1].shape)        
         else:
@@ -137,6 +137,7 @@ class Tabular:
         return torch.max(table[s])
 
     def r_hat(self, s0, s1, a):
+        a = int(a)
         '''
         samples = Buffer(['a_hat', 'r_hat'])
         for p in table:
@@ -144,7 +145,8 @@ class Tabular:
             samples.insert({'a_hat':a_hat, 'r_hat': r_hat})
         return samples
         '''
-        return self.q_value(self.tables, s0, a) - self.gamma * self.v_value(self.tables, s1) 
+        # print(self.v_value(self.tables, s1))
+        return self.q_value(self.tables, s0, a) - self.gamma * self.v_value(self.tables, s1).values 
         
     def lld(self, obs, sample):
         reward = obs['rewards'][-1]

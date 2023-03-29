@@ -19,7 +19,7 @@ def likelihood(data):
 def mcmc(data, prior_parameter, num_samples=MCMC_SAMPLE, warmup_steps=MCMC_T//10, num_chains=2):
     pyro.clear_param_store()
     # kernel = pyro.infer.mcmc.HMC(likelihood, step_size=stepsize, adapt_step_size=False, adapt_mass_matrix=True, target_accept_prob=target_accept_prob)
-    kernel = pyro.infer.mcmc.NUTS(likelihood, step_size=stepsize, adapt_step_size=False, adapt_mass_matrix=True, target_accept_prob=target_accept_prob)
+    kernel = pyro.infer.mcmc.HMC(likelihood, step_size=stepsize, adapt_step_size=adapt_step_size, adapt_mass_matrix=True, target_accept_prob=target_accept_prob)
     mcmc_run = pyro.infer.mcmc.MCMC(kernel, num_samples=num_samples, warmup_steps=warmup_steps, initial_params={'prior_parameter': prior_parameter}, disable_progbar=MCMC_SHOW_DISABLE)
     mcmc_run.run(data)
 

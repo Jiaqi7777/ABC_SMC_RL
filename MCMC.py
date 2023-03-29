@@ -90,7 +90,7 @@ class RandomWalk(Kernel):
 
     def accept(self, current_para, obs, samples, batch_indicies):
         proposed_para, move_ratio = self.move(current_para)
-        proposed_samples = generate_samples(self.model, obs, proposed_para, batch_indicies)
+        proposed_samples = generate_samples(proposed_para, self.model, obs, batch_indicies)
         #print(proposed_samples-samples)
         current_log_posterior = self.posterior(current_para, obs, samples)
         proposed_log_posterior = self.posterior(proposed_para, obs, proposed_samples)
@@ -109,7 +109,7 @@ class pCN(Kernel):
     
     def accept(self, current_para, obs, samples, batch_indicies):
         proposed_para = self.move(current_para)
-        proposed_samples = generate_samples(self.model, obs, proposed_para, batch_indicies)
+        proposed_samples = generate_samples(proposed_para, self.model, obs, batch_indicies)
         current_log_posterior = self.likelihood.get_log_likelihood(obs, samples)
         proposed_log_posterior = self.likelihood.get_log_likelihood(obs, proposed_samples)
         return proposed_log_posterior - current_log_posterior, proposed_para, proposed_samples
@@ -149,7 +149,7 @@ class MALA(Kernel):
     
     def accept(self, current_para, obs, samples, batch_indicies):
         proposed_para, move_ratio = self.move(current_para, obs, samples)
-        proposed_samples = generate_samples(self.model, obs, proposed_para, batch_indicies)
+        proposed_samples = generate_samples(proposed_para, self.model, obs, batch_indicies)
         current_log_posterior = self.posterior(current_para, obs, samples)
         proposed_log_posterior = self.posterior(proposed_para, obs, proposed_samples)
         # print(proposed_log_posterior, current_log_posterior,  - move_ratio)
@@ -184,7 +184,7 @@ class AM(Kernel):
         
     def accept(self, current_para, obs, samples, batch_indicies, para_history):
         proposed_para, move_ratio = self.move(current_para, para_history)
-        proposed_samples = generate_samples(self.model, obs, proposed_para, batch_indicies)
+        proposed_samples = generate_samples(proposed_para, self.model, obs, batch_indicies)
         current_log_posterior = self.posterior(current_para, obs, samples)
         proposed_log_posterior = self.posterior(proposed_para, obs, proposed_samples)
         return proposed_log_posterior - current_log_posterior - move_ratio, proposed_para, proposed_samples
@@ -211,9 +211,13 @@ class MCMC:
             if accept:
                 new_paras[i] = proposed_para
                 self.accepted += 1
-                samples[:, i] = proposed_samples
+                print(proposed_samples.shape, i)
+                print(samples.shape)
+                samples[batch_indicies, i] = proposed_samples
         # print('accept with ratio ', np.exp(acceptance_ratio))
-        return new_paras, samples
+        
+        # print([s for s in torch.chunk(samples, samples.size(0))])
+        return new_paras, [s for s in torch.chunk(samples, samples.size(0))]
         
 
 if __name__ == '__main__':
@@ -277,7 +281,7 @@ if __name__ == '__main__':
     if ONLINE_LEARNING:
         r_all_iter = []
         for repeat in range(repeat_experiment):
-            samples_l=[]
+            samples_l = []
             model = Tabular(env=env, n_particle=n_particle, prior='normal')
             r_all_epi = []
             obs = Buffer(['state0', 'state1', 'action', 'rewards', 'done'])
@@ -295,6 +299,7 @@ if __name__ == '__main__':
                     s1, r, done, *info = env.step(action)
                     samples = model.r_hat(s0, s1, action)
                     samples_l.append(samples)
+                    # print(samples_l)
                     #Optimal action
                     R_star = V_star[s0] + gamma * R_star#env.R[tuple(env.P[s0 + (int(pi_star[s0]), )])]
                     R += sum([r * gamma ** i for i in range(h + 1)])
@@ -303,7 +308,9 @@ if __name__ == '__main__':
                     if ( h + 1)  % FROZEN_T == 0 or done:
                         #MCMC
                         batch_indicies = random.sample(range(min(len(obs._buffers['state0']), buffer_size)), k=min(batch_size, len(obs._buffers['state0'])))
-                        new_parameter, samples_l = mcmc.update(model.get_parameter(), obs, samples_l, batch_indicies)#paras_history for AM
+    
+                        torch_sample = torch.vstack(samples_l)
+                        new_parameter, samples_l = mcmc.update(model.get_parameter(), obs._buffers, torch_sample, batch_indicies)#paras_history for AM
                         model.set_parameter(new_parameter)
                         chain[h] = new_parameter.flatten()                        # posterior_samples = new_posterior_samples
                         # model.plot_policy(paras=posterior_samples.numpy(), title=f'policy_T{training_steps}_{time}', additional_info = env.R, save=save, show=show)
