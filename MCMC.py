@@ -88,9 +88,9 @@ class RandomWalk(Kernel):
         move_ratio = 1
         return current_para + np.random.normal(size=(current_para.shape), scale=self.stepsize), move_ratio
 
-    def accept(self, current_para, obs, samples):
+    def accept(self, current_para, obs, samples, batch_indicies):
         proposed_para, move_ratio = self.move(current_para)
-        proposed_samples = generate_samples(self.model, obs, proposed_para)
+        proposed_samples = generate_samples(self.model, obs, proposed_para, batch_indicies)
         #print(proposed_samples-samples)
         current_log_posterior = self.posterior(current_para, obs, samples)
         proposed_log_posterior = self.posterior(proposed_para, obs, proposed_samples)
@@ -107,9 +107,9 @@ class pCN(Kernel):
     def move(self, current_para):
         return np.sqrt(1 - self.stepsize ** 2) * current_para + self.stepsize * np.random.normal(size=(current_para.shape), scale=self.sigma)
     
-    def accept(self, current_para, obs, samples):
+    def accept(self, current_para, obs, samples, batch_indicies):
         proposed_para = self.move(current_para)
-        proposed_samples = generate_samples(self.model, obs, proposed_para)
+        proposed_samples = generate_samples(self.model, obs, proposed_para, batch_indicies)
         current_log_posterior = self.likelihood.get_log_likelihood(obs, samples)
         proposed_log_posterior = self.likelihood.get_log_likelihood(obs, proposed_samples)
         return proposed_log_posterior - current_log_posterior, proposed_para, proposed_samples
@@ -147,9 +147,9 @@ class MALA(Kernel):
         # print(stats.norm.logpdf(proposed_para, loc=current_para + self.stepsize * current_gradient, scale=2*self.stepsize).sum(), stats.norm.logpdf(current_para, loc=proposed_para + self.stepsize * proposed_gradient, scale=2*self.stepsize).sum())
         return proposed_para, move_ratio
     
-    def accept(self, current_para, obs, samples):
+    def accept(self, current_para, obs, samples, batch_indicies):
         proposed_para, move_ratio = self.move(current_para, obs, samples)
-        proposed_samples = generate_samples(self.model, obs, proposed_para)
+        proposed_samples = generate_samples(self.model, obs, proposed_para, batch_indicies)
         current_log_posterior = self.posterior(current_para, obs, samples)
         proposed_log_posterior = self.posterior(proposed_para, obs, proposed_samples)
         # print(proposed_log_posterior, current_log_posterior,  - move_ratio)
@@ -182,9 +182,9 @@ class AM(Kernel):
             return self.stepsize ** 2 * np.eye(len(para_history[0]))
         return self.sd * np.cov(para_history, rowvar=False) + self.sd * self.am_epsilon * np.eye(len(para_history[0]))
         
-    def accept(self, current_para, obs, samples, para_history):
+    def accept(self, current_para, obs, samples, batch_indicies, para_history):
         proposed_para, move_ratio = self.move(current_para, para_history)
-        proposed_samples = generate_samples(self.model, obs, proposed_para)
+        proposed_samples = generate_samples(self.model, obs, proposed_para, batch_indicies)
         current_log_posterior = self.posterior(current_para, obs, samples)
         proposed_log_posterior = self.posterior(proposed_para, obs, proposed_samples)
         return proposed_log_posterior - current_log_posterior - move_ratio, proposed_para, proposed_samples
@@ -199,10 +199,10 @@ class MCMC:
     def reset(self):
         self.accepted = 0
 
-    def update(self, paras, obs, samples, para_history=[]):
+    def update(self, paras, obs, samples, batch_indicies=None, para_history=[]):
         new_paras = deepcopy(paras)
         for i, current_para in enumerate(paras):
-            acceptance_ratio, proposed_para, proposed_samples = self.kernel.accept(current_para, obs, samples[:, i])#para_history for AM
+            acceptance_ratio, proposed_para, proposed_samples = self.kernel.accept(current_para, obs, samples[:, i], batch_indicies)#para_history for AM
             if acceptance_ratio > 1:
                 accept = True
             else:
@@ -230,17 +230,29 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-T', '--training_step', default=MCMC_T, type=int)
     parser.add_argument('-t', '--time', default=datetime.datetime.now().strftime("%f"))
-    parser.add_argument('-s', '--save', default=False)
-    parser.add_argument('-p', '--show', default=False)
+    parser.add_argument('-s', '--save', default=save)
+    parser.add_argument('-p', '--show', default=show)
+    parser.add_argument('-e', '--epsilon', default=epsilon, type=float)
+    parser.add_argument('--seed', default=seed, type=int)
+    parser.add_argument('--MCMC', default=True, action='store_false', help='Bool type')
     args = parser.parse_args()
     time = args.time
+    print('time:', time)
     training_steps = args.training_step
     save = args.save
     show = args.show
-    repeat = 100
+    abc_epsilon = args.epsilon
+    seed = args.seed
+    MCMC_SHOW_DISABLE=args.MCMC
+
+    n_particle = 1
+    random.seed(seed)
+
+    np.random.seed(seed)
+    
     n_particle = 1
     r = []
-    random.seed(10)
+
     env = GridWorld((3,4), obstacles=True)
     model = Tabular(env=env, n_particle=n_particle, prior='normal')
     kernel = pCN(model=model, stepsize=stepsize)
@@ -252,9 +264,20 @@ if __name__ == '__main__':
     # env.expert(reset=True)
     # for _ in range(repeat):
     #     env.expert(reset=False)
+    
+    #True Q
+    S = []
+    for i in range(env.n_cell[0]):
+        for j in range(env.n_cell[1]):
+            S.append((i,j)) 
+    Q = np.ones(shape=(env.n_cell + (env.action_space.n, )))/env.observation_space.n / env.action_space.n
+    A = range(env.action_space.n)
+    pi_star, Q_star, V_star = DynamicProgramming(Q, A, S, env)
+    
     if ONLINE_LEARNING:
         r_all_iter = []
         for repeat in range(repeat_experiment):
+            samples_l=[]
             model = Tabular(env=env, n_particle=n_particle, prior='normal')
             r_all_epi = []
             obs = Buffer(['state0', 'state1', 'action', 'rewards', 'done'])
@@ -270,6 +293,8 @@ if __name__ == '__main__':
                 # for h in tqdm(range(horizon)):
                     action = model.act(s0, posterior_samples)
                     s1, r, done, *info = env.step(action)
+                    samples = model.r_hat(s0, s1, action)
+                    samples_l.append(samples)
                     #Optimal action
                     R_star = V_star[s0] + gamma * R_star#env.R[tuple(env.P[s0 + (int(pi_star[s0]), )])]
                     R += sum([r * gamma ** i for i in range(h + 1)])
@@ -277,15 +302,23 @@ if __name__ == '__main__':
                     s0 = s1
                     if ( h + 1)  % FROZEN_T == 0 or done:
                         #MCMC
-                        batch_indicies = random.sample(range(min(len(obs._buffers['state0']), buffer_size)), k=batch_size)
-                        new_parameter, samples_l = mcmc.update(model.get_parameter(), obs, samples_l)#paras_history for AM
+                        batch_indicies = random.sample(range(min(len(obs._buffers['state0']), buffer_size)), k=min(batch_size, len(obs._buffers['state0'])))
+                        new_parameter, samples_l = mcmc.update(model.get_parameter(), obs, samples_l, batch_indicies)#paras_history for AM
                         model.set_parameter(new_parameter)
                         chain[h] = new_parameter.flatten()                        # posterior_samples = new_posterior_samples
                         # model.plot_policy(paras=posterior_samples.numpy(), title=f'policy_T{training_steps}_{time}', additional_info = env.R, save=save, show=show)
                         # model.plot_value(paras=posterior_samples.numpy(), title=f'value_T{training_steps}_{time}')
-                        f = mcp.plot_chain_panel(chains=posterior_samples.numpy().reshape(posterior_samples.shape[0], -1)[:, :4], settings=dict(add_pm2std=True,
-                                                                        mean=dict(color='b'),
-                                                                        plot=dict(color='k')))
+                        f = mcp.plot_chain_panel(chains=chain[training_steps // 10:, :8], names=env.names,
+                                                                        settings=dict(add_pm2std=True, fig=dict(figsize=(10,10), dpi=250),
+                                                                        mean=dict(color='y', label='mean'),
+                                                                        plot=dict(color='k', label='trace')))
+                        ax = f.get_axes()
+                        for i, ai in enumerate(ax):
+                            ai.axhline(y = Q_star.flatten()[i], linestyle=':', linewidth=5, color = 'g',  label = 'true q')
+                        # reset positions to avoid overlap    
+                        f.tight_layout()
+                        handles, labels = ai.get_legend_handles_labels()
+                        ai.legend(handles, labels, bbox_to_anchor=(2, 0.2), loc='right')
                         if show:
                             plt.show()
                     if done:

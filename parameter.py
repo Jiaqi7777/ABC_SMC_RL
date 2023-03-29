@@ -29,7 +29,7 @@ ONLINE_LEARNING = True
 seed = 555
 FROZEN_T = 15
 batch_training = True
-batch_size = 32
+batch_size = 64
 buffer_size = 100
 
 #SMC parameters
