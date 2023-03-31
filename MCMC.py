@@ -1,5 +1,6 @@
 import numpy as np
 import scipy.stats as stats
+import torch
 from copy import deepcopy
 from parameter import *
    
@@ -9,10 +10,12 @@ def generate_samples(para, model, obs, batch_indicies=None):
     if not batch_training:
         batch_indicies = range(min(len(obs['state0']), buffer_size))
     
-    s0 = np.array(obs['state0'][-buffer_size:])[batch_indicies]
-    s1 = np.array(obs['state1'][-buffer_size:])[batch_indicies]
-    a = np.array(obs['action'][-buffer_size:])[batch_indicies]
-    return model.q_value(para, s0.T, a) - model.gamma * model.v_value(para, s1.T).values #time 
+    s0 = np.array(obs['state0'])[-buffer_size:][batch_indicies]
+    s1 = np.array(obs['state1'])[-buffer_size:][batch_indicies]
+    a = np.array(obs['action'])[-buffer_size:][batch_indicies]
+    dones = torch.tensor(np.array(obs['done'])[-buffer_size:][batch_indicies].astype(int))
+
+    return model.q_value(para, s0.T, a) - torch.where(dones == 1, torch.zeros(len(s0)), model.gamma * model.v_value(para, s1.T).values) #time 
 
     samples = []
     for s0, a, s1 in zip(obs['state0'], obs['action'], obs['state1']):

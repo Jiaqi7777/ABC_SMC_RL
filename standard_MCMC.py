@@ -55,7 +55,7 @@ if __name__ == '__main__':
     MCMC_SHOW_DISABLE=args.MCMC
     warmup_steps = int(training_steps * warmup_ratio)
 
-    n_particle = 1
+    n_particle = 10
     random.seed(seed)
     pyro.set_rng_seed(seed)
     np.random.seed(seed)
@@ -97,8 +97,12 @@ if __name__ == '__main__':
                     R += sum([r * gamma ** i for i in range(h + 1)])
                     obs.insert({'state0': s0, 'state1': s1, 'action': action, 'rewards': r, 'done': done})
                     s0 = s1
+                    # if e==0 and h==0:
+                    #     print(posterior_samples[:, 0, 0], h, posterior_samples.shape)
+                    #     print(np.argmax(posterior_samples[:, 0, 0], axis=-1))
+                    
                     if ( h + 1)  % FROZEN_T == 0 or done:
-                        print(obs._buffers, batch_training)
+                        # print(obs._buffers, batch_training)
                         #MCMC
                         batch_indicies = random.sample(range(min(len(obs._buffers['state0']), buffer_size)), k=min(batch_size, len(obs._buffers['state0'])))
                         r_hat = partial(generate_samples, model=model, obs=obs._buffers,  batch_indicies=batch_indicies)
@@ -108,16 +112,18 @@ if __name__ == '__main__':
                             mcmc_run = mcmc(torch.tensor(obs._buffers['rewards']), torch.tensor(posterior_samples[-1].reshape(-1)), num_samples=training_steps,  warmup_steps=warmup_steps)
                         posterior_samples = mcmc_run.get_samples()["prior_parameter"].reshape((-1, ) + env.n_cell + (env.action_space.n, ))
                         # posterior_samples = new_posterior_samples
-                        # model.plot_policy(paras=posterior_samples.numpy(), title=f'policy_T{training_steps}_{time}', additional_info = env.R, save=save, show=show)
-                        # model.plot_value(paras=posterior_samples.numpy(), title=f'value_T{training_steps}_{time}')
-                        f = mcp.plot_chain_panel(chains=posterior_samples.numpy().reshape(posterior_samples.shape[0], -1)[:, :8], names=env.names,
+                        model.plot_policy(paras=posterior_samples.numpy(), title=f'policy_T{training_steps}_{time}', additional_info = env.R, save=save, show=show)
+                        model.plot_value(paras=posterior_samples.numpy(), title=f'value_T{training_steps}_{time}')
+                        data_plot = posterior_samples.numpy().reshape(posterior_samples.shape[0], -1)[:, :8]
+                        f = mcp.plot_chain_panel(chains=data_plot, names=env.names,
                                                                         settings=dict(add_pm2std=True, fig=dict(figsize=(10,10), dpi=250),
                                                                         mean=dict(color='y', label='mean'),
                                                                         plot=dict(color='k', label='trace')))
                         ax = f.get_axes()
                         for i, ai in enumerate(ax):
                             ai.axhline(y = Q_star.flatten()[i], linestyle=':', linewidth=5, color = 'g',  label = 'true q')
-                        # reset positions to avoid overlap    
+                            q = np.percentile(data_plot[:, i], [plot_threshold, 100 - plot_threshold])
+                            ai.set_ylim(q)   
                         f.tight_layout()
                         handles, labels = ai.get_legend_handles_labels()
                         ai.legend(handles, labels, bbox_to_anchor=(2, 0.2), loc='right')

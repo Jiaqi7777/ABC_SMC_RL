@@ -102,3 +102,8 @@ def plot_return_vs_episodes_repeat(r_all_episodes_repeat, figure_path='Figures/'
     if show:
         plt.show()
     plt.clf()
+    
+def get_outliers(data, threshold=5):
+    q = np.percentile(data, [threshold, 100-threshold])
+    outliers = np.any((data < q[0]) | (data > q[1]), axis=1)
+    return outliers

@@ -41,21 +41,23 @@ min_ess = 0.5
 #MCMC
 prior_sigma = 10
 update_frequency = 5
-stepsize = 0.02
+stepsize = 0.01
 MCMC_T = 100
 MCMC_SAMPLE = 10
 BURN_IN = 0.1
 skip = 10
 target_accept_prob = 0.6
 adapt_step_size = False
-adapt_mass_matrix = True
-num_steps = 100
+adapt_mass_matrix = False
+num_steps = 2000
 warmup_ratio = 0
 full_mass = False
+#Plot
+plot_threshold = 2#percentile
 
 #ABC
-epsilon = 0.1
+epsilon = 0.05
 
 #Results
-save=False
+save = False
 show = True

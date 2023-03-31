@@ -40,6 +40,7 @@ class GridWorld:
                 next_col = max(0, min(col + d[1], n_cell[1]-1))
                 s_prime = [next_row, next_col] #gridworld[next_row, next_col]
                 self.P[row, col, a] = s_prime
+                self.P[goal_position + (a, )] = goal_position
                 
         self.R = np.full((n_cell[0], n_cell[1]), -1)
         if obstacles:
@@ -50,7 +51,7 @@ class GridWorld:
             # self.R[n_cell[0]//2, n_cell[1]//2] = -2
         self.R[starting_position] = -1
         self.R[goal_position] = 0
-        self.names = [f'{i,j,a}' for a in range(4) for j in range(n_cell[1]) for i in range(n_cell[0])]
+        self.names = [f'{i,j,a}' for i in range(n_cell[1]) for j in range(n_cell[0]) for a in range(4)]
 
     def reset(self):
         self.state = self.starting_position
@@ -61,10 +62,11 @@ class GridWorld:
     def step(self, action, state=None):
         done = False
         if state == None:
+            state = self.state
             self.state = new_state = tuple(self.P[self.state + (action, )])
         else:
             new_state = tuple(self.P[state + (action, )])
-        if new_state == self.goal_position:
+        if state == self.goal_position:
             done = True
             if state == None:
                 self.done = done
