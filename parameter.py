@@ -41,7 +41,7 @@ min_ess = 0.5
 #MCMC
 prior_sigma = 10
 update_frequency = 5
-stepsize = 0.01
+stepsize = 0.005
 MCMC_T = 100
 MCMC_SAMPLE = 10
 BURN_IN = 0.1
