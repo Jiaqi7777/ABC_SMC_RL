@@ -113,7 +113,8 @@ if __name__ == '__main__':
                         posterior_samples = mcmc_run.get_samples()["prior_parameter"].reshape((-1, ) + env.n_cell + (env.action_space.n, ))
                         # posterior_samples = new_posterior_samples
                         model.plot_policy(paras=posterior_samples.numpy(), title=f'policy_T{training_steps}_{time}', additional_info = env.R, save=save, show=show)
-                        model.plot_value(paras=posterior_samples.numpy(), title=f'value_T{training_steps}_{time}')
+                        # model.plot_value(paras=posterior_samples.numpy(), title=f'value_T{training_steps}_{time}')
+                        print('Mean Q values', torch.round(torch.max(posterior_samples, 0).values, decimals=2))
                         data_plot = posterior_samples.numpy().reshape(posterior_samples.shape[0], -1)[:, :8]
                         f = mcp.plot_chain_panel(chains=data_plot, names=env.names,
                                                                         settings=dict(add_pm2std=True, fig=dict(figsize=(10,10), dpi=250),
@@ -139,9 +140,9 @@ if __name__ == '__main__':
                         np.save(f, r_all_iter)
                         print('model saved at', f'Models/MCMC/chains_T{training_steps}_{time}.npy')
             r_all_iter.append(r_all_epi)
-        with open(f'Models/MCMC/chains_T{training_steps}_{time}.npy', 'wb') as f:
+        with open(f'Returns/MCMC/T{training_steps}_{time}.npy', 'wb') as f:
             np.save(f, r_all_iter)
-            print('model saved at', f'Models/MCMC/chains_T{training_steps}_{time}.npy')
+            print('return saved at', f'Returns/MCMC/T{training_steps}_{time}.npy')
             
         plt.plot(R)
         if show:
