@@ -105,10 +105,13 @@ class Tabular:
             # thompson_weights = thompson_matrix @ weights
             # return np.argmax(thompson_weights)
             # return random.choices(range(self.action_size), thompson_weights)[0]
-            table = random.choice(tables)
-            return np.argmax(table[state])
+            if GREEDY:
+                table = torch.mean(tables, 0)
+            else:
+                table = random.choice(tables)
+            return torch.argmax(table[state])
         '''Greedy Action'''
-        return np.argmax(table[state])
+        return torch.argmax(table[state])
 
     def discrete_state(self, sample_state):
         """Discretize a sample as per given grid."""

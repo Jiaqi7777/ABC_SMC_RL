@@ -31,6 +31,8 @@ FROZEN_T = 15
 batch_training = False
 batch_size = 64
 buffer_size = 100 if batch_training else 100000000000
+#policy
+GREEDY = False
 
 #SMC parameters
 prior = 'normal'

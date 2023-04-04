@@ -93,8 +93,8 @@ if __name__ == '__main__':
                     action = model.act(s0, posterior_samples)
                     s1, r, done, *info = env.step(action)
                     #Optimal action
-                    R_star = V_star[s0] + gamma * R_star#env.R[tuple(env.P[s0 + (int(pi_star[s0]), )])]
-                    R += sum([r * gamma ** i for i in range(h + 1)])
+                    # R_star = V_star[s0] + gamma * R_star#env.R[tuple(env.P[s0 + (int(pi_star[s0]), )])] #for regret
+                    R += r#sum([r * gamma ** i for i in range(h + 1)])
                     obs.insert({'state0': s0, 'state1': s1, 'action': action, 'rewards': r, 'done': done})
                     s0 = s1
                     # if e==0 and h==0:
@@ -133,7 +133,7 @@ if __name__ == '__main__':
                         print("done with", h + 1, 'steps')
                         break
                     h += 1
-                r_all_epi.append(R_star - R)
+                r_all_epi.append(R)
                 if e % FROZEN_T == 0 :
                     with open(f'Models/MCMC/chains_T{training_steps}_{time}.npy', 'wb') as f:
                         np.save(f, r_all_iter)
