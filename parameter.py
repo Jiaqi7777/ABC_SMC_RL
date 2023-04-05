@@ -31,8 +31,7 @@ FROZEN_T = 15
 batch_training = False
 batch_size = 64
 buffer_size = 100 if batch_training else 100000000000
-#policy
-GREEDY = False
+
 
 #SMC parameters
 prior = 'normal'
@@ -44,6 +43,7 @@ min_ess = 0.5
 prior_sigma = 10
 update_frequency = 5
 stepsize = 0.01
+decreasing_factor = 0.9
 MCMC_T = 100
 MCMC_SAMPLE = 10
 BURN_IN = 0.1

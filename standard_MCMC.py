@@ -44,7 +44,9 @@ if __name__ == '__main__':
     parser.add_argument('-e', '--epsilon', default=epsilon, type=float)
     parser.add_argument('--seed', default=seed, type=int)
     parser.add_argument('--MCMC', default=True, action='store_false', help='Bool type')
+    parser.add_argument('-g', '--Greedy', default=False, action='store_true', help='Bool type')
     args = parser.parse_args()
+    print(args)
     time = args.time
     print('time:', time)
     training_steps = args.training_step
@@ -54,6 +56,7 @@ if __name__ == '__main__':
     seed = args.seed
     MCMC_SHOW_DISABLE=args.MCMC
     warmup_steps = int(training_steps * warmup_ratio)
+    GREEDY = args.Greedy
 
     n_particle = 10
     random.seed(seed)
@@ -90,7 +93,7 @@ if __name__ == '__main__':
                 h = 0
                 while True:
                 # for h in tqdm(range(horizon)):
-                    action = model.act(s0, posterior_samples)
+                    action = model.act(s0, posterior_samples, GREEDY)
                     s1, r, done, *info = env.step(action)
                     #Optimal action
                     # R_star = V_star[s0] + gamma * R_star#env.R[tuple(env.P[s0 + (int(pi_star[s0]), )])] #for regret
@@ -111,7 +114,7 @@ if __name__ == '__main__':
                         else:
                             mcmc_run = mcmc(torch.tensor(obs._buffers['rewards']), torch.tensor(posterior_samples[-1].reshape(-1)), num_samples=training_steps,  warmup_steps=warmup_steps)
                         posterior_samples = mcmc_run.get_samples()["prior_parameter"].reshape((-1, ) + env.n_cell + (env.action_space.n, ))
-                        stepsize *= 0.9
+                        stepsize *= decreasing_factor
                         # posterior_samples = new_posterior_samples
                         model.plot_policy(paras=posterior_samples.numpy(), title=f'policy_T{training_steps}_{time}', additional_info = env.R, save=save, show=show)
                         # model.plot_value(paras=posterior_samples.numpy(), title=f'value_T{training_steps}_{time}')
@@ -137,13 +140,13 @@ if __name__ == '__main__':
                     h += 1
                 r_all_epi.append(R)
                 if e % FROZEN_T == 0 :
-                    with open(f'Models/MCMC/chains_T{training_steps}_{time}.npy', 'wb') as f:
+                    with open(f'Returns/MCMC/T{training_steps}_Gdy{GREEDY}_Ep{epsilon}_Stp{stepsize}_Dcrs{decreasing_factor}_{time}.npy', 'wb') as f:
                         np.save(f, r_all_iter)
-                        print('model saved at', f'Models/MCMC/chains_T{training_steps}_{time}.npy')
+                        print('model saved at', f'Returns/MCMC/T{training_steps}_Gdy{GREEDY}_Ep{epsilon}_Stp{stepsize}_Dcrs{decreasing_factor}_{time}.npy')
             r_all_iter.append(r_all_epi)
-        with open(f'Returns/MCMC/T{training_steps}_{time}.npy', 'wb') as f:
+        with open(f'Returns/MCMC/T{training_steps}_Gdy{GREEDY}_Ep{epsilon}_Stp{stepsize}_Dcrs{decreasing_factor}_{time}.npy', 'wb') as f:
             np.save(f, r_all_iter)
-            print('return saved at', f'Returns/MCMC/T{training_steps}_{time}.npy')
+            print('return saved at', f'Returns/MCMC/T{training_steps}_Gdy{GREEDY}_Ep{epsilon}_Stp{stepsize}_Dcrs{decreasing_factor}_{time}.npy')
             
         plt.plot(R)
         if show:
