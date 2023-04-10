@@ -91,9 +91,9 @@ if __name__ == '__main__':
                 R = 0
                 R_star = 0
                 h = 0
-                while True:
-                # for h in tqdm(range(horizon)):
-                    action = model.act(s0, posterior_samples, GREEDY)
+                # while True: #Turn on h += 1
+                for h in tqdm(range(horizon)):
+                    action = model.act(s0, posterior_samples, GREEDY=GREEDY)
                     s1, r, done, *info = env.step(action)
                     #Optimal action
                     # R_star = V_star[s0] + gamma * R_star#env.R[tuple(env.P[s0 + (int(pi_star[s0]), )])] #for regret
@@ -118,7 +118,7 @@ if __name__ == '__main__':
                         # posterior_samples = new_posterior_samples
                         model.plot_policy(paras=posterior_samples.numpy(), title=f'policy_T{training_steps}_{time}', additional_info = env.R, save=save, show=show)
                         # model.plot_value(paras=posterior_samples.numpy(), title=f'value_T{training_steps}_{time}')
-                        print('Mean Q values', torch.round(torch.mean(posterior_samples, 0).values, decimals=2))
+                        print('Mean Q values', torch.round(torch.mean(posterior_samples, 0), decimals=2))
                         data_plot = posterior_samples.numpy().reshape(posterior_samples.shape[0], -1)[:, :8]
                         f = mcp.plot_chain_panel(chains=data_plot, names=env.names,
                                                                         settings=dict(add_pm2std=True, fig=dict(figsize=(10,10), dpi=250),
@@ -137,16 +137,15 @@ if __name__ == '__main__':
                     if done:
                         print("done with", h + 1, 'steps')
                         break
-                    h += 1
+                    # h += 1
                 r_all_epi.append(R)
-                if e % FROZEN_T == 0 :
-                    with open(f'Returns/MCMC/T{training_steps}_Gdy{GREEDY}_Ep{epsilon}_Stp{stepsize}_Dcrs{decreasing_factor}_{time}.npy', 'wb') as f:
-                        np.save(f, r_all_iter)
-                        print('model saved at', f'Returns/MCMC/T{training_steps}_Gdy{GREEDY}_Ep{epsilon}_Stp{stepsize}_Dcrs{decreasing_factor}_{time}.npy')
+                with open(f'Returns/MCMC/T{training_steps}_Gdy{GREEDY}_Ep{epsilon}_Stp{initial_stepsize}_Dcrs{decreasing_factor}_{time}.npy', 'wb') as f:
+                    np.save(f, r_all_iter)
+                    print('return saved at', f'Returns/MCMC/T{training_steps}_Gdy{GREEDY}_Ep{epsilon}_Stp{initial_stepsize}_Dcrs{decreasing_factor}_{time}.npy')
             r_all_iter.append(r_all_epi)
-        with open(f'Returns/MCMC/T{training_steps}_Gdy{GREEDY}_Ep{epsilon}_Stp{stepsize}_Dcrs{decreasing_factor}_{time}.npy', 'wb') as f:
+        with open(f'Returns/MCMC/T{training_steps}_Gdy{GREEDY}_Ep{epsilon}_Stp{initial_stepsize}_Dcrs{decreasing_factor}_{time}.npy', 'wb') as f:
             np.save(f, r_all_iter)
-            print('return saved at', f'Returns/MCMC/T{training_steps}_Gdy{GREEDY}_Ep{epsilon}_Stp{stepsize}_Dcrs{decreasing_factor}_{time}.npy')
+            print('return saved at', f'Returns/MCMC/T{training_steps}_Gdy{GREEDY}_Ep{epsilon}_Stp{initial_stepsize}_Dcrs{decreasing_factor}_{time}.npy')
             
         plt.plot(R)
         if show:

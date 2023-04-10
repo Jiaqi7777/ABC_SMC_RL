@@ -17,7 +17,7 @@ env_name = 'GridWorld'
 # FROZEN_T = 5
 
 #Long Experiment
-horizon = 50
+horizon = 100
 #Number of Episodes
 episodes = 6
 gamma = 0.95
@@ -42,7 +42,7 @@ min_ess = 0.5
 #MCMC
 prior_sigma = 10
 update_frequency = 5
-stepsize = 0.01
+initial_stepsize = stepsize = 0.01
 decreasing_factor = 0.9
 MCMC_T = 100
 MCMC_SAMPLE = 10
