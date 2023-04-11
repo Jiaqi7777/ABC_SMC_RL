@@ -73,7 +73,7 @@ if __name__ == '__main__':
                 samples_l.append(samples)
                 s0 = s1
                 if ( t + 1 ) % update_frequency == 0:
-                    samplse_l = sampler.update(obs._buffers, samples_l, update_frequency)
+                    samples_l = list(sampler.update(obs._buffers, samples_l, update_frequency))
                 if done:
                     print("Done!!")
                     print(t, obs._buffers['state0'][-t-1:])

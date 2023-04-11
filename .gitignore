@@ -1,14 +1,19 @@
 *.pyc
-*.ipynb
+*checkpoint.ipynb
+MountainCar.ipynb
 *.DS_Store
 .vscode
 *.yml
+log*
 
 #Models
 Models
 
 #Figures
 Figures
+
+#Returns
+Returns
 
 #Not used
 bandits.py
