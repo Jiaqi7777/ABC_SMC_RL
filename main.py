@@ -1,93 +1,94 @@
+'''
+import SMC
+import random
+import bandits
+import numpy as np
+from abcpy.continuousmodels import MultivariateNormal as MultiGaussian
+from abcpy.inferences import SMCABC 
+from abcpy.statistics import Identity
+statistics_calculator = Identity(degree=2, cross=False)
+from abcpy.distances import Euclidean
+distance_calculator = Euclidean(statistics_calculator, seed=42)
+
+import numpy as np
+from abcpy.perturbationkernel import DefaultKernel
+kernel = DefaultKernel([mu, sigma])
+from abcpy.backends import BackendDummy as Backend
+
+n_arms = 10
+backend = Backend()
+mean = [0]*n_arms#np.zeros(10)
+std = np.eye(n_arms)*0.1#np.ones(10)*0.1
+
+theta = MultiGaussian([mean, std.tolist()], name = 'theta')
+sampler = SMCABC([theta], [distance_calculator], backend, seed=1)
+
+random.seed(1)
+horizon = 10
+obs_steps = 10
+train_steps = 2
+n_arms = 10
+n_sample = 5
+bandit = bandits.SimpleGaussianBandit(n_arms=n_arms) 
+for t in range(horizon):
+    r_l = []
+    for i in range(obs_steps):
+        action = bandit.select_arm(theta)
+        r = bandit.pull_arm(action)
+        r_l.append(r)
+    journal = sampler.sample([r_l], train_steps, n_sample)
+    theta = random.choice(journal.accepted_parameters)
+print(theta)
+'''
 from SMC import *
 from model import *
 from MCMC import *
 from MountainCar import *
-from GridWorld import *
 import gym 
 import numpy as np
-from parameter import *
-from utils import *
-import argparse
-from tqdm import tqdm
-import datetime
-
 
 #Tabular method
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('-c', '--continue_train', default=False)
-    parser.add_argument('-o', '--output', default='')
-    parser.add_argument('-f', '--file', default=f'Models/{env_name}_H{horizon}_P{n_particle}_B{bins[0]}_E{last_episode}')
-    args = parser.parse_args()
-    continue_training = args.continue_train
-    file_path = args.file
-    # np.random.seed(seed)
-    
-    time =  datetime.datetime.now()
-    time = time.strftime("%f")
 
     #Environment
     #env = gym.make('MountainCar-v0')
-    #env = MountainCar()
-    env = GridWorld(11, 6, 10)    
+    env = MountainCar()
+
+    s0, _ = env.reset()
+
+    horizon = 500
+
     
-    R_all_experiment = []
-    for r in range(repeat_experiment):
-        #SMC
-        model = Tabular(env, n_particle, prior, discrete=discrete, bins=bins)
-        if continue_training:
-            model.set_parameter(np.load(f'{file_path}_tables.npy'))
-            model.set_weights(np.load(f'{file_path}_weights.npy'))
-            np.random.seed(last_episode)
-        else:
-            last_episode = 0
-        sampler = SMC(model, min_ess=min_ess)
-        # pre_p = model.get_parameter()
 
+    #SMC
+    n_particle = 2
+    prior = 'normal'
+    lld = 'normal'
+    train_steps = 2
+    model = Tabular(env, n_particle, prior)
+    sampler = SMC(n_particle, model)
+
+    #Discretize
+    discrete = True
+    if discrete:
+        s0 = model.discrete_state(s0)
+
+    obs = Buffer(['state', 'action', 'rewards', 'done'])
+    samples_l = []
+    for i in range(train_steps):
+        para = model.sample_para()[0]
         s0, _ = env.reset()
-
-        #Discretize
         if discrete:
             s0 = model.discrete_state(s0)
-        
-        obs = Buffer(['state0', 'state1', 'action', 'rewards', 'done'])
-        samples_l = []
-        R_l=[]
-        for e in tqdm(range(episodes)):
-            R = 0
-            sampler._mcmc.reset()
-            para = model.sample_para(sampler._weights)[0]
-            s0, _ = env.reset()
+        for t in range(horizon):
+            action = model.act(s0, para)
+            s1, r, done, *info = env.step(action)
             if discrete:
-                s0 = model.discrete_state(s0)
-            for t in range(horizon):
-                #print('Time:', t, model.get_parameter())
-                action = model.act(s0)
-                s1, r, done, *info = env.step(action)
-                R += r
-                # print('s1',s1,r,action)
-                if discrete:
-                    s1 = model.discrete_state(s1)
-                obs.insert({'state0': s0, 'state1': s1, 'action': action, 'rewards': r, 'done': done})
-                samples = model.r_hat(s0, s1, action)
-                samples_l.append(samples)
-                s0 = s1
-                if ( t + 1 ) % update_frequency == 0:
-                    samples_l = list(sampler.update(obs._buffers, samples_l, update_frequency))
-                if done:
-                    print("Done!!")
-                    print(t, obs._buffers['state0'][-t-1:])
-                    print('============================================')
-                    break
-                # print('tables:', (model.get_parameter()==pre_p).all())
-                # pre_p = model.get_parameter
-            # print(t, obs._buffers['state0'][-t-1:])
-            # print(f'total accepted for episode {e}:', round(sampler._mcmc.accepted / n_particle / horizon * update_frequency, 2))
-            
-            # model.plot_policy(title=f'{env_name} Policy for Episode={e + last_episode + 1}', xlabel='position', ylabel='velocity', show=show)
-            R_l.append(R)
-        R_all_experiment.append(R_l)
-    plot_return_vs_episodes_repeat(R_all_experiment, title=f'{env_name}_Return_{time}')
-    model.plot_value(title=f'{env_name} Value for Episode={e + last_episode + 1}', xlabel='position', ylabel='velocity', show=show)
-    #     model.save(e + last_episode + 1, args.output, horizon=horizon, env_name=env_name)
-    # replace_line('parameter.py', 'last_episode', e + last_episode + 1)
+                s1 = model.discrete_state(s1)
+            obs.insert({'state': s1, 'action': action, 'rewards': r, 'done': done})
+            samples = model.r_hat(s0, s1, action)
+            samples_l.append(samples)
+            s0 = s1
+
+        sampler.update(obs._buffers, samples_l)
+
