@@ -47,6 +47,7 @@ update_frequency = 5
 initial_stepsize = stepsize = 0.01
 decreasing_factor = 0.9
 MCMC_T = 100
+MCMC_SHOW_DISABLE = False
 MCMC_SAMPLE = 10
 BURN_IN = 0.1
 skip = 10
