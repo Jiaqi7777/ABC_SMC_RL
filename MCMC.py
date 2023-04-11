@@ -118,12 +118,13 @@ class pCN(Kernel):
         return proposed_log_posterior - current_log_posterior, proposed_para, proposed_samples
     
 class MALA(Kernel):
-    def __init__(self, *args, model=None, stepsize=0.5):
+    def __init__(self, *args, model=None, stepsize=0.5, use_riemann=False):
         print('MALA stepsize', stepsize)
         super(MALA, self).__init__(*args)   
         self.model=model
         self.stepsize = stepsize
         self.sigma = self.prior.sigma
+        self.use_riemann = use_riemann
         
     def gradient(self, para, obs, samples):
         s0 = obs['state0']
@@ -132,6 +133,7 @@ class MALA(Kernel):
         s01, s02 = np.array(s0).T
         s11, s12 = np.array(s1).T
         a_prime = np.argmax(para[s11, s12], axis=-1)
+        print("aprime", obs)
         Indicator = np.zeros(shape=(len(samples), ) + para.shape) #TxTheta
         Indicator[range(len(samples)), s01, s02, a] = 1
         Indicator[range(len(samples)), s11, s12, a_prime] -= self.model.gamma
@@ -140,7 +142,7 @@ class MALA(Kernel):
     
     def move(self, current_para, obs, samples):
         current_gradient = self.gradient(current_para, obs, samples)
-        proposed_para = np.sqrt(2 * self.stepsize) *  np.random.normal(size=(current_para.shape), scale=1) + current_para + self.stepsize * current_gradient
+        proposed_para = current_para + self.stepsize * current_gradient + np.sqrt(2 * self.stepsize) *  np.random.normal(size=(current_para.shape), scale=1)
         proposed_gradient = self.gradient(proposed_para, obs, samples)
         move_ratio = stats.norm.logpdf(proposed_para, loc=current_para + self.stepsize * current_gradient, scale=np.sqrt(2*self.stepsize)).sum() - \
                                                                     stats.norm.logpdf(current_para, loc=proposed_para + self.stepsize * proposed_gradient, scale=np.sqrt(2*self.stepsize)).sum()
@@ -157,6 +159,11 @@ class MALA(Kernel):
         proposed_log_posterior = self.posterior(proposed_para, obs, proposed_samples)
         # print(proposed_log_posterior, current_log_posterior,  - move_ratio)
         return proposed_log_posterior - current_log_posterior - move_ratio, proposed_para, proposed_samples
+    
+    def inverse_riemann_mass(self):
+        fisher = 1 / (self.likelihood.epsilon ** 2)
+        pass
+
         
 class AM(Kernel):
     def __init__(self, model=None, stepsize=0.1, prior=Prior(sigma=prior_sigma), likelihood=ABCLikelihood(epsilon=epsilon), tractability=False, sd=1, am_epsilon=1e-5):
@@ -257,12 +264,12 @@ if __name__ == '__main__':
 
     np.random.seed(seed)
     
-    n_particle = 1
+    n_particle = 1000
     r = []
 
     env = GridWorld((3,4), obstacles=True)
     model = Tabular(env=env, n_particle=n_particle, prior='normal')
-    kernel = pCN(model=model, stepsize=stepsize)
+    kernel = MALA(model=model, stepsize=stepsize)
     mcmc = MCMC(kernal=kernel)
     chain = np.zeros([training_steps, env.observation_space.n * env.action_space.n])
     
