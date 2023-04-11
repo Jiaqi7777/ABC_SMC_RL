@@ -106,7 +106,10 @@ class Tabular:
             # return np.argmax(thompson_weights)
             # return random.choices(range(self.action_size), thompson_weights)[0]
             if GREEDY:
-                table = torch.mean(tables, 0)
+                if np.random.uniform(0, 1) > greedy_epsilon:
+                    table = torch.mean(tables, 0)
+                else: 
+                    return torch.randint(0, self.action_size, (1,))[0]
             else:
                 table = random.choice(tables)
             return torch.argmax(table[state])

@@ -44,7 +44,7 @@ if __name__ == '__main__':
     parser.add_argument('-e', '--epsilon', default=epsilon, type=float)
     parser.add_argument('--seed', default=seed, type=int)
     parser.add_argument('--MCMC', default=True, action='store_false', help='Bool type')
-    parser.add_argument('-g', '--Greedy', default=False, action='store_true', help='Bool type')
+    parser.add_argument('-g', '--Greedy', default=GREEDY, action='store_true', help='Bool type')
     args = parser.parse_args()
     print(args)
     time = args.time
@@ -62,6 +62,7 @@ if __name__ == '__main__':
     random.seed(seed)
     pyro.set_rng_seed(seed)
     np.random.seed(seed)
+    torch.manual_seed(seed)
     
     env = GridWorld((3,4), obstacles=True)
     dim = env.observation_space.n * env.action_space.n
@@ -105,7 +106,7 @@ if __name__ == '__main__':
                     #     print(np.argmax(posterior_samples[:, 0, 0], axis=-1))
                     
                     if ( h + 1)  % FROZEN_T == 0 or done:
-                        # print(obs._buffers, batch_training)
+                        print(obs._buffers['state0'][-FROZEN_T:])
                         #MCMC
                         batch_indicies = random.sample(range(min(len(obs._buffers['state0']), buffer_size)), k=min(batch_size, len(obs._buffers['state0'])))
                         r_hat = partial(generate_samples, model=model, obs=obs._buffers,  batch_indicies=batch_indicies)
@@ -140,8 +141,8 @@ if __name__ == '__main__':
                     # h += 1
                 r_all_epi.append(R)
                 with open(f'Returns/MCMC/T{training_steps}_Gdy{GREEDY}_Ep{epsilon}_Stp{initial_stepsize}_Dcrs{decreasing_factor}_{time}.npy', 'wb') as f:
-                    np.save(f, r_all_iter)
-                    print('return saved at', f'Returns/MCMC/T{training_steps}_Gdy{GREEDY}_Ep{epsilon}_Stp{initial_stepsize}_Dcrs{decreasing_factor}_{time}.npy')
+                    np.save(f, r_all_epi)
+                    print(f'episodes return for repeat {repeat} saved at', f'Returns/MCMC/T{training_steps}_Gdy{GREEDY}_Ep{epsilon}_Stp{initial_stepsize}_Dcrs{decreasing_factor}_{time}.npy')
             r_all_iter.append(r_all_epi)
         with open(f'Returns/MCMC/T{training_steps}_Gdy{GREEDY}_Ep{epsilon}_Stp{initial_stepsize}_Dcrs{decreasing_factor}_{time}.npy', 'wb') as f:
             np.save(f, r_all_iter)

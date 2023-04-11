@@ -21,7 +21,7 @@ horizon = 100
 #Number of Episodes
 episodes = 6
 gamma = 0.95
-repeat_experiment = 10
+repeat_experiment = 4
 discrete = False
 bins = (10, )
 last_episode = 1
@@ -31,6 +31,8 @@ FROZEN_T = 15
 batch_training = False
 batch_size = 64
 buffer_size = 100 if batch_training else 100000000000
+GREEDY = False
+greedy_epsilon = 0.3
 
 
 #SMC parameters

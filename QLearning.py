@@ -34,8 +34,8 @@ def QLearning(Q, env, n_episodes=10, horizon=50, gamma=0.95, epsilon=0.4):
         for t in range(horizon):
             a = np.argmax(Q[s0]) if np.random.uniform(0, 1) > epsilon else random.choice(range(env.action_space.n))
             s1, r, done, _ = env.step(a)
-            v_optimal = V_star[s0]#env.R[tuple(env.P[s0 + (int(pi_star[s0]), )])]
-            R += v_optimal - sum([r * gamma ** i for i in range(t + 1)])
+            # v_optimal = V_star[s0]#env.R[tuple(env.P[s0 + (int(pi_star[s0]), )])]
+            R += r #v_optimal - sum([r * gamma ** i for i in range(t + 1)])
             Q[s0][a] = r + gamma * max(Q[s1])
             if done:
                 print('Done in ', t + 1, 'steps')
@@ -51,6 +51,23 @@ def QLearning(Q, env, n_episodes=10, horizon=50, gamma=0.95, epsilon=0.4):
     # plot_return_vs_episodes(r_all_episodes_qlearning, smooth=10, show=True)
     print(np.round(Q,3))
     return pi, Q, V, r_all_episodes_qlearning
+
+def QLearningWithData(Q, obs, gamma=0.95, training_steps=100):
+    data = zip(obs['state0'], obs['state1'], obs['action'], obs['rewards'], obs['done'])
+    for _ in range(training_steps):
+        for i in range(len(obs['state0'])):
+            s0, s1, a, r, done = data[i]
+            # v_optimal = V_star[s0]#env.R[tuple(env.P[s0 + (int(pi_star[s0]), )])]
+            R += r #v_optimal - sum([r * gamma ** i for i in range(t + 1)])
+            Q[s0][a] = r + gamma * max(Q[s1])
+            s0 = s1
+        
+    V = np.max(Q, axis=-1)
+    print('Value', np.round(V, 2))
+    pi = np.argmax(Q, axis=-1)
+    print('Policy:', pi)
+    print(np.round(Q,3))
+    return pi, Q, V
     
 if __name__ == '__main__':
     from GridWorld import *
