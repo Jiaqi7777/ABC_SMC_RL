@@ -9,14 +9,19 @@ from QLearning import *
 
 
 def likelihood(data):
-    global r_hat
+    global model
+    obs, model, dim, batch_indicies, abc_epsilon = data
+    if not batch_training:
+        batch_indicies = range(min(len(obs['state0']), buffer_size))
+    r_hat = torch.tensor(obs['rewards'])[-buffer_size:][batch_indicies]
+    
     prior_parameter = pyro.sample("prior_parameter", dist.MultivariateNormal(torch.zeros(dim), prior_sigma **2 * torch.eye(dim)))
-    mean = r_hat(prior_parameter).reshape(-1)
+    mean = generate_samples(prior_parameter, model, obs, batch_indicies=batch_indicies).reshape(-1)
     with pyro.plate("data_plate"):
-        pyro.sample("obs", dist.MultivariateNormal(mean, abc_epsilon ** 2 * torch.eye(len(data))), obs=data)
+        pyro.sample("obs", dist.MultivariateNormal(mean, abc_epsilon ** 2 * torch.eye(len(r_hat))), obs=r_hat)
 
 
-def mcmc(data, prior_parameter, num_samples=MCMC_SAMPLE, warmup_steps=MCMC_T//10):
+def mcmc(data, prior_parameter, num_samples=MCMC_SAMPLE, warmup_steps=MCMC_T//10, MCMC_SHOW_DISABLE=MCMC_SHOW_DISABLE):
     pyro.clear_param_store()
     kernel = pyro.infer.mcmc.HMC(likelihood, full_mass=full_mass, step_size=stepsize, adapt_step_size=adapt_step_size, adapt_mass_matrix=adapt_mass_matrix, target_accept_prob=target_accept_prob)
     # kernel = pyro.infer.mcmc.HMC(likelihood, full_mass=True, step_size=stepsize, adapt_step_size=adapt_step_size, adapt_mass_matrix=adapt_mass_matrix, target_accept_prob=target_accept_prob)
@@ -111,9 +116,9 @@ if __name__ == '__main__':
                         batch_indicies = random.sample(range(min(len(obs._buffers['state0']), buffer_size)), k=min(batch_size, len(obs._buffers['state0'])))
                         r_hat = partial(generate_samples, model=model, obs=obs._buffers,  batch_indicies=batch_indicies)
                         if batch_training:
-                            mcmc_run = mcmc(torch.tensor(obs._buffers['rewards'])[-batch_size:][batch_indicies], torch.tensor(posterior_samples[-1].reshape(-1)), num_samples=training_steps,  warmup_steps=training_steps//5)
+                            mcmc_run = mcmc([obs._buffers, model, dim, batch_indicies, abc_epsilon], torch.tensor(posterior_samples[-1].reshape(-1)), num_samples=training_steps,  warmup_steps=training_steps//5, MCMC_SHOW_DISABLE=MCMC_SHOW_DISABLE)
                         else:
-                            mcmc_run = mcmc(torch.tensor(obs._buffers['rewards']), torch.tensor(posterior_samples[-1].reshape(-1)), num_samples=training_steps,  warmup_steps=warmup_steps)
+                            mcmc_run = mcmc([obs._buffers, model, dim, batch_indicies, abc_epsilon], torch.tensor(posterior_samples[-1].reshape(-1)), num_samples=training_steps,  warmup_steps=warmup_steps, MCMC_SHOW_DISABLE=MCMC_SHOW_DISABLE)
                         posterior_samples = mcmc_run.get_samples()["prior_parameter"].reshape((-1, ) + env.n_cell + (env.action_space.n, ))
                         stepsize *= decreasing_factor
                         # posterior_samples = new_posterior_samples

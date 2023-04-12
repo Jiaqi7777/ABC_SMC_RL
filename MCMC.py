@@ -252,7 +252,6 @@ if __name__ == '__main__':
     seed = args.seed
     MCMC_SHOW_DISABLE=args.MCMC
 
-    n_particle = 1
     random.seed(seed)
 
     np.random.seed(seed)
