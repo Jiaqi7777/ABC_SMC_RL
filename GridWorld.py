@@ -66,11 +66,11 @@ class GridWorld:
             self.state = new_state = tuple(self.P[self.state + (action, )])
         else:
             new_state = tuple(self.P[state + (action, )])
-        if state == self.goal_position:
+        if new_state == self.goal_position:
             done = True
             if state == None:
                 self.done = done
-        return new_state, self.R[new_state], done, None
+        return new_state, self.R[state], done, None
         
 
     def oneD_step(self, action, state=None):
