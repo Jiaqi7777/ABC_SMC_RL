@@ -17,10 +17,10 @@ def generate_samples(para, model, obs, batch_indicies=None):
 
     return model.q_value(para, s0.T, a) - torch.where(dones == 1, torch.zeros(len(s0)), model.gamma * model.v_value(para, s1.T).values) #time 
 
-    samples = []
-    for s0, a, s1 in zip(obs['state0'], obs['action'], obs['state1']):
-        samples.append(model.q_value(para, s0, a) - model.gamma * model.v_value(para, s1))
-    return np.array(samples)# t
+    # samples = []
+    # for s0, a, s1 in zip(obs['state0'], obs['action'], obs['state1']):
+    #     samples.append(model.q_value(para, s0, a) - model.gamma * model.v_value(para, s1))
+    # return np.array(samples)# t
 
 
 
@@ -125,19 +125,22 @@ class MALA(Kernel):
         self.stepsize = stepsize
         self.sigma = self.prior.sigma
         self.use_riemann = use_riemann
-        
-    def gradient(self, para, obs, samples):
+
+    def tabular_indicator(self, para, obs, samples):
         s0 = obs['state0']
         s1 = obs['state1']
         a = obs['action']
         s01, s02 = np.array(s0).T
         s11, s12 = np.array(s1).T
         a_prime = np.argmax(para[s11, s12], axis=-1)
-        print("aprime", obs)
         Indicator = np.zeros(shape=(len(samples), ) + para.shape) #TxTheta
         Indicator[range(len(samples)), s01, s02, a] = 1
         Indicator[range(len(samples)), s11, s12, a_prime] -= self.model.gamma
-        Sum = np.matmul(Indicator.T, (np.array(obs['rewards']) - samples)).T #Theta x T, Tx1
+        return Indicator
+
+    def gradient(self, para, obs, samples):
+        Indicator = self.tabular_indicator(para=para, obs=obs, samples=samples)
+        Sum = np.matmul(Indicator.T, (np.array(obs['rewards']) - np.array(samples))).T #Theta x T, Tx1
         return - para / self.sigma ** 2 + 1 / self.likelihood.epsilon ** 2 * Sum
     
     def move(self, current_para, obs, samples):
@@ -160,8 +163,10 @@ class MALA(Kernel):
         # print(proposed_log_posterior, current_log_posterior,  - move_ratio)
         return proposed_log_posterior - current_log_posterior - move_ratio, proposed_para, proposed_samples
     
-    def inverse_riemann_mass(self):
-        fisher = 1 / (self.likelihood.epsilon ** 2)
+    def inverse_riemann_mass(self, Indicator):
+        Indicator_flatten = Indicator.reshape(Indicator.shape[0],-1)
+        fisher = 1 / (self.likelihood.epsilon ** 2) * Indicator_flatten.T @ Indicator_flatten
+        fisher +=  self.prior.sigma ** 2 * np.identity(fisher.shape[0])
         pass
 
         
@@ -221,8 +226,6 @@ class MCMC:
             if accept:
                 new_paras[i] = proposed_para
                 self.accepted += 1
-                print(proposed_samples.shape, i)
-                print(samples.shape)
                 samples[batch_indicies, i] = proposed_samples
         # print('accept with ratio ', np.exp(acceptance_ratio))
         
@@ -258,13 +261,14 @@ if __name__ == '__main__':
     abc_epsilon = args.epsilon
     seed = args.seed
     MCMC_SHOW_DISABLE=args.MCMC
+    save = False
 
-    n_particle = 1
+    n_particle = 100
+    #episodes = 50
     random.seed(seed)
 
     np.random.seed(seed)
-    
-    n_particle = 1000
+    print("HERE", episodes, repeat_experiment)
     r = []
 
     env = GridWorld((3,4), obstacles=True)
@@ -290,6 +294,7 @@ if __name__ == '__main__':
     
     if ONLINE_LEARNING:
         r_all_iter = []
+        num_steps = []
         for repeat in range(repeat_experiment):
             samples_l = []
             model = Tabular(env=env, n_particle=n_particle, prior='normal')
@@ -318,14 +323,14 @@ if __name__ == '__main__':
                     if ( h + 1)  % FROZEN_T == 0 or done:
                         #MCMC
                         batch_indicies = random.sample(range(min(len(obs._buffers['state0']), buffer_size)), k=min(batch_size, len(obs._buffers['state0'])))
-    
                         torch_sample = torch.vstack(samples_l)
                         new_parameter, samples_l = mcmc.update(model.get_parameter(), obs._buffers, torch_sample, batch_indicies)#paras_history for AM
                         model.set_parameter(new_parameter)
-                        chain[h] = new_parameter.flatten()                        # posterior_samples = new_posterior_samples
-                        # model.plot_policy(paras=posterior_samples.numpy(), title=f'policy_T{training_steps}_{time}', additional_info = env.R, save=save, show=show)
-                        # model.plot_value(paras=posterior_samples.numpy(), title=f'value_T{training_steps}_{time}')
-                        f = mcp.plot_chain_panel(chains=chain[training_steps // 10:, :8], names=env.names,
+                        chain = np.array(new_parameter).reshape(new_parameter.shape[0],-1)                        # posterior_samples = new_posterior_samples
+                        
+                        model.plot_policy(paras=posterior_samples.numpy(), title=f'policy_T{training_steps}_{time}', additional_info = env.R, save=save, show=show)
+                        model.plot_value(paras=posterior_samples.numpy(), title=f'value_T{training_steps}_{time}')
+                        f = mcp.plot_chain_panel(chains=chain[n_particle // 10:, :8], names=env.names,
                                                                         settings=dict(add_pm2std=True, fig=dict(figsize=(10,10), dpi=250),
                                                                         mean=dict(color='y', label='mean'),
                                                                         plot=dict(color='k', label='trace')))
@@ -340,17 +345,19 @@ if __name__ == '__main__':
                             plt.show()
                     if done:
                         print("done with", h + 1, 'steps')
+                        num_steps.append(h+1)
                         break
                     h += 1
                 r_all_epi.append(R_star - R)
-                if e % FROZEN_T == 0 :
+                if e % FROZEN_T == 0 and save:
                     with open(f'Models/MCMC/chains_T{training_steps}_{time}.npy', 'wb') as f:
                         np.save(f, r_all_iter)
                         print('model saved at', f'Models/MCMC/chains_T{training_steps}_{time}.npy')
             r_all_iter.append(r_all_epi)
-        with open(f'Models/MCMC/chains_T{training_steps}_{time}.npy', 'wb') as f:
-            np.save(f, r_all_iter)
-            print('model saved at', f'Models/MCMC/chains_T{training_steps}_{time}.npy')
+        if save:
+            with open(f'Models/MCMC/chains_T{training_steps}_{time}.npy', 'wb') as f:
+                np.save(f, r_all_iter)
+                print('model saved at', f'Models/MCMC/chains_T{training_steps}_{time}.npy')
             
         plt.plot(R)
         if show:

@@ -19,9 +19,9 @@ env_name = 'GridWorld'
 #Long Experiment
 horizon = 100
 #Number of Episodes
-episodes = 6
+episodes = 50
 gamma = 0.95
-repeat_experiment = 4
+repeat_experiment = 1
 discrete = False
 bins = (10, )
 last_episode = 1
