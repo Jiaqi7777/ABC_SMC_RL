@@ -32,37 +32,37 @@ BATCH_TRAINING = False
 BATCH_SIZE = 64
 BUFFER_SIZE = 100 if BATCH_TRAINING else 100000000000
 GREEDY = False
-greedy_epsilon = 0.3
+GREEDY_EPSILON = 0.3
 
 
 #SMC parameters
-prior = 'normal'
-lld = 'normal'
-n_particle = 4
-min_ess = 0.5
+PRIOR = 'normal'
+LLD = 'normal'
+N_PARTICLE = 4
+MIN_ESS = 0.5
 
 #MCMC
-prior_sigma = 10
-update_frequency = 5
-initial_stepsize = stepsize = 0.01
-decreasing_factor = 0.9
+PRIOR_SIGMA = 10
+UPDATE_FREQUENCY = 5
+INITIAL_STEPSIZE = STEPSIZE = 0.01
+DECREASING_FACTOR = 0.9
 MCMC_T = 100
 MCMC_SHOW_DISABLE = False
 MCMC_SAMPLE = 10
 BURN_IN = 0.1
-skip = 10
-target_accept_prob = 0.4
-warmup_ratio = 0
-adapt_step_size = True if warmup_ratio > 0 else False
-adapt_mass_matrix = True if warmup_ratio > 0 else False
-num_steps = 2000
-full_mass = False
+SKIP = 10
+TARGET_ACCEPT_PROB = 0.4
+WARMUP_RATIO = 0
+ADAPT_STEP_SIZE = True if WARMUP_RATIO > 0 else False
+ADAPT_MASS_MATRIX = True if WARMUP_RATIO > 0 else False
+NUM_STEPS = 2000
+FULL_MASS = False
 #Plot
-plot_threshold = 2#percentile
+PLOT_THRESHOLD = 2#percentile
 
 #ABC
-epsilon = 0.05
+EPSILON = 0.05
 
 #Results
-save = True
-show = True
+SAVE = True
+SHOW = True
