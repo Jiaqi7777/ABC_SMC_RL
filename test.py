@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 from parameter import *
 
 
-file_path=f'Models/MountainCar_H_{HORIZON}_P{n_particle}_B{BINS[0]}_E{LAST_EPISODE}'
+file_path=f'Models/MountainCar_H_{HORIZON}_P{N_PARTICLE}_B{BINS[0]}_E{LAST_EPISODE}'
 env = MountainCar()
 test_env = gym.make('MountainCar-v0', render_mode='human')
 render = lambda : plt.imshow(test_env.render())
@@ -16,7 +16,7 @@ tables = np.load(f'{file_path}_tables.npy')
 
 weights = np.load(f'{file_path}_weights.npy')
 optimal_table = tables[np.argmax(weights)]
-model = Tabular(env, n_particle, 'normal')
+model = Tabular(env, N_PARTICLE, 'normal')
 s0, _ = test_env.reset()
 score = 0
 

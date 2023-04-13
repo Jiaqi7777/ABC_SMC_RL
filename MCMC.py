@@ -35,14 +35,14 @@ class Prior:
 
 class Likelihood:
     """log(p(evidence|para))"""
-    def __init__(self, epsilon=epsilon):
+    def __init__(self, epsilon=EPSILON):
         self.epsilon = epsilon 
         
     def get_log_likelihood(self):
         raise NotImplementedError
         
 class ABCLikelihood(Likelihood):
-    def __init__(self, epsilon=epsilon):
+    def __init__(self, epsilon=EPSILON):
         super().__init__(epsilon)
         print('abc epsilon', epsilon)
     
@@ -66,7 +66,7 @@ class ABCLikelihood(Likelihood):
 #     return log_prior + log_likelihood
 
 class Kernel:
-    def __init__(self, model=None, stepsize=0.1, prior=Prior(sigma=prior_sigma), likelihood=ABCLikelihood(epsilon=epsilon), tractability=False):
+    def __init__(self, model=None, stepsize=0.1, prior=Prior(sigma=PRIOR_SIGMA), likelihood=ABCLikelihood(epsilon=EPSILON), tractability=False):
         self.stepsize = stepsize
         self.model=model
         self.prior = prior
@@ -170,7 +170,7 @@ class MALA(Kernel):
 
         
 class AM(Kernel):
-    def __init__(self, model=None, stepsize=0.1, prior=Prior(sigma=prior_sigma), likelihood=ABCLikelihood(epsilon=epsilon), tractability=False, sd=1, am_epsilon=1e-5):
+    def __init__(self, model=None, stepsize=0.1, prior=Prior(sigma=PRIOR_SIGMA), likelihood=ABCLikelihood(epsilon=EPSILON), tractability=False, sd=1, am_epsilon=1e-5):
         super().__init__(model, stepsize, prior, likelihood, tractability)
         self.sd = sd
         self.am_epsilon=am_epsilon
@@ -205,7 +205,7 @@ class AM(Kernel):
         
 
 class MCMC:
-    def __init__(self, steps = 10, kernal=pCN(stepsize=stepsize)):
+    def __init__(self, steps = 10, kernal=pCN(stepsize=STEPSIZE)):
         self.steps = steps
         self.kernel = kernal
         self.accepted = 0
@@ -246,9 +246,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-T', '--training_step', default=MCMC_T, type=int)
     parser.add_argument('-t', '--time', default=datetime.datetime.now().strftime("%f"))
-    parser.add_argument('-s', '--save', default=save)
-    parser.add_argument('-p', '--show', default=show)
-    parser.add_argument('-e', '--epsilon', default=epsilon, type=float)
+    parser.add_argument('-s', '--save', default=SAVE)
+    parser.add_argument('-p', '--show', default=SHOW)
+    parser.add_argument('-e', '--epsilon', default=EPSILON, type=float)
     parser.add_argument('--seed', default=SEED, type=int)
     parser.add_argument('--MCMC', default=True, action='store_false', help='Bool type')
     args = parser.parse_args()
@@ -259,23 +259,17 @@ if __name__ == '__main__':
     show = args.show
     abc_epsilon = args.epsilon
     seed = args.seed
-    MCMC_SHOW_DISABLE=args.MCMC
+    mcmc_show_disable = args.MCMC
     save = False
 
-<<<<<<< HEAD
-    n_particle = 100
-    #episodes = 50
-=======
->>>>>>> d98a19051e20eac8898945d07964e45fef92a695
     random.seed(seed)
 
     np.random.seed(seed)
-    print("HERE", episodes, repeat_experiment)
     r = []
 
     env = GridWorld((3,4), obstacles=True)
-    model = Tabular(env=env, n_particle=n_particle, prior='normal')
-    kernel = MALA(model=model, stepsize=stepsize)
+    model = Tabular(env=env, n_particle=N_PARTICLE, prior='normal')
+    kernel = MALA(model=model, stepsize=STEPSIZE)
     mcmc = MCMC(kernal=kernel)
     chain = np.zeros([training_steps, env.observation_space.n * env.action_space.n])
     
@@ -296,14 +290,9 @@ if __name__ == '__main__':
     
     if ONLINE_LEARNING:
         r_all_iter = []
-<<<<<<< HEAD
-        num_steps = []
-        for repeat in range(repeat_experiment):
-=======
         for repeat in range(REPEAT_EXPERIMENT):
->>>>>>> d98a19051e20eac8898945d07964e45fef92a695
             samples_l = []
-            model = Tabular(env=env, n_particle=n_particle, prior='normal')
+            model = Tabular(env=env, n_particle=N_PARTICLE, prior='normal')
             r_all_epi = []
             obs = Buffer(['state0', 'state1', 'action', 'rewards', 'done'])
             s0, _ = env.reset()
@@ -328,12 +317,8 @@ if __name__ == '__main__':
                     s0 = s1
                     if ( h + 1)  % FROZEN_T == 0 or done:
                         #MCMC
-<<<<<<< HEAD
-                        batch_indicies = random.sample(range(min(len(obs._buffers['state0']), buffer_size)), k=min(batch_size, len(obs._buffers['state0'])))
-=======
-                        batch_indicies = random.sample(range(min(len(obs._buffers['state0']), buffer_size)), k=min(BATCH_SIZE, len(obs._buffers['state0'])))
+                        batch_indicies = random.sample(range(min(len(obs._buffers['state0']), BUFFER_SIZE)), k=min(BATCH_SIZE, len(obs._buffers['state0'])))
     
->>>>>>> d98a19051e20eac8898945d07964e45fef92a695
                         torch_sample = torch.vstack(samples_l)
                         new_parameter, samples_l = mcmc.update(model.get_parameter(), obs._buffers, torch_sample, batch_indicies)#paras_history for AM
                         model.set_parameter(new_parameter)
@@ -341,7 +326,7 @@ if __name__ == '__main__':
                         
                         model.plot_policy(paras=posterior_samples.numpy(), title=f'policy_T{training_steps}_{time}', additional_info = env.R, save=save, show=show)
                         model.plot_value(paras=posterior_samples.numpy(), title=f'value_T{training_steps}_{time}')
-                        f = mcp.plot_chain_panel(chains=chain[n_particle // 10:, :8], names=env.names,
+                        f = mcp.plot_chain_panel(chains=chain[N_PARTICLE // 10:, :8], names=env.names,
                                                                         settings=dict(add_pm2std=True, fig=dict(figsize=(10,10), dpi=250),
                                                                         mean=dict(color='y', label='mean'),
                                                                         plot=dict(color='k', label='trace')))
@@ -356,7 +341,6 @@ if __name__ == '__main__':
                             plt.show()
                     if done:
                         print("done with", h + 1, 'steps')
-                        num_steps.append(h+1)
                         break
                     h += 1
                 r_all_epi.append(R_star - R)
@@ -387,7 +371,7 @@ if __name__ == '__main__':
             model.set_parameter(new_parameter)
             chain[t] = new_parameter.flatten()
             if t > training_steps * BURN_IN:
-                if t % skip == 0:
+                if t % SKIP == 0:
                     paras_history.append(new_parameter)
         print('accepted ratio:', mcmc.accepted / training_steps)
         model.plot_policy(paras=np.array(paras_history), title=f'policy_T{training_steps}_{time}', additional_info = env.R, save=save, show=show)

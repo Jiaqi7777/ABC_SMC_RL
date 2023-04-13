@@ -92,7 +92,7 @@ class Tabular:
         else:
             raise NotImplementedError(f'The prior method corresponds to {prior} has not been implemented')
 
-    def act(self, state, table=[], weights=[], GREEDY=False):
+    def act(self, state, table=[], weights=[], GREEDY=False, greedy_epsilon=GREEDY_EPSILON):
         if table == []:
             return self.act(state, self.tables, weights=self._weights)
         elif table[0].shape == self.tables[0].shape:

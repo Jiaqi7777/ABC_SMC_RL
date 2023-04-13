@@ -49,12 +49,10 @@ import numpy as np
 
 #Tabular method
 if __name__ == '__main__':
-<<<<<<< HEAD
-=======
     parser = argparse.ArgumentParser()
     parser.add_argument('-c', '--continue_train', default=False)
     parser.add_argument('-o', '--output', default='')
-    parser.add_argument('-f', '--file', default=f'Models/{ENV_NAME}_H{HORIZON}_P{n_particle}_B{BINS[0]}_E{LAST_EPISODE}')
+    parser.add_argument('-f', '--file', default=f'Models/{ENV_NAME}_H{HORIZON}_P{N_PARTICLE}_B{BINS[0]}_E{LAST_EPISODE}')
     args = parser.parse_args()
     continue_training = args.continue_train
     file_path = args.file
@@ -62,7 +60,6 @@ if __name__ == '__main__':
     
     time =  datetime.datetime.now()
     time = time.strftime("%f")
->>>>>>> d98a19051e20eac8898945d07964e45fef92a695
 
     #Environment
     #env = gym.make('MountainCar-v0')
@@ -73,29 +70,26 @@ if __name__ == '__main__':
     horizon = 500
 
     
-<<<<<<< HEAD
-=======
     R_all_experiment = []
     for r in range(REPEAT_EXPERIMENT):
         #SMC
-        model = Tabular(env, n_particle, prior, discrete=DISCRETE, bins=BINS)
+        model = Tabular(env, N_PARTICLE, PRIOR, discrete=DISCRETE, bins=BINS)
         if continue_training:
             model.set_parameter(np.load(f'{file_path}_tables.npy'))
             model.set_weights(np.load(f'{file_path}_weights.npy'))
             np.random.seed(LAST_EPISODE)
         else:
             LAST_EPISODE = 0
-        sampler = SMC(model, min_ess=min_ess)
+        sampler = SMC(model, min_ess=MIN_ESS)
         # pre_p = model.get_parameter()
->>>>>>> d98a19051e20eac8898945d07964e45fef92a695
 
     #SMC
-    n_particle = 2
-    prior = 'normal'
-    lld = 'normal'
+    N_PARTICLE = 2
+    PRIOR = 'normal'
+    LLD = 'normal'
     train_steps = 2
-    model = Tabular(env, n_particle, prior)
-    sampler = SMC(n_particle, model)
+    model = Tabular(env, N_PARTICLE, PRIOR)
+    sampler = SMC(N_PARTICLE, model)
 
     #Discretize
     discrete = True
@@ -107,22 +101,6 @@ if __name__ == '__main__':
     for i in range(train_steps):
         para = model.sample_para()[0]
         s0, _ = env.reset()
-<<<<<<< HEAD
-        if discrete:
-            s0 = model.discrete_state(s0)
-        for t in range(horizon):
-            action = model.act(s0, para)
-            s1, r, done, *info = env.step(action)
-            if discrete:
-                s1 = model.discrete_state(s1)
-            obs.insert({'state': s1, 'action': action, 'rewards': r, 'done': done})
-            samples = model.r_hat(s0, s1, action)
-            samples_l.append(samples)
-            s0 = s1
-
-        sampler.update(obs._buffers, samples_l)
-
-=======
 
         #Discretize
         if DISCRETE:
@@ -150,8 +128,8 @@ if __name__ == '__main__':
                 samples = model.r_hat(s0, s1, action)
                 samples_l.append(samples)
                 s0 = s1
-                if ( t + 1 ) % update_frequency == 0:
-                    samples_l = list(sampler.update(obs._buffers, samples_l, update_frequency))
+                if ( t + 1 ) % UPDATE_FREQUENCY == 0:
+                    samples_l = list(sampler.update(obs._buffers, samples_l, UPDATE_FREQUENCY))
                 if done:
                     print("Done!!")
                     print(t, obs._buffers['state0'][-t-1:])
@@ -160,13 +138,12 @@ if __name__ == '__main__':
                 # print('tables:', (model.get_parameter()==pre_p).all())
                 # pre_p = model.get_parameter
             # print(t, obs._buffers['state0'][-t-1:])
-            # print(f'total accepted for episode {e}:', round(sampler._mcmc.accepted / n_particle / HORIZON * update_frequency, 2))
+            # print(f'total accepted for episode {e}:', round(sampler._mcmc.accepted / N_PARTICLE / HORIZON * UPDATE_FREQUENCY, 2))
             
-            # model.plot_policy(title=f'{ENV_NAME} Policy for Episode={e + LAST_EPISODE + 1}', xlabel='position', ylabel='velocity', show=show)
+            # model.plot_policy(title=f'{ENV_NAME} Policy for Episode={e + LAST_EPISODE + 1}', xlabel='position', ylabel='velocity', show=SHOW)
             R_l.append(R)
         R_all_experiment.append(R_l)
     plot_return_vs_episodes_repeat(R_all_experiment, title=f'{ENV_NAME}_Return_{time}')
-    model.plot_value(title=f'{ENV_NAME} Value for Episode={e + LAST_EPISODE + 1}', xlabel='position', ylabel='velocity', show=show)
+    model.plot_value(title=f'{ENV_NAME} Value for Episode={e + LAST_EPISODE + 1}', xlabel='position', ylabel='velocity', show=SHOW)
     #     model.save(e + LAST_EPISODE + 1, args.output, HORIZON=HORIZON, ENV_NAME=ENV_NAME)
     # replace_line('parameter.py', 'LAST_EPISODE', e + LAST_EPISODE + 1)
->>>>>>> d98a19051e20eac8898945d07964e45fef92a695

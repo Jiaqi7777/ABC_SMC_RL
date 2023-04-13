@@ -45,10 +45,10 @@ class SMC:
 
 
 if __name__ == '__main__':
-    n_particle = 5    
+    N_PARTICLE = 5    
     r = []
     env = MountainCar()
-    model = Tabular(env=env, n_particle=n_particle, prior='normal')
+    model = Tabular(env=env, n_particle=N_PARTICLE, prior='normal')
     sampler = SMC(model)
     obs = {'rewards':[1,2,3], 'state0':[(1,2),(1,2),(1,2)],'state1':[(7,5),(8,2),(1,8)], 'action':[-1,0,1]}
     samples = np.vstack(([7,8,7,8,7],[4,5,4,5,4], [2,3,2,3,2]))
