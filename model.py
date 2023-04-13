@@ -46,7 +46,7 @@ class Buffer:
 
         for k, v in items.items():
             self._buffers[k].append(v)
-            # if len(self._buffers[k]) > buffer_size:
+            # if len(self._buffers[k]) > BUFFER_SIZE:
             #     self._buffers[k].pop(0)
         
     def get_minibatch(self, batch_size):
@@ -114,7 +114,7 @@ class Tabular:
                 table = random.choice(tables)
             return torch.argmax(table[state])
         '''Greedy Action'''
-        return torch.argmax(table[state])
+        return torch.argmax(table[state]) if np.random.uniform(0, 1) > greedy_epsilon else torch.randint(0, self.action_size, (1,))[0]
 
     def discrete_state(self, sample_state):
         """Discretize a sample as per given grid."""
@@ -218,9 +218,9 @@ class Tabular:
         plot_2d(s0, s1, para, title=title, xlabel=xlabel, ylabel=ylabel, zlabel=zlabel, show=show, additional_info=additional_info, save=save)
         # plot_3d(S0, S1, para.T, title=title, xlabel=xlabel, ylabel=ylabel, zlabel=zlabel, show=show)
 
-    def save(self, episode, file_path='', horizon=200, env_name=''):
+    def save(self, episode, file_path='', HORIZON=200, ENV_NAME=''):
         if file_path == '':
-            file_path=f'Models/{env_name}_H{horizon}_P{self.n_particle}_B{self.bins[0]}_E{episode}'
+            file_path=f'Models/{ENV_NAME}_H{HORIZON}_P{self.n_particle}_B{self.bins[0]}_E{episode}'
         with open(f'{file_path}_tables.npy', 'wb') as f:
             np.save(f, self.tables)
         with open(f'{file_path}_weights.npy', 'wb') as f:

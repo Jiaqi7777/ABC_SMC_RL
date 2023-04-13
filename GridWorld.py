@@ -57,6 +57,7 @@ class GridWorld:
         self.state = self.starting_position
         #self.state = random.choice(range(self.n_cell))
         self.done = False
+        self.expert_obs = Buffer(['state0', 'state1', 'action', 'rewards', 'done'])
         return self.state, None
     
     def step(self, action, state=None):
@@ -66,11 +67,11 @@ class GridWorld:
             self.state = new_state = tuple(self.P[self.state + (action, )])
         else:
             new_state = tuple(self.P[state + (action, )])
-        if state == self.goal_position:
+        if new_state == self.goal_position:
             done = True
             if state == None:
                 self.done = done
-        return new_state, self.R[new_state], done, None
+        return new_state, self.R[state], done, None
         
 
     def oneD_step(self, action, state=None):
