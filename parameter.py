@@ -1,36 +1,36 @@
 #RL
 #Env 
-env_name = 'GridWorld'
-#env_name = 'MountainCar'
+ENV_NAME = 'GridWorld'
+#ENV_NAME = 'MountainCar'
 
 #Test parameters
-# horizon = 15
-# #Number of Episodes
-# episodes = 2
-# gamma = 0.95
-# repeat_experiment = 2
-# discrete = False
-# bins = (10, )
-# last_episode = 1
+# HORIZON = 15
+# #Number of EPISODES
+# EPISODES = 2
+# GAMMA = 0.95
+# REPEAT_EXPERIMENT = 2
+# DISCRETE = False
+# BINS = (10, )
+# LAST_EPISODE = 1
 # ONLINE_LEARNING = True
-# seed = 555
+# SEED = 555
 # FROZEN_T = 5
 
 #Long Experiment
-horizon = 100
-#Number of Episodes
-episodes = 6
-gamma = 0.95
-repeat_experiment = 4
-discrete = False
-bins = (10, )
-last_episode = 1
+HORIZON = 100
+#Number of EPISODES
+EPISODES = 6
+GAMMA = 0.95
+REPEAT_EXPERIMENT = 4
+DISCRETE = False
+BINS = (10, )
+LAST_EPISODE = 1
 ONLINE_LEARNING = True
-seed = 555
+SEED = 555
 FROZEN_T = 15
-batch_training = False
-batch_size = 64
-buffer_size = 100 if batch_training else 100000000000
+BATCH_TRAINING = False
+BATCH_SIZE = 64
+BUFFER_SIZE = 100 if BATCH_TRAINING else 100000000000
 GREEDY = False
 greedy_epsilon = 0.3
 

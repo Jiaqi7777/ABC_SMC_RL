@@ -4,8 +4,7 @@ import torch
 from copy import deepcopy
 from parameter import *
    
-def generate_samples(para, model, obs, batch_indicies=None):
-    global batch_size
+def generate_samples(para, model, obs, batch_indicies=None, buffer_size=BUFFER_SIZE, batch_training=BATCH_TRAINING):
     para = para.reshape(model.state_size + (model.action_size, ))
     if not batch_training:
         batch_indicies = range(min(len(obs['state0']), buffer_size))
@@ -240,7 +239,7 @@ if __name__ == '__main__':
     parser.add_argument('-s', '--save', default=save)
     parser.add_argument('-p', '--show', default=show)
     parser.add_argument('-e', '--epsilon', default=epsilon, type=float)
-    parser.add_argument('--seed', default=seed, type=int)
+    parser.add_argument('--seed', default=SEED, type=int)
     parser.add_argument('--MCMC', default=True, action='store_false', help='Bool type')
     args = parser.parse_args()
     time = args.time
@@ -282,34 +281,34 @@ if __name__ == '__main__':
     
     if ONLINE_LEARNING:
         r_all_iter = []
-        for repeat in range(repeat_experiment):
+        for repeat in range(REPEAT_EXPERIMENT):
             samples_l = []
             model = Tabular(env=env, n_particle=n_particle, prior='normal')
             r_all_epi = []
             obs = Buffer(['state0', 'state1', 'action', 'rewards', 'done'])
             s0, _ = env.reset()
             posterior_samples = torch.tensor(model.get_parameter())
-            for e in range(episodes):
+            for e in range(EPISODES):
                 env.reset()
                 print(f'Episode {e} in repeat {repeat}')
                 R = 0
                 R_star = 0
                 h = 0
                 while True:
-                # for h in tqdm(range(horizon)):
+                # for h in tqdm(range(HORIZON)):
                     action = model.act(s0, posterior_samples)
                     s1, r, done, *info = env.step(action)
                     samples = model.r_hat(s0, s1, action)
                     samples_l.append(samples)
                     # print(samples_l)
                     #Optimal action
-                    R_star = V_star[s0] + gamma * R_star#env.R[tuple(env.P[s0 + (int(pi_star[s0]), )])]
-                    R += sum([r * gamma ** i for i in range(h + 1)])
+                    R_star = V_star[s0] + GAMMA * R_star#env.R[tuple(env.P[s0 + (int(pi_star[s0]), )])]
+                    R += sum([r * GAMMA ** i for i in range(h + 1)])
                     obs.insert({'state0': s0, 'state1': s1, 'action': action, 'rewards': r, 'done': done})
                     s0 = s1
                     if ( h + 1)  % FROZEN_T == 0 or done:
                         #MCMC
-                        batch_indicies = random.sample(range(min(len(obs._buffers['state0']), buffer_size)), k=min(batch_size, len(obs._buffers['state0'])))
+                        batch_indicies = random.sample(range(min(len(obs._buffers['state0']), buffer_size)), k=min(BATCH_SIZE, len(obs._buffers['state0'])))
     
                         torch_sample = torch.vstack(samples_l)
                         new_parameter, samples_l = mcmc.update(model.get_parameter(), obs._buffers, torch_sample, batch_indicies)#paras_history for AM

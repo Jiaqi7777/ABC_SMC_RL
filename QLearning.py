@@ -1,6 +1,7 @@
 import numpy as np
 from utils import *
 from parameter import *
+import torch
 def DynamicProgramming(Q, A, S, env, thresh = 1e-4, gamma=0.95):
     loop = 0
     delta = thresh + 0.01
@@ -24,14 +25,14 @@ def DynamicProgramming(Q, A, S, env, thresh = 1e-4, gamma=0.95):
     pi = np.argmax(Q, axis=-1)
     return pi, Q, V
 
-def QLearning(Q, env, n_episodes=10, horizon=50, gamma=0.95, epsilon=0.4):
+def QLearning(Q, env, n_episodes=10, HORIZON=50, gamma=0.95, epsilon=0.4):
     # while delta > thresh:
     #     loop += 1
     r_all_episodes_qlearning = []
     for _ in range(n_episodes):
         R = 0
         s0, _ = env.reset()
-        for t in range(horizon):
+        for t in range(HORIZON):
             a = np.argmax(Q[s0]) if np.random.uniform(0, 1) > epsilon else random.choice(range(env.action_space.n))
             s1, r, done, _ = env.step(a)
             # v_optimal = V_star[s0]#env.R[tuple(env.P[s0 + (int(pi_star[s0]), )])]
@@ -63,7 +64,7 @@ def QLearningWithData(Q, obs, gamma=0.95, training_steps=100, alpha=0.2):
     print('Value', np.round(V, 2))
     pi = np.argmax(Q, axis=-1)
     print('Policy:', pi)
-    print(np.round(Q,3))
+    # print(np.round(Q,3))
     return pi, Q, V
     
 if __name__ == '__main__':
@@ -76,8 +77,8 @@ if __name__ == '__main__':
     n_particle = 1
     stepsize = 0.03
     r = []
-    random.seed(seed)
-    np.random.seed(seed)
+    random.seed(SEED)
+    np.random.seed(SEED)
     
     env = GridWorld((3,4), obstacles=True)
     S = []
@@ -91,21 +92,21 @@ if __name__ == '__main__':
     # S = range(env.n_cell)
     A = range(env.action_space.n)
     pi_star, Q_star, V_star = DynamicProgramming(Q, A, S, env)
-    for repeat in range(repeat_experiment):
-        env.reset()
-        V = np.ones(env.n_cell)/env.observation_space.n
-        Q = np.ones(shape=(env.n_cell + (env.action_space.n, )))/env.observation_space.n / env.action_space.n
-        print('Q table with shape', Q.shape)
-        # S = range(env.n_cell)
-        A = range(env.action_space.n)
-        # DynamicProgramming(V, A, S, env)
-        pi, Q, V, r_, = QLearning(Q, env, n_episodes=episodes, horizon=horizon)
-        r_all_repeat_qlearning.append(r_)
-        # S = []
-        # for i in range(env.n_cell[0]):
-        #     for j in range(env.n_cell[1]):
-        #         S.append((i,j)) 
-        # DynamicProgramming(Q, A, S, env)
-    with open(f'Models/MCMC/q_learning_chains_T{training_steps}_{time}.npy', 'wb') as f:
-        np.save(f, r_all_repeat_qlearning)
-        print('model saved at', f'Models/MCMC/q_learning_chains_T{training_steps}_{time}.npy')
+    # for repeat in range(REPEAT_EXPERIMENT):
+    #     env.reset()
+    #     V = torch.ones(env.n_cell)/env.observation_space.n
+    #     Q = torch.ones(size=(env.n_cell + (env.action_space.n, )))/env.observation_space.n / env.action_space.n
+    #     print('Q table with shape', Q.shape)
+    #     # S = range(env.n_cell)
+    #     A = range(env.action_space.n)
+    #     # DynamicProgramming(V, A, S, env)
+    #     pi, Q, V, r_, = QLearning(Q, env, n_episodes=EPISODES, HORIZON=HORIZON)
+    #     r_all_repeat_qlearning.append(r_)
+    #     # S = []
+    #     # for i in range(env.n_cell[0]):
+    #     #     for j in range(env.n_cell[1]):
+    #     #         S.append((i,j)) 
+    #     # DynamicProgramming(Q, A, S, env)
+    # with open(f'Models/MCMC/q_learning_chains_T{training_steps}_{time}.npy', 'wb') as f:
+    #     np.save(f, r_all_repeat_qlearning)
+    #     print('model saved at', f'Models/MCMC/q_learning_chains_T{training_steps}_{time}.npy')

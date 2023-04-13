@@ -57,6 +57,7 @@ class GridWorld:
         self.state = self.starting_position
         #self.state = random.choice(range(self.n_cell))
         self.done = False
+        self.expert_obs = Buffer(['state0', 'state1', 'action', 'rewards', 'done'])
         return self.state, None
     
     def step(self, action, state=None):
