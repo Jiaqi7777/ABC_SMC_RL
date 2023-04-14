@@ -74,8 +74,8 @@ if __name__ == '__main__':
     time = time.strftime("%f")
     training_steps = 50
     repeat = 100
-    n_particle = 1
-    stepsize = 0.03
+    N_PARTICLE = 1
+    STEPSIZE = 0.03
     r = []
     random.seed(SEED)
     np.random.seed(SEED)

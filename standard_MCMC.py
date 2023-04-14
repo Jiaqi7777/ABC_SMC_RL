@@ -14,16 +14,16 @@ def likelihood(data):
         batch_indicies = range(min(len(obs['state0']), BUFFER_SIZE))
     r_hat = torch.tensor(obs['rewards'])[-BUFFER_SIZE:][batch_indicies]
     
-    prior_parameter = pyro.sample("prior_parameter", dist.MultivariateNormal(torch.zeros(dim), prior_sigma **2 * torch.eye(dim)))
+    prior_parameter = pyro.sample("prior_parameter", dist.MultivariateNormal(torch.zeros(dim), PRIOR_SIGMA **2 * torch.eye(dim)))
     mean = generate_samples(prior_parameter, model, obs, batch_indicies=batch_indicies).reshape(-1)
     with pyro.plate("data_plate"):
         pyro.sample("obs", dist.MultivariateNormal(mean, abc_epsilon ** 2 * torch.eye(len(r_hat))), obs=r_hat)
 
 
-def mcmc(data, prior_parameter, num_samples=MCMC_SAMPLE, warmup_steps=MCMC_T//10, MCMC_SHOW_DISABLE=MCMC_SHOW_DISABLE, stepsize=stepsize):
+def mcmc(data, prior_parameter, num_samples=MCMC_SAMPLE, warmup_steps=MCMC_T//10, MCMC_SHOW_DISABLE=MCMC_SHOW_DISABLE, stepsize=STEPSIZE):
     pyro.clear_param_store()
-    kernel = pyro.infer.mcmc.HMC(likelihood, full_mass=full_mass, step_size=stepsize, adapt_step_size=adapt_step_size, adapt_mass_matrix=adapt_mass_matrix, target_accept_prob=target_accept_prob)
-    # kernel = pyro.infer.mcmc.HMC(likelihood, full_mass=True, step_size=stepsize, adapt_step_size=adapt_step_size, adapt_mass_matrix=adapt_mass_matrix, target_accept_prob=target_accept_prob)
+    kernel = pyro.infer.mcmc.HMC(likelihood, full_mass=FULL_MASS, step_size=stepsize, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB)
+    # kernel = pyro.infer.mcmc.HMC(likelihood, full_mass=True, step_size=stepsize, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB)
     mcmc_run = pyro.infer.mcmc.MCMC(kernel, num_samples=num_samples, warmup_steps=warmup_steps, initial_params={'prior_parameter': prior_parameter}, disable_progbar=MCMC_SHOW_DISABLE)
     mcmc_run.run(data)
 
@@ -43,9 +43,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-T', '--training_step', default=MCMC_T, type=int)
     parser.add_argument('-t', '--time', default=datetime.datetime.now().strftime("%f"))
-    parser.add_argument('-s', '--save', default=save)
-    parser.add_argument('-p', '--show', default=show)
-    parser.add_argument('-e', '--epsilon', default=epsilon, type=float)
+    parser.add_argument('-s', '--save', default=SAVE)
+    parser.add_argument('-p', '--show', default=SHOW)
+    parser.add_argument('-e', '--epsilon', default=EPSILON, type=float)
     parser.add_argument('--seed', default=SEED, type=int)
     parser.add_argument('--MCMC', default=True, action='store_false', help='Bool type')
     parser.add_argument('-g', '--Greedy', default=GREEDY, action='store_true', help='Bool type')
@@ -59,10 +59,10 @@ if __name__ == '__main__':
     abc_epsilon = args.epsilon
     seed = args.seed
     MCMC_SHOW_DISABLE=args.MCMC
-    warmup_steps = int(training_steps * warmup_ratio)
+    warmup_steps = int(training_steps * WARMUP_RATIO)
     GREEDY = args.Greedy
 
-    n_particle = 10
+    N_PARTICLE = 10
     random.seed(seed)
     pyro.set_rng_seed(seed)
     np.random.seed(seed)
@@ -70,7 +70,7 @@ if __name__ == '__main__':
     
     env = GridWorld((3,4), obstacles=True)
     dim = env.observation_space.n * env.action_space.n
-    model = Tabular(env=env, n_particle=n_particle, prior='normal')
+    model = Tabular(env=env, n_particle=N_PARTICLE, prior='normal')
     
     S = []
     for i in range(env.n_cell[0]):
@@ -85,7 +85,7 @@ if __name__ == '__main__':
     if ONLINE_LEARNING:
         r_all_iter = []
         for repeat in range(REPEAT_EXPERIMENT):
-            model = Tabular(env=env, n_particle=n_particle, prior='normal')
+            model = Tabular(env=env, n_particle=N_PARTICLE, prior='normal')
             r_all_epi = []
             obs = Buffer(['state0', 'state1', 'action', 'rewards', 'done'])
             s0, _ = env.reset()
@@ -119,7 +119,7 @@ if __name__ == '__main__':
                         else:
                             mcmc_run = mcmc([obs._buffers, model, dim, batch_indicies, abc_epsilon], torch.tensor(posterior_samples[-1].reshape(-1)), num_samples=training_steps,  warmup_steps=warmup_steps, MCMC_SHOW_DISABLE=MCMC_SHOW_DISABLE)
                         posterior_samples = mcmc_run.get_samples()["prior_parameter"].reshape((-1, ) + env.n_cell + (env.action_space.n, ))
-                        stepsize *= decreasing_factor
+                        STEPSIZE *= DECREASING_FACTOR
                         # posterior_samples = new_posterior_samples
                         model.plot_policy(paras=posterior_samples.numpy(), title=f'policy_T{training_steps}_{time}', additional_info = env.R, save=save, show=show)
                         # model.plot_value(paras=posterior_samples.numpy(), title=f'value_T{training_steps}_{time}')
@@ -132,7 +132,7 @@ if __name__ == '__main__':
                         ax = f.get_axes()
                         for i, ai in enumerate(ax):
                             ai.axhline(y = Q_star.flatten()[i], linestyle=':', linewidth=5, color = 'g',  label = 'true q')
-                            q = np.percentile(data_plot[:, i], [plot_threshold, 100 - plot_threshold])
+                            q = np.percentile(data_plot[:, i], [PLOT_THRESHOLD, 100 - PLOT_THRESHOLD])
                             ai.set_ylim(q)   
                         f.tight_layout()
                         handles, labels = ai.get_legend_handles_labels()
@@ -144,13 +144,13 @@ if __name__ == '__main__':
                         break
                     # h += 1
                 r_all_epi.append(R)
-                with open(f'Returns/MCMC/T{training_steps}_Gdy{GREEDY}_Ep{epsilon}_Stp{initial_stepsize}_Dcrs{decreasing_factor}_{time}.npy', 'wb') as f:
+                with open(f'Returns/MCMC/T{training_steps}_Gdy{GREEDY}_Ep{EPSILON}_Stp{INITIAL_STEPSIZE}_Dcrs{DECREASING_FACTOR}_{time}.npy', 'wb') as f:
                     np.save(f, r_all_epi)
-                    print(f'EPISODES return for repeat {repeat} saved at', f'Returns/MCMC/T{training_steps}_Gdy{GREEDY}_Ep{epsilon}_Stp{initial_stepsize}_Dcrs{decreasing_factor}_{time}.npy')
+                    print(f'EPISODES return for repeat {repeat} saved at', f'Returns/MCMC/T{training_steps}_Gdy{GREEDY}_Ep{EPSILON}_Stp{INITIAL_STEPSIZE}_Dcrs{DECREASING_FACTOR}_{time}.npy')
             r_all_iter.append(r_all_epi)
-        with open(f'Returns/MCMC/T{training_steps}_Gdy{GREEDY}_Ep{epsilon}_Stp{initial_stepsize}_Dcrs{decreasing_factor}_{time}.npy', 'wb') as f:
+        with open(f'Returns/MCMC/T{training_steps}_Gdy{GREEDY}_Ep{EPSILON}_Stp{INITIAL_STEPSIZE}_Dcrs{DECREASING_FACTOR}_{time}.npy', 'wb') as f:
             np.save(f, r_all_iter)
-            print('return saved at', f'Returns/MCMC/T{training_steps}_Gdy{GREEDY}_Ep{epsilon}_Stp{initial_stepsize}_Dcrs{decreasing_factor}_{time}.npy')
+            print('return saved at', f'Returns/MCMC/T{training_steps}_Gdy{GREEDY}_Ep{EPSILON}_Stp{INITIAL_STEPSIZE}_Dcrs{DECREASING_FACTOR}_{time}.npy')
             
         plt.plot(R)
         if show:
