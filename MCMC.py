@@ -5,7 +5,8 @@ from copy import deepcopy
 from parameter import *
 from functools import partial
 import pyro
-   
+from tqdm.notebook import tqdm
+
 def generate_samples(para, model, obs, batch_indices=None, buffer_size=BUFFER_SIZE, batch_training=BATCH_TRAINING):
     para = para.reshape(model.state_size + (model.action_size, ))
     if not batch_training:
@@ -137,13 +138,17 @@ class Kernel:
     #     raise NotImplementedError
 
 class RandomWalk(Kernel):
-    def __init__(self, model, stepsize=0.5, *args):
+    def __init__(self, model, stepsize=0.5, covariance_matrix=None, *args):
         print('RandomWalk stepsize', stepsize)
         super(RandomWalk, self).__init__(model=model)   
         self.stepsize = stepsize
+        self.covariance_matrix = covariance_matrix
 
     def move(self, current_para):
-        return torch.normal(mean=current_para, std=self.stepsize)
+        if self.covariance_matrix is not None:
+            return torch.distributions.multivariate_normal.MultivariateNormal(loc=current_para, covariance_matrix=np.sqrt(self.stepsize) * self.covariance_matrix).sample()
+        else:
+            return torch.normal(mean=current_para, std=self.stepsize)
 
     def propose_accept(self, current_para, data, current_para_extra_info=None):
         proposed_para = self.move(current_para)
@@ -194,6 +199,7 @@ class MALA(Kernel):
     def propose_accept(self, current_para, data, current_para_extra_info=None):
 
         if self.use_autograd:
+            #print("using autograd")
             current_para_density_info = current_para_extra_info["density_info"] if current_para_extra_info is not None else None
 
             if current_para_extra_info is not None:
@@ -203,7 +209,7 @@ class MALA(Kernel):
                 current_para.requires_grad = True
                 current_logtarget_density, _ = self.model.logtarget_density(data=data, parameter=current_para, para_extra_info=current_para_density_info)
                 current_logtarget_density.backward()
-                current_gradient = current_para.grad
+                current_gradient = current_para.grad.clone()
                 current_para.grad.zero_()
                 current_para.requires_grad = False
 
@@ -213,11 +219,12 @@ class MALA(Kernel):
             proposed_logtarget_density, proposed_para_density_info = self.model.logtarget_density(data=data, parameter=proposed_para, para_extra_info=None)
 
             proposed_logtarget_density.backward()
-            proposed_gradient = proposed_para.grad
+            proposed_gradient = proposed_para.grad.clone()
             proposed_para.grad.zero_()
             proposed_para.requires_grad = False
 
         else:
+            #print("using manual gradient")
             current_para_density_info = current_para_extra_info["density_info"] if current_para_extra_info is not None else None
             current_logtarget_density, current_para_density_info = self.model.logtarget_density(data=data, parameter=current_para, para_extra_info=current_para_density_info)
             if current_para_extra_info is not None:
@@ -229,8 +236,8 @@ class MALA(Kernel):
 
             proposed_logtarget_density, proposed_para_density_info = self.model.logtarget_density(data=data, parameter=proposed_para, para_extra_info=None)
             proposed_gradient = self.model.logtarget_gradient(parameter=proposed_para, data=data, para_extra_info=proposed_para_density_info)
-        #print("current_grad", current_gradient)
-        #print("proposed_gradient", proposed_gradient)
+        # print("current_grad", current_gradient)
+        # print("proposed_gradient", proposed_gradient)
 
         move_ratio = torch.distributions.normal.Normal(loc=current_para + self.stepsize * current_gradient, scale=np.sqrt(2*self.stepsize)).log_prob(proposed_para).sum() - \
             torch.distributions.normal.Normal(loc=proposed_para + self.stepsize * proposed_gradient, scale=np.sqrt(2*self.stepsize)).log_prob(current_para).sum()
@@ -436,8 +443,9 @@ if __name__ == '__main__':
                             s0 = obs['state0']
                             s1 = obs['state1']
                             a = obs['action']
+                            done = np.array(obs['done'])
                             s01, s02 = np.array(s0).T
-                            s11, s12 = np.array(s1).T
+                            s11, s12 = np.array(s1)[done == False].T
                             a_prime = np.argmax(para[s11, s12], axis=-1)
                             Indicator = np.zeros(shape=(len(a), ) + para.shape) #TxTheta
                             Indicator[range(len(a)), s01, s02, a] = 1.
@@ -461,11 +469,12 @@ if __name__ == '__main__':
         
                         hessian = torch.autograd.functional.hessian(fn,torch.tensor(posterior_samples[-3].reshape(-1)))
                         #kernel = RandomWalk(model=Model, stepsize=STEPSIZE)
+                        #kernel = RandomWalk(model=Model, stepsize=STEPSIZE, covariance_matrix=-torch.linalg.inv(hessian))
                         #kernel = pCN(model=Model, stepsize=STEPSIZE)
                         #kernel = MALA(model=Model, stepsize=STEPSIZE, precondition_matrix=None)
-                        #kernel = MALA(model=Model, stepsize=STEPSIZE, precondition_matrix=-torch.linalg.inv(hessian))
+                        kernel = MALA(model=Model, stepsize=STEPSIZE, precondition_matrix=-torch.linalg.inv(hessian))
                         #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=False)
-                        kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=False, precondition_matrix=-torch.linalg.inv(hessian))
+                        #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=False, precondition_matrix=-torch.linalg.inv(hessian))
 
                         mcmc = MCMC(num_samples=training_steps, kernel=kernel, initial_params=torch.tensor(posterior_samples[-1].reshape(-1)))
                         posterior_samples = mcmc.run(torch.tensor(obs._buffers["rewards"])[-BUFFER_SIZE:][batch_indices]).reshape((-1, ) + env.n_cell + (env.action_space.n, ))
@@ -513,12 +522,50 @@ if __name__ == '__main__':
         env.uniform_policy()
         obs = env.uniform_obs._buffers
         r_hat = partial(generate_samples, model=model, obs=obs)
-        mcmc_run = mcmc(torch.tensor(obs['rewards']), torch.tensor(model.get_parameter()[0].reshape(-1)), num_samples=training_steps, warmup_steps=training_steps//10)
-        posterior_samples = mcmc_run.get_samples()["prior_parameter"]
-        print(posterior_samples.shape)
+
+        posterior_samples = torch.tensor(model.get_parameter())
+        def tabular_indicator(para, model, obs):
+            s0 = obs['state0']
+            s1 = obs['state1']
+            a = obs['action']
+            done = np.array(obs['done'])
+            s01, s02 = np.array(s0).T
+            s11, s12 = np.array(s1)[done == False].T
+            a_prime = np.argmax(para[s11, s12], axis=-1)
+            Indicator = np.zeros(shape=(len(a), ) + para.shape) #TxTheta
+            Indicator[range(len(a)), s01, s02, a] = 1.
+            Indicator[range(len(a)), s11, s12, a_prime] -= model.gamma
+            return torch.tensor(Indicator, dtype=torch.float32).reshape((len(a),-1))
+        
+        llh_transform_grad_fn = lambda data, parameter:  tabular_indicator(para=parameter.reshape(env.n_cell + (env.action_space.n, )), model=model, obs=obs._buffers)#standard form
+
+        prior = IsotropicGaussianPrior()
+        abclikelihood = GaussianABCLikelihood(epsilon=EPSILON)
+        Model = DeterministicSRModel(prior=prior, abclikelihood=abclikelihood, llh_transform_fn=r_hat, llh_transform_grad_fn=llh_transform_grad_fn)
+
+        def fn(parameter):
+            current_logtarget_density, _ = Model.logtarget_density(data=torch.tensor(obs["rewards"]), parameter=parameter, para_extra_info=None)
+            return current_logtarget_density
+
+        hessian = torch.autograd.functional.hessian(fn,torch.tensor(posterior_samples[-3].reshape(-1)))
+        #kernel = RandomWalk(model=Model, stepsize=STEPSIZE)
+        kernel = RandomWalk(model=Model, stepsize=STEPSIZE, covariance_matrix=-torch.linalg.inv(hessian))
+        #kernel = pCN(model=Model, stepsize=STEPSIZE)
+        #kernel = MALA(model=Model, stepsize=STEPSIZE, precondition_matrix=None)
+        #kernel = MALA(model=Model, stepsize=STEPSIZE, precondition_matrix=-torch.linalg.inv(hessian))
+        #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=False)
+        #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=False, precondition_matrix=-torch.linalg.inv(hessian))
+
+        mcmc = MCMC(num_samples=training_steps, kernel=kernel, initial_params=torch.tensor(posterior_samples[-1].reshape(-1)))
+        posterior_samples = mcmc.run(torch.tensor(obs["rewards"])).reshape((-1, ) + env.n_cell + (env.action_space.n, ))
+
+        
+        #mcmc_run = mcmc(torch.tensor(obs['rewards']), torch.tensor(model.get_parameter()[0].reshape(-1)), num_samples=training_steps, warmup_steps=training_steps//10)
+        #posterior_samples = mcmc_run.get_samples()["prior_parameter"]
 
         model.plot_policy(paras=posterior_samples.numpy().reshape((-1, ) + env.n_cell + (env.action_space.n, )), title=f'policy_T{training_steps}_{time}', additional_info = env.R, save=save, show=show)
         # print('ESS:', ess(chain.T))
+        posterior_samples = posterior_samples.reshape(len(posterior_samples),-1)
         f = mcp.plot_chain_panel(chains=posterior_samples.numpy()[training_steps // 5:, :4], names=env.names,
                                                                         settings=dict(add_pm2std=True, fig=dict(figsize=(10,10), dpi=250),
                                                                         mean=dict(color='y', label='mean'),
