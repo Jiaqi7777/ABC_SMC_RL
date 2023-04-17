@@ -50,6 +50,7 @@ if __name__ == '__main__':
     parser.add_argument('--seed', default=SEED, type=int)
     parser.add_argument('--MCMC', default=True, action='store_false', help='Bool type')
     parser.add_argument('-g', '--Greedy', default=GREEDY, action='store_true', help='Bool type')
+    parser.add_argument('--Env', default=ENV_NAME)
     args = parser.parse_args()
     print(args)
     time = args.time
@@ -62,6 +63,7 @@ if __name__ == '__main__':
     MCMC_SHOW_DISABLE=args.MCMC
     warmup_steps = int(training_steps * WARMUP_RATIO)
     GREEDY = args.Greedy
+    env_name = args.Env
 
     N_PARTICLE = 10
     random.seed(seed)
@@ -69,8 +71,10 @@ if __name__ == '__main__':
     np.random.seed(seed)
     torch.manual_seed(seed)
     
-    env = GridWorld((3,4), obstacles=True)
-    env = Maze()
+    if env_name == 'GridWorld':
+        env = GridWorld((3,4), obstacles=True)
+    if env_name == 'Maze':
+        env = Maze()
     dim = env.observation_space.n * env.action_space.n
     model = Tabular(env=env, n_particle=N_PARTICLE, prior='normal')
     
