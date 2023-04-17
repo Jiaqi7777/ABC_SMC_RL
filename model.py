@@ -126,20 +126,20 @@ class Tabular:
         return random.choices(self.tables, weights)
 
     def q_value(self, table, s, a): 
-        if hasattr(a, "__len__"):
+        if hasattr(a, "__len__"):# multiple s, mutiple a 
             if len(table.shape) > len(s) + len(a):
                 return table[(slice(None), *s, a)]
-        elif len(table.shape) > len(s+ (a,)):
+        elif len(table.shape) > len(s+ (a,)):# multiple s, single a 
             return table[(slice(None), *(s+ (a,)))]
         if hasattr(s[0], "__len__"):
-            return table[s[0], s[1], a]
+            return table[tuple(s) + (a, )]
         return table[s][a]
 
     def v_value(self, table, s):
         if len(table.shape) > len(s) + 1:
             return torch.max(table[(slice(None), *s)], 1)
         if hasattr(s[0], "__len__"):
-            return torch.max(table[s[0], s[1]], -1)
+            return torch.max(table[tuple(s)], -1)
         return torch.max(table[s])
 
     def r_hat(self, s0, s1, a):
@@ -212,10 +212,9 @@ class Tabular:
             s0, s1 = uniform_grid(high=self.env.observation_space_high, low=self.env.observation_space_low, bins=self.bins, include_low=0)
         
         S0, S1 = np.meshgrid(s0, s1)
-        print(s0, s1)
         print('policy:', '\n',  para)
         para = para
-        plot_2d(s0, s1, para, title=title, xlabel=xlabel, ylabel=ylabel, zlabel=zlabel, show=show, additional_info=additional_info, save=save)
+        plot_2d(s0, s1, para, action_dim=self.action_size, title=title, xlabel=xlabel, ylabel=ylabel, zlabel=zlabel, show=show, additional_info=additional_info, save=save)
         # plot_3d(S0, S1, para.T, title=title, xlabel=xlabel, ylabel=ylabel, zlabel=zlabel, show=show)
 
     def save(self, episode, file_path='', HORIZON=200, ENV_NAME=''):

@@ -32,6 +32,7 @@ def mcmc(data, prior_parameter, num_samples=MCMC_SAMPLE, warmup_steps=MCMC_T//10
 
 if __name__ == '__main__':
     from GridWorld import *
+    from Maze import *
     from model import *
     from QLearning import *
     from tqdm import tqdm
@@ -69,13 +70,17 @@ if __name__ == '__main__':
     torch.manual_seed(seed)
     
     env = GridWorld((3,4), obstacles=True)
+    env = Maze()
     dim = env.observation_space.n * env.action_space.n
     model = Tabular(env=env, n_particle=N_PARTICLE, prior='normal')
     
     S = []
-    for i in range(env.n_cell[0]):
-        for j in range(env.n_cell[1]):
-            S.append((i,j)) 
+    if len(env.n_cell) == 1:
+        S = [(i, ) for i in range(env.n_cell[0])]
+    else:
+        for i in range(env.n_cell[0]):
+            for j in range(env.n_cell[1]):
+                S.append((i,j)) 
     Q = np.ones(shape=(env.n_cell + (env.action_space.n, )))/env.observation_space.n / env.action_space.n
     A = range(env.action_space.n)
     pi_star, Q_star, V_star = DynamicProgramming(Q, A, S, env)

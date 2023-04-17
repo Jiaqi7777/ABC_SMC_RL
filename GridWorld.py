@@ -63,13 +63,15 @@ class GridWorld:
     def step(self, action, state=None):
         done = False
         if state == None:
+            real_step = True
             state = self.state
             self.state = new_state = tuple(self.P[self.state + (action, )])
         else:
+            real_step = False
             new_state = tuple(self.P[state + (action, )])
         if new_state == self.goal_position:
             done = True
-            if state == None:
+            if real_step:
                 self.done = done
         return new_state, self.R[state], done, None
         

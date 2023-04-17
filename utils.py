@@ -5,11 +5,19 @@ def argmaxs(arr):
     mask = arr == arr.max()
     return random.choice(np.array(range(len(arr)))[mask])
 
-def plot_2d(X, Y, Z, title=None, xlabel='s0', ylabel='s1', zlabel='Value', show=False, additional_info=[], save=False, figure_path = 'Figures/MCMC/'):
-    arrows = {2:(1,0), 0:(-1,0),1:(0,1),3:(0,-1)}
+def expand_dims(arr):
+    arr = np.array(arr)
+    if len(arr.shape) >= 2:
+        return arr
+    return arr.reshape(1, -1)
+
+def plot_2d(X, Y, Z, action_dim=4, title=None, xlabel='s0', ylabel='s1', zlabel='Value', show=False, additional_info=[], save=False, figure_path = 'Figures/MCMC/'):
+    Z = expand_dims(Z)
+    arrows = {2:(1,0), 0:(-1,0),1:(0,1),3:(0,-1)} if action_dim == 4 else {0:(0, -1), 1:(0,1)}
     scale = 0.25
     fig, ax = plt.subplots()
     if additional_info != []:
+        additional_info = expand_dims(additional_info)
         im = ax.imshow(additional_info)
     ax.set_xticks(np.arange(len(Y)), labels=Y) #Y is the column number
     ax.set_yticks(np.arange(len(X)), labels=X) #X is the row number
