@@ -87,7 +87,7 @@ if __name__ == '__main__':
                 S.append((i,j)) 
     Q = np.ones(shape=(env.n_cell + (env.action_space.n, )))/env.observation_space.n / env.action_space.n
     A = range(env.action_space.n)
-    pi_star, Q_star, V_star = DynamicProgramming(Q, A, S, env)
+    pi_star, Q_star, V_star = DynamicProgramming(Q, A, S, env, gamma=GAMMA)
     
     env.reset()
     results = []
@@ -150,6 +150,7 @@ if __name__ == '__main__':
                             plt.show()
                     if done:
                         print("done with", h + 1, 'steps')
+                        print('Return', R)
                         break
                     # h += 1
                 r_all_epi.append(R)

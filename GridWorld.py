@@ -8,9 +8,7 @@ from model import *
 
 class GridWorld:
     def __init__(self, n_cell, starting_position=(0,0), goal_position=(-1,-1), obstacles=False):
-        '''
-        actions: [1,-1]
-        '''
+        self.env_name = 'GridWorld'
         self.n_cell = n_cell
         self.starting_position = starting_position
         if goal_position == (-1, -1):

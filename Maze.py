@@ -1,13 +1,14 @@
 import numpy as np
 from gym import spaces
 class Maze:
-    def __init__(self, action_size=2, depth=10):
+    def __init__(self, action_size=2, depth=5):
+        self.env_name = 'Maze'
         self.action_size = action_size
         self.starting_position = (0, )
         self.goal_position = (depth - 1, )
         self.n_cell = (depth, )
         if action_size == 2:
-            self.R = [0, 3]
+            self.R = np.array([[-3, -1] for i in range(depth)])
         else:
             return NotImplementedError
         self.done = False
@@ -35,7 +36,7 @@ class Maze:
         if real_step:
             self.done = done
             self.state = new_state
-        return  new_state, self.R[action], done, None
+        return  new_state, self.R[new_state + (action, )], done, None
         
 if __name__ == '__main__':
     import random

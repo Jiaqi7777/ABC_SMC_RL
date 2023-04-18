@@ -214,7 +214,7 @@ class Tabular:
         S0, S1 = np.meshgrid(s0, s1)
         print('policy:', '\n',  para)
         para = para
-        plot_2d(s0, s1, para, action_dim=self.action_size, title=title, xlabel=xlabel, ylabel=ylabel, zlabel=zlabel, show=show, additional_info=additional_info, save=save)
+        plot_2d(s0, s1, para, env_name=self.env.env_name, action_dim=self.action_size, title=title, xlabel=xlabel, ylabel=ylabel, zlabel=zlabel, show=show, additional_info=additional_info, save=save)
         # plot_3d(S0, S1, para.T, title=title, xlabel=xlabel, ylabel=ylabel, zlabel=zlabel, show=show)
 
     def save(self, episode, file_path='', HORIZON=200, ENV_NAME=''):
