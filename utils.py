@@ -143,3 +143,10 @@ def compare_r_vs_episodes_repeat(r_1, r_2, figure_path='Figures/', show=True, ti
     if show:
         plt.show()
     plt.clf()
+    
+def unique_observation(obs):
+    '''
+    obs is of Buffer._buffers() type
+    '''
+    
+    return obs

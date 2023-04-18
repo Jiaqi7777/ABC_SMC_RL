@@ -112,7 +112,7 @@ if __name__ == '__main__':
                     #Optimal action
                     # R_star = V_star[s0] + gamma * R_star#env.R[tuple(env.P[s0 + (int(pi_star[s0]), )])] #for regret
                     R += r#sum([r * gamma ** i for i in range(h + 1)])
-                    obs.insert({'state0': s0, 'state1': s1, 'action': action, 'rewards': r, 'done': done})
+                    obs.insert({'state0': s0, 'state1': s1, 'action': action, 'rewards': r, 'done': done}, unique=UNIQUE_OBS)
                     s0 = s1
                     # if e==0 and h==0:
                     #     print(posterior_samples[:, 0, 0], h, posterior_samples.shape)

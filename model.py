@@ -39,15 +39,19 @@ def uniform_grid(low, high, bins=(10,10), include_low=1, verbose=False):
 class Buffer:
     def __init__(self, entry_keys, seed=555):
         self._buffers = {key: [] for key in entry_keys}
+        self.unique_set = np.array([list(self._buffers.values())]).T
 
-    def insert(self, items):
+    def insert(self, items, unique=False):
         if set(items.keys()) != set(self._buffers.keys()):
             raise IndexError
-
+        print(list(items.values()),np.any(np.all(np.isin(self.unique_set, list(items.values()), True), axis=1)))
+        if unique and np.any(np.all(np.isin(self.unique_set, list(items.values()), True), axis=1)):
+            return 
         for k, v in items.items():
             self._buffers[k].append(v)
             # if len(self._buffers[k]) > BUFFER_SIZE:
             #     self._buffers[k].pop(0)
+        self.unique_set = np.array([list(self._buffers.values())]).T
         
     def get_minibatch(self, batch_size):
         if batch_size == 1:
