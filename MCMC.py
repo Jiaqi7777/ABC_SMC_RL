@@ -424,7 +424,7 @@ if __name__ == '__main__':
                     #     print(np.argmax(posterior_samples[:, 0, 0], axis=-1))
                     
                     if ( h + 1)  % FROZEN_T == 0 or done:
-                        print(obs._buffers['state0'][-FROZEN_T:])
+                        print(*zip(obs._buffers['state0'][-FROZEN_T:],obs._buffers['action'][-FROZEN_T:]))
                         #MCMC
                         if BATCH_TRAINING:
                             batch_indices = random.sample(range(min(len(obs._buffers['state0']), BUFFER_SIZE)), k=min(BATCH_SIZE, len(obs._buffers['state0']))) #TODO: what is this?
@@ -454,7 +454,7 @@ if __name__ == '__main__':
                         
                         llh_transform_grad_fn = lambda data, parameter:  tabular_indicator(para=parameter.reshape(env.n_cell + (env.action_space.n, )), model=model, obs=obs._buffers)#standard form
 
-                        prior = IsotropicGaussianPrior()
+                        prior = IsotropicGaussianPrior(sd=PRIOR_SIGMA)
                         abclikelihood = GaussianABCLikelihood(epsilon=EPSILON)
                         Model = DeterministicSRModel(prior=prior, abclikelihood=abclikelihood, llh_transform_fn=r_hat, llh_transform_grad_fn=llh_transform_grad_fn)
 
@@ -472,9 +472,9 @@ if __name__ == '__main__':
                         #kernel = RandomWalk(model=Model, stepsize=STEPSIZE, covariance_matrix=-torch.linalg.inv(hessian))
                         #kernel = pCN(model=Model, stepsize=STEPSIZE)
                         #kernel = MALA(model=Model, stepsize=STEPSIZE, precondition_matrix=None)
-                        kernel = MALA(model=Model, stepsize=STEPSIZE, precondition_matrix=-torch.linalg.inv(hessian))
+                        #kernel = MALA(model=Model, stepsize=STEPSIZE, precondition_matrix=-torch.linalg.inv(hessian))
                         #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=False)
-                        #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=False, precondition_matrix=-torch.linalg.inv(hessian))
+                        kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=False, precondition_matrix=-torch.linalg.inv(hessian))
 
                         mcmc = MCMC(num_samples=training_steps, kernel=kernel, initial_params=torch.tensor(posterior_samples[-1].reshape(-1)))
                         posterior_samples = mcmc.run(torch.tensor(obs._buffers["rewards"])[-BUFFER_SIZE:][batch_indices]).reshape((-1, ) + env.n_cell + (env.action_space.n, ))

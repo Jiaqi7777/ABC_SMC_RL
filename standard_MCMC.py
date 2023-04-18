@@ -160,7 +160,7 @@ if __name__ == '__main__':
         env.uniform_policy()
         obs = env.uniform_obs._buffers
         r_hat = partial(generate_samples, model=model, obs=obs)
-        mcmc_run = mcmc(torch.tensor(obs['rewards']), torch.tensor(model.get_parameter()[0].reshape(-1)), num_samples=training_steps, warmup_steps=training_steps//10)
+        mcmc_run = mcmc([obs, model, dim, slice(None), abc_epsilon], torch.tensor(model.get_parameter()[0].reshape(-1)), num_samples=training_steps, warmup_steps=training_steps//10)
         posterior_samples = mcmc_run.get_samples()["prior_parameter"]
         print(posterior_samples.shape)
 
