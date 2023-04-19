@@ -96,7 +96,7 @@ class Tabular:
         else:
             raise NotImplementedError(f'The prior method corresponds to {prior} has not been implemented')
 
-    def act(self, state, table=[], weights=[], GREEDY=False, greedy_epsilon=GREEDY_EPSILON):
+    def act(self, state, table=[], weights=[], greedy=False, greedy_epsilon=GREEDY_EPSILON):
         if table == []:
             return self.act(state, self.tables, weights=self._weights)
         elif table[0].shape == self.tables[0].shape:
@@ -109,7 +109,7 @@ class Tabular:
             # thompson_weights = thompson_matrix @ weights
             # return np.argmax(thompson_weights)
             # return random.choices(range(self.action_size), thompson_weights)[0]
-            if GREEDY:
+            if greedy:
                 if np.random.uniform(0, 1) > greedy_epsilon:
                     table = torch.mean(tables, 0)
                 else: 
