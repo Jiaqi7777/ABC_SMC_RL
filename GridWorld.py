@@ -92,7 +92,7 @@ class GridWorld:
         return (new_state, ), reward, done, None
     
     def plot_env(self, value=[]):
-        print(self.R)
+        # print(self.R)
         # norm = colors.BoundaryNorm(bounds, cmap.N)
         value = self.R if value == [] else value
         fig, ax = plt.subplots()

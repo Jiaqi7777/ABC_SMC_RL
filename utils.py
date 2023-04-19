@@ -26,10 +26,11 @@ def plot_2d(X, Y, Z, env_name='GridWorld', action_dim=4, title=None, xlabel='s0'
         ax.set_yticks(np.arange(len(X[0])), labels=X[0]) 
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
-    # for i in range(len(X)):
-    #     for j in range(len(Y)):
-    #         # text = ax.text(j, i, Z[i, j], ha="center", va="center", color="w")
-    #         ax.arrow(j, i, scale*arrows[Z[i, j]][1], scale*arrows[Z[i, j]][0], head_width=0.1)
+    if action_dim == 4:
+        for i in range(len(X)):
+            for j in range(len(Y)):
+                # text = ax.text(j, i, Z[i, j], ha="center", va="center", color="w")
+                ax.arrow(j, i, scale*arrows[Z[i, j]][1], scale*arrows[Z[i, j]][0], head_width=0.1)
     ax.set_title(title)
     fig.tight_layout()
     if show:
@@ -85,15 +86,16 @@ def plot_return_for_epsiodes(r_all_episodes, figure_path='Figures/', show=False)
         plt.show()
     plt.clf()
     
-def plot_return_vs_episodes(r_all_episodes, smooth=1, figure_path='Figures/', show=False):
+def plot_return_vs_episodes(r_all_episodes, smooth=1, figure_path='Figures/', show=False, save=False):
     r_all_episodes = np.convolve(np.array(r_all_episodes), np.ones(smooth)/smooth, mode='valid')
     plt.plot(r_all_episodes)
     plt.xlabel('episodes')
     plt.ylabel('Return')
     title = 'Return for each episodes'
     plt.title(title)
-    plt.savefig(f'{figure_path+title}.png')
-    print('figure saved at ', f'{figure_path+title}.png')
+    if save:
+        plt.savefig(f'{figure_path+title}.png')
+        print('figure saved at ', f'{figure_path+title}.png')
     if show:
         plt.show()
     plt.clf()
@@ -109,7 +111,7 @@ def plot_return_vs_episodes_repeat(r_all_episodes_repeat, figure_path='Figures/'
     plt.title(f'Return for each episodes averaging over {N} random runs')
     if save:
         plt.savefig(f'{figure_path+title}.png')
-    print('figure saved at ', f'{figure_path+title}.png')
+        print('figure saved at ', f'{figure_path+title}.png')
     if show:
         plt.show()
     plt.clf()
@@ -137,16 +139,10 @@ def compare_r_vs_episodes_repeat(r_1, r_2, figure_path='Figures/', show=True, ti
     plt.fill_between(range(len(r_2[0])), r_mean-r_std/np.sqrt(N), r_mean+r_std/np.sqrt(N), alpha=0.2)
     plt.legend()
     if save:
-        plt.savefig(f'{figure_path+title}.png')
-    print('figure saved at ', f'{figure_path+title}.png')
+        plt.savefig(f'{figure_path+title}.png', bbox_inches='tight')
+        print('figure saved at ', f'{figure_path+title}.png')
     
     if show:
         plt.show()
     plt.clf()
     
-def unique_observation(obs):
-    '''
-    obs is of Buffer._buffers() type
-    '''
-    
-    return obs

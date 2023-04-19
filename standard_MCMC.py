@@ -22,7 +22,7 @@ def likelihood(data):
 
 def mcmc(data, prior_parameter, num_samples=MCMC_SAMPLE, warmup_steps=MCMC_T//10, MCMC_SHOW_DISABLE=MCMC_SHOW_DISABLE, stepsize=STEPSIZE):
     pyro.clear_param_store()
-    kernel = pyro.infer.mcmc.HMC(likelihood, full_mass=FULL_MASS, step_size=stepsize, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB)
+    kernel = pyro.infer.mcmc.HMC(likelihood, full_mass=FULL_MASS, step_size=stepsize, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB, num_steps=NUM_STEPS)
     # kernel = pyro.infer.mcmc.HMC(likelihood, full_mass=True, step_size=stepsize, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB)
     mcmc_run = pyro.infer.mcmc.MCMC(kernel, num_samples=num_samples, warmup_steps=warmup_steps, initial_params={'prior_parameter': prior_parameter}, disable_progbar=MCMC_SHOW_DISABLE)
     mcmc_run.run(data)
@@ -73,6 +73,7 @@ if __name__ == '__main__':
     
     if env_name == 'GridWorld':
         env = GridWorld((3,4), obstacles=True)
+        env.plot_env()
     if env_name == 'Maze':
         env = Maze()
     dim = env.observation_space.n * env.action_space.n
@@ -87,7 +88,7 @@ if __name__ == '__main__':
                 S.append((i,j)) 
     Q = np.ones(shape=(env.n_cell + (env.action_space.n, )))/env.observation_space.n / env.action_space.n
     A = range(env.action_space.n)
-    pi_star, Q_star, V_star = DynamicProgramming(Q, A, S, env, gamma=GAMMA)
+    pi_star, Q_star, V_star = DynamicProgramming(Q, A, S, env, gamma=GAMMA, show=show)
     
     env.reset()
     results = []
@@ -112,14 +113,15 @@ if __name__ == '__main__':
                     #Optimal action
                     # R_star = V_star[s0] + gamma * R_star#env.R[tuple(env.P[s0 + (int(pi_star[s0]), )])] #for regret
                     R += r#sum([r * gamma ** i for i in range(h + 1)])
-                    obs.insert({'state0': s0, 'state1': s1, 'action': action, 'rewards': r, 'done': done}, unique=UNIQUE_OBS)
+                    obs.insert({'state0': s0, 'state1': s1, 'action': int(action), 'rewards': r, 'done': done}, unique=UNIQUE_OBS)
                     s0 = s1
                     # if e==0 and h==0:
                     #     print(posterior_samples[:, 0, 0], h, posterior_samples.shape)
                     #     print(np.argmax(posterior_samples[:, 0, 0], axis=-1))
                     
                     if ( h + 1)  % FROZEN_T == 0 or done:
-                        print(obs._buffers['state0'][-FROZEN_T:])
+                        # print(obs._buffers['state0'][-FROZEN_T:])
+                        print(obs._buffers)
                         #MCMC
                         batch_indicies = random.sample(range(min(len(obs._buffers['state0']), BUFFER_SIZE)), k=min(BATCH_SIZE, len(obs._buffers['state0'])))
                         r_hat = partial(generate_samples, model=model, obs=obs._buffers,  batch_indicies=batch_indicies)
@@ -133,7 +135,7 @@ if __name__ == '__main__':
                         model.plot_policy(paras=posterior_samples.numpy(), title=f'policy_T{training_steps}_{time}', additional_info = env.R, save=save, show=show)
                         # model.plot_value(paras=posterior_samples.numpy(), title=f'value_T{training_steps}_{time}')
                         print('Mean Q values', torch.round(torch.mean(posterior_samples, 0), decimals=2))
-                        data_plot = posterior_samples.numpy().reshape(posterior_samples.shape[0], -1)[:, :8]
+                        data_plot = posterior_samples.numpy().reshape(posterior_samples.shape[0], -1)[:, -12:-4]
                         f = mcp.plot_chain_panel(chains=data_plot, names=env.names,
                                                                         settings=dict(add_pm2std=True, fig=dict(figsize=(10,10), dpi=250),
                                                                         mean=dict(color='y', label='mean'),
