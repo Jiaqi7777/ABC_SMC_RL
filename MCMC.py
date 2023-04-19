@@ -81,7 +81,7 @@ class GaussianABCLikelihood():
 
         mean = self.compute_mean(parameter=parameter, mean_fn=mean_fn, llh_info_dict=llh_info_dict)
         llh = torch.distributions.normal.Normal(loc=mean,scale=self.epsilon).log_prob(data).sum()
-        return llh, {"mean":mean}
+        return llh, {"mean":mean.detach()}
     
     def compute_mean(self, parameter=None, mean_fn=None, llh_info_dict=dict()):
         """if mean is provided, mean_fn is not used"""
@@ -167,13 +167,17 @@ class RandomWalk(Kernel):
             return torch.normal(mean=current_para, std=self.stepsize)
 
     def propose_accept(self, current_para, data, current_para_info_dict=dict()):
+
+        current_para_llh_info_dict = current_para_info_dict["llh_info_dict"] if current_para_info_dict.get("llh_info_dict") is not None else dict()
         proposed_para = self.move(current_para)
 
-        current_logtarget_density, _ = self.model.logtarget_density(data=data, parameter=current_para, llh_info_dict=current_para_info_dict)
-        proposed_logtarget_density, proposed_para_extra_info = self.model.logtarget_density(data=data, parameter=proposed_para, llh_info_dict=dict())
+        current_logtarget_density, _ = self.model.logtarget_density(data=data, parameter=current_para, llh_info_dict=current_para_llh_info_dict)
+        proposed_logtarget_density, proposed_para_llh_info_dict = self.model.logtarget_density(data=data, parameter=proposed_para, llh_info_dict=dict())
         accept_prob = proposed_logtarget_density - current_logtarget_density
 
-        return accept_prob, proposed_para, proposed_para_extra_info #acceptance_prob, proposal, extra_stat_for_proposal
+        proposed_para_info_dict = {"llh_info_dict": proposed_para_llh_info_dict, "logdensities":proposed_logtarget_density}
+
+        return accept_prob, proposed_para, proposed_para_info_dict #acceptance_prob, proposal, extra_stat_for_proposal
     
 class pCN(Kernel):
     def __init__(self, model, stepsize=0.5, *args):
@@ -186,22 +190,25 @@ class pCN(Kernel):
         return np.sqrt(1 - self.stepsize ** 2) * current_para + self.stepsize * torch.normal(mean=torch.zeros(current_para.size()), std=self.sigma)
     
     def propose_accept(self, current_para, data, current_para_info_dict=dict()):
+
+        current_para_llh_info_dict = current_para_info_dict["llh_info_dict"] if current_para_info_dict.get("llh_info_dict") is not None else dict()
+    
         proposed_para = self.move(current_para)
 
-        current_llh, _ = self.model.llh(data=data, parameter=current_para, llh_info_dict=current_para_info_dict)
-        proposed_llh, proposed_para_extra_info = self.model.llh(data=data, parameter=proposed_para, llh_info_dict=dict())
+        current_llh, _ = self.model.llh(data=data, parameter=current_para, llh_info_dict=current_para_llh_info_dict)
+        proposed_llh, proposed_para_llh_info_dict = self.model.llh(data=data, parameter=proposed_para, llh_info_dict=dict())
         accept_prob = proposed_llh - current_llh
 
-        return accept_prob, proposed_para, proposed_para_extra_info #acceptance_prob, proposal, extra_stat_for_proposal
+        proposed_para_info_dict = {"llh_info_dict": proposed_para_llh_info_dict, "logdensities":proposed_llh}
+
+        return accept_prob, proposed_para, proposed_para_info_dict #acceptance_prob, proposal, extra_stat_for_proposal
     
 class MALA(Kernel):
     def __init__(self, model, stepsize=0.5, precondition_matrix=None, use_autograd=True, *args):
         print('MALA stepsize', stepsize)
         super(MALA, self).__init__(model=model)   
         self.stepsize = stepsize
-        #self.sigma = self.prior.sigma
         self.precondition = precondition_matrix
-        #self.gradient = gradient_fn #should take parameter, data as input, gradient as output
         self.use_autograd = use_autograd
 
     def move(self, current_para, current_gradient):
@@ -210,58 +217,64 @@ class MALA(Kernel):
         else:
             noise = torch.distributions.multivariate_normal.MultivariateNormal(loc=torch.zeros(current_para.size()), covariance_matrix=self.precondition).sample()
             proposed_para = current_para + self.stepsize * (self.precondition @ current_gradient) + np.sqrt(2 * self.stepsize) * noise
+            #print("gradient step", self.stepsize * (self.precondition @ current_gradient))
+            #print("noise",  np.sqrt(2 * self.stepsize) * noise)
+            #print("current_para", current_para)
         return proposed_para
 
     def propose_accept(self, current_para, data, current_para_info_dict=dict()):
 
         if self.use_autograd:
             #print("using autograd")
-            current_para_density_info = current_para_info_dict["density_info"] if current_para_info_dict.get("density_info") is not None else dict()
+            current_para_llh_info_dict = current_para_info_dict["llh_info_dict"] if current_para_info_dict.get("llh_info_dict") is not None else dict()
 
             if current_para_info_dict.get("gradient") is not None:
                 current_gradient = current_para_info_dict["gradient"]
-                current_logtarget_density, _ = self.model.logtarget_density(data=data, parameter=current_para, llh_info_dict=current_para_density_info)
+                current_logtarget_density, _ = self.model.logtarget_density(data=data, parameter=current_para, llh_info_dict=current_para_llh_info_dict)
+
             else:
                 current_para.requires_grad = True
-                current_logtarget_density, _ = self.model.logtarget_density(data=data, parameter=current_para, llh_info_dict=current_para_density_info)
+                current_logtarget_density, _ = self.model.logtarget_density(data=data, parameter=current_para, llh_info_dict=current_para_llh_info_dict)
                 current_logtarget_density.backward()
                 current_gradient = current_para.grad.clone()
                 current_para.grad.zero_()
                 current_para.requires_grad = False
+                current_logtarget_density = current_logtarget_density.detach()
 
             proposed_para = self.move(current_para=current_para, current_gradient=current_gradient)
             proposed_para = proposed_para.detach().requires_grad_(True)
 
-            proposed_logtarget_density, proposed_para_density_info = self.model.logtarget_density(data=data, parameter=proposed_para, llh_info_dict=dict())
+            proposed_logtarget_density, proposed_para_llh_info_dict = self.model.logtarget_density(data=data, parameter=proposed_para, llh_info_dict=dict())
 
             proposed_logtarget_density.backward()
             proposed_gradient = proposed_para.grad.clone()
             proposed_para.grad.zero_()
             proposed_para.requires_grad = False
+            proposed_logtarget_density = proposed_logtarget_density.detach()
 
         else:
             #print("using manual gradient")
-            current_para_density_info = current_para_info_dict["density_info"] if current_para_info_dict.get("density_info") is not None else dict()
-            current_logtarget_density, current_para_density_info = self.model.logtarget_density(data=data, parameter=current_para, llh_info_dict=current_para_density_info)
+            current_para_llh_info_dict = current_para_info_dict["llh_info_dict"] if current_para_info_dict.get("llh_info_dict") is not None else dict()
+            current_logtarget_density, current_para_llh_info_dict = self.model.logtarget_density(data=data, parameter=current_para, llh_info_dict=current_para_llh_info_dict)
             if current_para_info_dict.get("gradient") is not None:
                 current_gradient = current_para_info_dict["gradient"]
             else:
-                current_gradient = self.model.logtarget_gradient(data=data, parameter=current_para, llh_info_dict=current_para_density_info)
+                current_gradient = self.model.logtarget_gradient(data=data, parameter=current_para, llh_info_dict=current_para_llh_info_dict)
 
             proposed_para = self.move(current_para=current_para, current_gradient=current_gradient)
 
-            proposed_logtarget_density, proposed_para_density_info = self.model.logtarget_density(data=data, parameter=proposed_para, llh_info_dict=dict())
-            proposed_gradient = self.model.logtarget_gradient(parameter=proposed_para, data=data, llh_info_dict=proposed_para_density_info)
+            proposed_logtarget_density, proposed_para_llh_info_dict = self.model.logtarget_density(data=data, parameter=proposed_para, llh_info_dict=dict())
+            proposed_gradient = self.model.logtarget_gradient(parameter=proposed_para, data=data, llh_info_dict=proposed_para_llh_info_dict)
         # print("current_grad", current_gradient)
         # print("proposed_gradient", proposed_gradient)
 
         move_ratio = torch.distributions.normal.Normal(loc=current_para + self.stepsize * current_gradient, scale=np.sqrt(2*self.stepsize)).log_prob(proposed_para).sum() - \
             torch.distributions.normal.Normal(loc=proposed_para + self.stepsize * proposed_gradient, scale=np.sqrt(2*self.stepsize)).log_prob(current_para).sum()
         accept_prob = proposed_logtarget_density - current_logtarget_density - move_ratio
+        print("diff a", proposed_logtarget_density - current_logtarget_density, "diff b", move_ratio)
+        proposed_para_info_dict = {"llh_info_dict": proposed_para_llh_info_dict, "gradient": proposed_gradient, "logdensities":proposed_logtarget_density.detach()}
 
-        proposed_para_extra_info = {"density_info": proposed_para_density_info, "gradient": proposed_gradient, "logdensities":proposed_logtarget_density}
-
-        return accept_prob, proposed_para, proposed_para_extra_info #acceptance_prob, proposal, extra_stat_for_proposal
+        return accept_prob, proposed_para, proposed_para_info_dict #acceptance_prob, proposal, extra_stat_for_proposal
     
     # def inverse_riemann_mass(self, Indicator):
     #     Indicator_flatten = Indicator.reshape(Indicator.shape[0],-1)
@@ -340,20 +353,21 @@ class MCMC:
 
         pbar = tqdm(range(self.num_samples))
         for i in pbar:
-            accept_prob, proposed_para, proposed_para_extra_info  = self.kernel.propose_accept(current_para=current_para, 
+            accept_prob, proposed_para, proposed_para_info_dict  = self.kernel.propose_accept(current_para=current_para, 
                                                                          data=data, 
                                                                          current_para_info_dict=current_para_info_dict)
 
             if np.log(np.random.uniform(0,1)) < accept_prob:
                 current_para = proposed_para
-                current_para_info_dict = proposed_para_extra_info
+                current_para_info_dict = proposed_para_info_dict
                 self.accepted += 1
 
             pbar.set_description("Acceptance probability {}".format(np.round(self.accepted/(i+1), 2)))
 
             self.samples[i+1] = current_para
             self.logdensities[i+1] = current_para_info_dict["logdensities"]
-            self.proposed_logdensities[i+1] = proposed_para_extra_info["logdensities"]
+            self.proposed_logdensities[i+1] = proposed_para_info_dict["logdensities"]
+            self.accept_prob[i+1] = accept_prob
 
         return self.samples
     
@@ -366,11 +380,39 @@ class MCMC:
     def get_proposed_logdensities(self):
         return self.proposed_logdensities
     
+    def get_accept_prob(self):
+        return self.accept_prob
+    
     def reset(self):
         self.samples = torch.zeros((self.num_samples+1, self.params_dim))
         self.logdensities = torch.zeros(self.num_samples+1)
         self.proposed_logdensities = torch.zeros(self.num_samples+1)
         self.accepted = 0
+        self.accept_prob = torch.zeros(self.num_samples+1)
+
+class MCMC_pyro(MCMC):
+    def __init__(self, kernel, num_samples=MCMC_SAMPLE, initial_params=None, params_dim=None, warmup_steps=MCMC_T//5, disable_progbar=MCMC_SHOW_DISABLE, **kwargs):
+        super(MCMC_pyro, self).__init__(kernel=kernel, num_samples=num_samples, initial_params=initial_params, params_dim=params_dim, **kwargs)
+        self.pyro_mcmc = pyro.infer.mcmc.MCMC(kernel=kernel, num_samples=num_samples, initial_params={'prior_parameter': initial_params}, warmup_steps=warmup_steps, disable_progbar=disable_progbar, **kwargs)
+
+    def run(self, data):
+
+        self.reset()
+
+        self.pyro_mcmc.run(data)
+        self.samples = self.pyro_mcmc.get_samples()["prior_parameter"]
+        return self.samples
+    
+    def get_logdensities(self):
+        raise NotImplementedError
+
+    def get_proposed_logdensities(self):
+        raise NotImplementedError
+    
+    def get_accept_prob(self):
+        raise NotImplementedError
+
+
 
 
 if __name__ == '__main__':
@@ -389,6 +431,7 @@ if __name__ == '__main__':
     parser.add_argument('-s', '--save', default=SAVE)
     parser.add_argument('-p', '--show', default=SHOW)
     parser.add_argument('-e', '--epsilon', default=EPSILON, type=float)
+    parser.add_argument('-n', '--stepsize', default=STEPSIZE, type=float)
     parser.add_argument('--seed', default=SEED, type=int)
     parser.add_argument('--MCMC', default=True, action='store_false', help='Bool type')
     parser.add_argument('-g', '--Greedy', default=GREEDY, action='store_true', help='Bool type')
@@ -402,6 +445,7 @@ if __name__ == '__main__':
     abc_epsilon = args.epsilon
     seed = args.seed
     MCMC_SHOW_DISABLE=args.MCMC
+    STEPSIZE = args.stepsize
     warmup_steps = int(training_steps * WARMUP_RATIO)
     GREEDY = args.Greedy
 
@@ -428,7 +472,7 @@ if __name__ == '__main__':
     if ONLINE_LEARNING:
         r_all_iter = []
         for repeat in range(REPEAT_EXPERIMENT):
-            model = Tabular(env=env, n_particle=N_PARTICLE, prior='normal')
+            model = Tabular(env=env, n_particle=training_steps, prior='normal')
             r_all_epi = []
             obs = Buffer(['state0', 'state1', 'action', 'rewards', 'done'])
             s0, _ = env.reset()
@@ -461,13 +505,6 @@ if __name__ == '__main__':
                             batch_indices = slice(None)
                         r_hat = partial(generate_samples, model=model, obs=obs._buffers,  batch_indices=batch_indices)
 
-
-                        # if BATCH_TRAINING:
-                        #     mcmc_run = mcmc([obs._buffers, model, dim, batch_indices, abc_epsilon], torch.tensor(posterior_samples[-1].reshape(-1)), num_samples=training_steps,  warmup_steps=training_steps//5, MCMC_SHOW_DISABLE=MCMC_SHOW_DISABLE)
-                        # else:
-                        #     mcmc_run = mcmc([obs._buffers, model, dim, batch_indices, abc_epsilon], torch.tensor(posterior_samples[-1].reshape(-1)), num_samples=training_steps,  warmup_steps=warmup_steps, MCMC_SHOW_DISABLE=MCMC_SHOW_DISABLE)
-                        # posterior_samples = mcmc_run.get_samples()["prior_parameter"].reshape((-1, ) + env.n_cell + (env.action_space.n, ))
-
                         def tabular_indicator(para, model, obs):
                             s0 = obs['state0']
                             s1 = obs['state1']
@@ -487,36 +524,30 @@ if __name__ == '__main__':
                         abclikelihood = GaussianABCLikelihood(epsilon=EPSILON)
                         Model = DeterministicSRModel(prior=prior, abclikelihood=abclikelihood, llh_transform_fn=r_hat, llh_transform_grad_fn=llh_transform_grad_fn)
 
-                        # def gradient(para, Model, model ,obs, samples):
-                        #     Indicator = tabular_indicator(para=para, model=model, obs=obs, samples=samples)
-                        #     Sum = np.matmul(Indicator.T, (np.array(obs['rewards']) - np.array(samples))).T #Theta x T, Tx1
-                        #     return - para / Model.prior.sigma ** 2 + 1 / Model.abclikelihood.epsilon ** 2 * Sum
-
                         def fn(parameter):
                             current_logtarget_density, _ = Model.logtarget_density(data=torch.tensor(obs._buffers["rewards"])[-BUFFER_SIZE:][batch_indices], parameter=parameter, llh_info_dict=dict())
                             return current_logtarget_density
-        
-                        hessian = torch.autograd.functional.hessian(fn,torch.tensor(posterior_samples[-3].reshape(-1)))
+                        hessian = torch.autograd.functional.hessian(fn,torch.tensor(posterior_samples[0].reshape(-1)))
                         #kernel = RandomWalk(model=Model, stepsize=STEPSIZE)
                         #kernel = RandomWalk(model=Model, stepsize=STEPSIZE, covariance_matrix=-torch.linalg.inv(hessian))
                         #kernel = pCN(model=Model, stepsize=STEPSIZE)
-                        #kernel = MALA(model=Model, stepsize=STEPSIZE, precondition_matrix=None)
+                        kernel = MALA(model=Model, stepsize=STEPSIZE, precondition_matrix=None)
                         #kernel = MALA(model=Model, stepsize=STEPSIZE, precondition_matrix=-torch.linalg.inv(hessian))
                         #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=False)
-                        kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=False, precondition_matrix=-torch.linalg.inv(hessian))
+                        #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=False, precondition_matrix=-torch.linalg.inv(hessian))
                         #kernel = HMC(model=Model, parameter_len=len(posterior_samples[0].reshape(-1)), stepsize=STEPSIZE,full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB)
+                        accept_probs = None
 
                         if isinstance(kernel, Kernel):
-                                
                             mcmc = MCMC(num_samples=training_steps, kernel=kernel, initial_params=torch.tensor(posterior_samples[-1].reshape(-1)))
                             posterior_samples = mcmc.run(torch.tensor(obs._buffers["rewards"])[-BUFFER_SIZE:][batch_indices]).reshape((-1, ) + env.n_cell + (env.action_space.n, ))
                             logdensities = mcmc.get_logdensities()
                             proposed_logdensities = mcmc.get_proposed_logdensities()
+                            accept_probs = mcmc.get_accept_prob()
 
                         else:
-                            mcmc = pyro.infer.mcmc.MCMC(kernel, num_samples=training_steps, initial_params={'prior_parameter': torch.tensor(posterior_samples[-1].reshape(-1))}, warmup_steps=training_steps//5, disable_progbar=MCMC_SHOW_DISABLE)
-                            mcmc_run = mcmc.run(torch.tensor(obs._buffers["rewards"])[-BUFFER_SIZE:][batch_indices]).reshape((-1, ) + env.n_cell + (env.action_space.n, ))
-                            posterior_samples = mcmc.get_samples()["prior_parameter"].reshape((-1, ) + env.n_cell + (env.action_space.n, ))
+                            mcmc = MCMC_pyro(num_samples=training_steps, kernel=kernel, initial_params=torch.tensor(posterior_samples[-1].reshape(-1)), warmup_steps=training_steps//5, disable_progbar=MCMC_SHOW_DISABLE)
+                            posterior_samples = mcmc.run(torch.tensor(obs._buffers["rewards"])[-BUFFER_SIZE:][batch_indices]).reshape((-1, ) + env.n_cell + (env.action_space.n, ))
 
                         # STEPSIZE *= DECREASING_FACTOR
                         # posterior_samples = new_posterior_samples
@@ -538,15 +569,25 @@ if __name__ == '__main__':
                         ai.legend(handles, labels, bbox_to_anchor=(2, 0.2), loc='right')
                         if show:
                             plt.show()
-                        fig, ax = plt.subplots()
-                        ax.plot(logdensities.numpy(), label="accepted samples")
-                        ax.plot(proposed_logdensities.numpy(), label="proposed samples")
-                        fig.legend()
-                        fig.tight_layout()
-                        ax.set_xlabel("samples")
-                        ax.set_ylabel("log density")
-                        if show:
-                            fig.show()
+
+                        if accept_probs is not None:
+                            fig, ax = plt.subplots(1,1,sharex=True)
+
+                            ax.plot(proposed_logdensities.numpy(), label="proposed samples")
+                            ax.plot(logdensities.numpy(), label="accepted samples")
+                            ax.set_xlabel("samples")
+                            ax.set_ylabel("log density")
+
+                            ax2 = ax.twinx()
+                            ax2.plot(accept_probs.numpy(), label="log acceptance probability", c="tab:green")
+                            ax2.set_ylabel("log acceptance probability")
+
+                            fig.legend()
+                            fig.tight_layout()
+
+                            if show:
+                                plt.show()
+
                     if done:
                         print("done with", h + 1, 'steps')
                         break
