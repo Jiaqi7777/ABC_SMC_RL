@@ -30,7 +30,7 @@ def generate_samples(para, model, obs, batch_indices=None, buffer_size=BUFFER_SI
 class IsotropicGaussianPrior:
     def __init__(self, sd=1., mean=0):
         """log(p(para))"""
-        self.sigma = np.float(sd)
+        self.sigma = float(sd)
         self.mean = mean
         
     def logprior(self, parameter, return_gradient=False):
@@ -531,11 +531,11 @@ if __name__ == '__main__':
                         #kernel = RandomWalk(model=Model, stepsize=STEPSIZE)
                         #kernel = RandomWalk(model=Model, stepsize=STEPSIZE, covariance_matrix=-torch.linalg.inv(hessian))
                         #kernel = pCN(model=Model, stepsize=STEPSIZE)
-                        kernel = MALA(model=Model, stepsize=STEPSIZE, precondition_matrix=None)
+                        #kernel = MALA(model=Model, stepsize=STEPSIZE, precondition_matrix=None)
                         #kernel = MALA(model=Model, stepsize=STEPSIZE, precondition_matrix=-torch.linalg.inv(hessian))
                         #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=False)
                         #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=False, precondition_matrix=-torch.linalg.inv(hessian))
-                        #kernel = HMC(model=Model, parameter_len=len(posterior_samples[0].reshape(-1)), stepsize=STEPSIZE,full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB)
+                        kernel = HMC(model=Model, parameter_len=len(posterior_samples[0].reshape(-1)), stepsize=STEPSIZE,full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB, num_steps=NUM_STEPS)
                         accept_probs = None
 
                         if isinstance(kernel, Kernel):
@@ -546,10 +546,10 @@ if __name__ == '__main__':
                             accept_probs = mcmc.get_accept_prob()
 
                         else:
-                            mcmc = MCMC_pyro(num_samples=training_steps, kernel=kernel, initial_params=torch.tensor(posterior_samples[-1].reshape(-1)), warmup_steps=training_steps//5, disable_progbar=MCMC_SHOW_DISABLE)
+                            mcmc = MCMC_pyro(num_samples=training_steps, kernel=kernel, initial_params=torch.tensor(posterior_samples[-1].reshape(-1)), warmup_steps=np.int64(np.floor(training_steps*WARMUP_RATIO)), disable_progbar=MCMC_SHOW_DISABLE)
                             posterior_samples = mcmc.run(torch.tensor(obs._buffers["rewards"])[-BUFFER_SIZE:][batch_indices]).reshape((-1, ) + env.n_cell + (env.action_space.n, ))
 
-                        # STEPSIZE *= DECREASING_FACTOR
+                        STEPSIZE *= DECREASING_FACTOR
                         # posterior_samples = new_posterior_samples
                         model.plot_policy(paras=posterior_samples.numpy(), title=f'policy_T{training_steps}_{time}', additional_info = env.R, save=save, show=show)
                         # model.plot_value(paras=posterior_samples.numpy(), title=f'value_T{training_steps}_{time}')
