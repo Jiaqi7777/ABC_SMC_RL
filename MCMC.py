@@ -135,6 +135,17 @@ class DeterministicSRModel():
         logprior_grad = self.prior.logprior_gradient(parameter=parameter)
         llh_grad = self.abclikelihood.llh_gradient(data=data, parameter=parameter, llh_info_dict=llh_info_dict, llh_transform_fn=self.llh_transform_fn, llh_transform_grad_fn=self.llh_transform_grad_fn)
         return logprior_grad + llh_grad
+    
+    def logtarget_auto_gradient(self, data, parameter, llh_info_dict=dict()):
+        parameter = parameter.clone()
+        parameter.requires_grad = True
+        logtarget_density, llh_info_dict = self.logtarget_density(data=data, parameter=parameter, llh_info_dict=llh_info_dict)
+        logtarget_density.backward()
+        gradient = parameter.grad.clone()
+        parameter.grad.zero_()
+        parameter.requires_grad = False
+        logtarget_density = logtarget_density.detach()
+        return logtarget_density, gradient, llh_info_dict
 
     def pyro_model(self, data, parameter_len):
         prior_parameter = pyro.sample("prior_parameter", dist.MultivariateNormal(torch.zeros(parameter_len), self.prior.covariance_matrix(parameter_len=parameter_len)))
@@ -162,7 +173,7 @@ class RandomWalk(Kernel):
 
     def move(self, current_para):
         if self.covariance_matrix is not None:
-            return torch.distributions.multivariate_normal.MultivariateNormal(loc=current_para, covariance_matrix=np.sqrt(self.stepsize) * self.covariance_matrix).sample()
+            return torch.distributions.multivariate_normal.MultivariateNormal(loc=current_para, covariance_matrix= (self.stepsize ** 2) * self.covariance_matrix).sample()
         else:
             return torch.normal(mean=current_para, std=self.stepsize)
 
@@ -213,65 +224,63 @@ class MALA(Kernel):
 
     def move(self, current_para, current_gradient):
         if self.precondition is None:
-            proposed_para = current_para + self.stepsize * current_gradient + np.sqrt(2 * self.stepsize) *  torch.normal(mean=torch.zeros(current_para.size()), std=1.)
+            proposed_para = current_para + ((self.stepsize ** 2) / 2) * current_gradient + self.stepsize *  torch.normal(mean=torch.zeros(current_para.size()), std=1.)
         else:
             noise = torch.distributions.multivariate_normal.MultivariateNormal(loc=torch.zeros(current_para.size()), covariance_matrix=self.precondition).sample()
-            proposed_para = current_para + self.stepsize * (self.precondition @ current_gradient) + np.sqrt(2 * self.stepsize) * noise
-            #print("gradient step", self.stepsize * (self.precondition @ current_gradient))
-            #print("noise",  np.sqrt(2 * self.stepsize) * noise)
+            proposed_para = current_para + ((self.stepsize ** 2) / 2) * (self.precondition @ current_gradient) + self.stepsize * noise
+            #print("gradient step", ((self.stepsize ** 2) / 2) * (self.precondition @ current_gradient))
+            #print("noise",  self.stepsize * noise)
             #print("current_para", current_para)
         return proposed_para
+    
+    def move_ratio(self, current_para, current_gradient, proposed_para, proposed_gradient):
+
+        if self.precondition is None:
+            curr_to_prop = torch.distributions.normal.Normal(loc=current_para + ((self.stepsize ** 2) / 2) * current_gradient, scale=self.stepsize).log_prob(proposed_para).sum()
+            prop_to_curr = torch.distributions.normal.Normal(loc=proposed_para + ((self.stepsize ** 2) / 2) * proposed_gradient, scale=self.stepsize).log_prob(current_para).sum()
+        else:
+            curr_to_prop = torch.distributions.multivariate_normal.MultivariateNormal(
+                loc=current_para + ((self.stepsize ** 2) / 2) * (self.precondition @ current_gradient), 
+                covariance_matrix=self.precondition * (self.stepsize ** 2)
+                ).log_prob(proposed_para).sum()
+            prop_to_curr = torch.distributions.multivariate_normal.MultivariateNormal(
+                loc=proposed_para + ((self.stepsize ** 2) / 2) * (self.precondition @ proposed_gradient), 
+                covariance_matrix=self.precondition * (self.stepsize ** 2)
+                ).log_prob(current_para).sum()
+        return curr_to_prop - prop_to_curr
+    
+    def logtarget_density_with_gradient(self, data, parameter, info_dict=dict(), llh_info_dict=dict()):
+
+        if self.use_autograd:
+            if info_dict.get("gradient") is not None:
+                logtarget_density, llh_info_dict = self.model.logtarget_density(data=data, parameter=parameter, llh_info_dict=llh_info_dict)
+                gradient = info_dict["gradient"]
+            else:
+                logtarget_density, gradient, llh_info_dict = self.model.logtarget_auto_gradient(data=data, parameter=parameter, llh_info_dict=llh_info_dict)
+
+        else:
+            logtarget_density, llh_info_dict = self.model.logtarget_density(data=data, parameter=parameter, llh_info_dict=llh_info_dict)
+            if info_dict.get("gradient") is not None:
+                gradient = info_dict["gradient"]
+            else:
+                gradient = self.model.logtarget_gradient(data=data, parameter=parameter, llh_info_dict=llh_info_dict)
+        
+        return logtarget_density, gradient, llh_info_dict
 
     def propose_accept(self, current_para, data, current_para_info_dict=dict()):
 
-        if self.use_autograd:
-            #print("using autograd")
-            current_para_llh_info_dict = current_para_info_dict["llh_info_dict"] if current_para_info_dict.get("llh_info_dict") is not None else dict()
+        current_para_llh_info_dict = current_para_info_dict["llh_info_dict"] if current_para_info_dict.get("llh_info_dict") is not None else dict()
+        current_logtarget_density, current_gradient, current_para_llh_info_dict = self.logtarget_density_with_gradient(data=data, parameter=current_para, info_dict=current_para_info_dict, llh_info_dict=current_para_llh_info_dict)
 
-            if current_para_info_dict.get("gradient") is not None:
-                current_gradient = current_para_info_dict["gradient"]
-                current_logtarget_density, _ = self.model.logtarget_density(data=data, parameter=current_para, llh_info_dict=current_para_llh_info_dict)
+        proposed_para = self.move(current_para=current_para, current_gradient=current_gradient)
+        proposed_logtarget_density, proposed_gradient, proposed_para_llh_info_dict = self.logtarget_density_with_gradient(data=data, parameter=proposed_para, info_dict=dict(), llh_info_dict=dict())
 
-            else:
-                current_para.requires_grad = True
-                current_logtarget_density, _ = self.model.logtarget_density(data=data, parameter=current_para, llh_info_dict=current_para_llh_info_dict)
-                current_logtarget_density.backward()
-                current_gradient = current_para.grad.clone()
-                current_para.grad.zero_()
-                current_para.requires_grad = False
-                current_logtarget_density = current_logtarget_density.detach()
-
-            proposed_para = self.move(current_para=current_para, current_gradient=current_gradient)
-            proposed_para = proposed_para.detach().requires_grad_(True)
-
-            proposed_logtarget_density, proposed_para_llh_info_dict = self.model.logtarget_density(data=data, parameter=proposed_para, llh_info_dict=dict())
-
-            proposed_logtarget_density.backward()
-            proposed_gradient = proposed_para.grad.clone()
-            proposed_para.grad.zero_()
-            proposed_para.requires_grad = False
-            proposed_logtarget_density = proposed_logtarget_density.detach()
-
-        else:
-            #print("using manual gradient")
-            current_para_llh_info_dict = current_para_info_dict["llh_info_dict"] if current_para_info_dict.get("llh_info_dict") is not None else dict()
-            current_logtarget_density, current_para_llh_info_dict = self.model.logtarget_density(data=data, parameter=current_para, llh_info_dict=current_para_llh_info_dict)
-            if current_para_info_dict.get("gradient") is not None:
-                current_gradient = current_para_info_dict["gradient"]
-            else:
-                current_gradient = self.model.logtarget_gradient(data=data, parameter=current_para, llh_info_dict=current_para_llh_info_dict)
-
-            proposed_para = self.move(current_para=current_para, current_gradient=current_gradient)
-
-            proposed_logtarget_density, proposed_para_llh_info_dict = self.model.logtarget_density(data=data, parameter=proposed_para, llh_info_dict=dict())
-            proposed_gradient = self.model.logtarget_gradient(parameter=proposed_para, data=data, llh_info_dict=proposed_para_llh_info_dict)
         # print("current_grad", current_gradient)
         # print("proposed_gradient", proposed_gradient)
 
-        move_ratio = torch.distributions.normal.Normal(loc=current_para + self.stepsize * current_gradient, scale=np.sqrt(2*self.stepsize)).log_prob(proposed_para).sum() - \
-            torch.distributions.normal.Normal(loc=proposed_para + self.stepsize * proposed_gradient, scale=np.sqrt(2*self.stepsize)).log_prob(current_para).sum()
+        move_ratio = self.move_ratio(current_para=current_para, current_gradient=current_gradient, proposed_para=proposed_para, proposed_gradient=proposed_gradient)
         accept_prob = proposed_logtarget_density - current_logtarget_density - move_ratio
-        print("diff a", proposed_logtarget_density - current_logtarget_density, "diff b", move_ratio)
+        #print("diff a", proposed_logtarget_density - current_logtarget_density, "diff b", move_ratio)
         proposed_para_info_dict = {"llh_info_dict": proposed_para_llh_info_dict, "gradient": proposed_gradient, "logdensities":proposed_logtarget_density.detach()}
 
         return accept_prob, proposed_para, proposed_para_info_dict #acceptance_prob, proposal, extra_stat_for_proposal
@@ -282,7 +291,31 @@ class MALA(Kernel):
     #     fisher +=  self.prior.sigma ** 2 * np.identity(fisher.shape[0])
     #     pass
 
-def HMC(model, parameter_len, stepsize=0.5, *args, **kwargs):
+
+class HMC(Kernel):
+    def __init__(self, model, traj_len=10, stepsize=0.5, precondition_matrix=None, use_autograd=True, *args):
+        print('HMC stepsize', stepsize)
+        super(HMC, self).__init__(model=model)   
+        self.stepsize = stepsize
+        self.precondition = precondition_matrix
+        self.use_autograd = use_autograd
+        self.L = traj_len
+
+    def move(self, current_para, current_gradient):
+        p = torch.distributions.multivariate_normal.MultivariateNormal(loc=torch.zeros(current_para.size()), covariance_matrix=self.precondition).sample()
+
+        p = p - self.stepsize * torch.linalg.solve(current_gradient, self.precondition) / 2
+
+        for i in range(self.L):
+            q = q + self.stepsize * p
+            if i != (self.L-1):
+                p = p - self.stepsize * self.gradient(q)
+        
+        p = p - self.stepsize * self.gradient(q) / 2
+
+
+
+def HMC_pyro(model, parameter_len, stepsize=0.5, *args, **kwargs):
         print('HMC stepsize', stepsize)
         pyro.clear_param_store()
         pyro_model = lambda data: model.pyro_model(data=data, parameter_len=parameter_len)
@@ -532,10 +565,10 @@ if __name__ == '__main__':
                         #kernel = RandomWalk(model=Model, stepsize=STEPSIZE, covariance_matrix=-torch.linalg.inv(hessian))
                         #kernel = pCN(model=Model, stepsize=STEPSIZE)
                         #kernel = MALA(model=Model, stepsize=STEPSIZE, precondition_matrix=None)
-                        #kernel = MALA(model=Model, stepsize=STEPSIZE, precondition_matrix=-torch.linalg.inv(hessian))
+                        kernel = MALA(model=Model, stepsize=STEPSIZE, precondition_matrix=-torch.linalg.inv(hessian))
                         #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=False)
                         #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=False, precondition_matrix=-torch.linalg.inv(hessian))
-                        kernel = HMC(model=Model, parameter_len=len(posterior_samples[0].reshape(-1)), stepsize=STEPSIZE,full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB, num_steps=NUM_STEPS)
+                        #kernel = HMC_pyro(model=Model, parameter_len=len(posterior_samples[0].reshape(-1)), stepsize=STEPSIZE,full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB, num_steps=NUM_STEPS)
                         accept_probs = None
 
                         if isinstance(kernel, Kernel):
@@ -636,12 +669,12 @@ if __name__ == '__main__':
             current_logtarget_density, _ = Model.logtarget_density(data=torch.tensor(obs["rewards"]), parameter=parameter, llh_info_dict=dict())
             return current_logtarget_density
 
-        hessian = torch.autograd.functional.hessian(fn,torch.tensor(posterior_samples[-3].reshape(-1)))
+        hessian = torch.autograd.functional.hessian(fn,torch.tensor(posterior_samples[-3].reshape(-1))) + 1.e-6
         #kernel = RandomWalk(model=Model, stepsize=STEPSIZE)
-        kernel = RandomWalk(model=Model, stepsize=STEPSIZE, covariance_matrix=-torch.linalg.inv(hessian))
+        #kernel = RandomWalk(model=Model, stepsize=STEPSIZE, covariance_matrix=-torch.linalg.inv(hessian))
         #kernel = pCN(model=Model, stepsize=STEPSIZE)
         #kernel = MALA(model=Model, stepsize=STEPSIZE, precondition_matrix=None)
-        #kernel = MALA(model=Model, stepsize=STEPSIZE, precondition_matrix=-torch.linalg.inv(hessian))
+        kernel = MALA(model=Model, stepsize=STEPSIZE, precondition_matrix=-torch.linalg.inv(hessian))
         #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=False)
         #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=False, precondition_matrix=-torch.linalg.inv(hessian))
 
