@@ -208,7 +208,7 @@ class RandomWalk(Kernel):
 
         current_logtarget_density, _ = self.model.logtarget_density(parameter=current_para, llh_info_dict=current_para_llh_info_dict)
         proposed_logtarget_density, proposed_para_llh_info_dict = self.model.logtarget_density(parameter=proposed_para, llh_info_dict=dict())
-        accept_prob = proposed_logtarget_density - current_logtarget_density
+        accept_prob = np.exp(proposed_logtarget_density - current_logtarget_density)
 
         proposed_para_info_dict = {"llh_info_dict": proposed_para_llh_info_dict, "logdensities":proposed_logtarget_density}
 
@@ -232,7 +232,7 @@ class pCN(Kernel):
 
         current_llh, _ = self.model.llh(parameter=current_para, llh_info_dict=current_para_llh_info_dict)
         proposed_llh, proposed_para_llh_info_dict = self.model.llh(parameter=proposed_para, llh_info_dict=dict())
-        accept_prob = proposed_llh - current_llh
+        accept_prob = np.exp(proposed_llh - current_llh)
 
         proposed_para_info_dict = {"llh_info_dict": proposed_para_llh_info_dict, "logdensities":proposed_llh}
 
@@ -285,7 +285,7 @@ class MALA(Kernel):
         # print("proposed_gradient", proposed_gradient)
 
         move_ratio = self.move_ratio(current_para=current_para, current_gradient=current_gradient, proposed_para=proposed_para, proposed_gradient=proposed_gradient)
-        accept_prob = proposed_logtarget_density - current_logtarget_density - move_ratio
+        accept_prob = np.exp(proposed_logtarget_density - current_logtarget_density - move_ratio)
         #print("diff a", proposed_logtarget_density - current_logtarget_density, "diff b", move_ratio)
         proposed_para_info_dict = {"llh_info_dict": proposed_para_llh_info_dict, "gradient": proposed_gradient, "logdensities":proposed_logtarget_density}
 
@@ -331,11 +331,11 @@ class HMC(Kernel):
             q = q + stepsize * q_move
             if i != (L-1):
                 p = p + stepsize * self.gradient(parameter=q, info_dict=dict(), llh_info_dict=dict(), return_logtarget_density=False)
-
-        p = -p
-
         proposed_gradient, proposed_logtarget_density, proposed_para_llh_info_dict = self.gradient(parameter=q, info_dict=dict(), llh_info_dict=dict(), return_logtarget_density=True)
+        
         p = p + stepsize * proposed_gradient * 0.5
+        p = -p
+        
         q_info_dict = {"logtarget_density":proposed_logtarget_density, "gradient":proposed_gradient, "llh_info_dict":proposed_para_llh_info_dict}
         return q, p0, p, q_info_dict
 
@@ -352,11 +352,12 @@ class HMC(Kernel):
 
         H_old = self.hamiltonian(q=current_para, p=p0, q_logtarget_density=current_logtarget_density)
         H_new =  self.hamiltonian(q=proposed_para, p=p, q_logtarget_density=proposed_logtarget_density)
-        accept_prob = H_old - H_new
+        accept_prob = np.exp(H_old - H_new)
 
         proposed_para_info_dict = {"llh_info_dict": proposed_para_llh_info_dict, "gradient": proposed_gradient, "logdensities":proposed_logtarget_density}
 
         return accept_prob, proposed_para, proposed_para_info_dict
+
 
     def hamiltonian(self, q, p, q_logtarget_density=None):
         if q_logtarget_density is None:
@@ -404,7 +405,7 @@ class HMC(Kernel):
                                                                          L=1,
                                                                          stepsize=eps)
 
-            if np.log(np.random.uniform(0,1)) < accept_prob:
+            if np.random.uniform(0,1) < accept_prob:
                 current_para = proposed_para
                 current_para_info_dict = proposed_para_info_dict
 
@@ -434,9 +435,9 @@ class HMC_pyro(Kernel):
         
     def get_pyro_kernel(self, parameter_len):
         pyro.clear_param_store()
-        pyro_model = lambda data: self.model.pyro_model(data=data, parameter_len=parameter_len)
+        pyro_model = lambda data: model.pyro_model(data=data, parameter_len=parameter_len)
         pyro_kernel =  pyro.infer.mcmc.HMC(model=pyro_model, step_size=self.stepsize, **self.kwargs)
-        return pyro_kernel
+        return self.pyro_kernel
 
 
 # class AM(Kernel):
@@ -507,7 +508,7 @@ class MCMC:
             accept_prob, proposed_para, proposed_para_info_dict  = self.kernel.propose_accept(current_para=current_para,
                                                                          current_para_info_dict=current_para_info_dict)
 
-            if np.log(np.random.uniform(0,1)) < accept_prob:
+            if np.random.uniform(0,1) < accept_prob:
                 current_para = proposed_para
                 current_para_info_dict = proposed_para_info_dict
                 self.accepted += 1
@@ -544,7 +545,7 @@ class MCMC_pyro(MCMC):
     def __init__(self, kernel, num_samples=MCMC_SAMPLE, initial_params=None, params_dim=None, warmup_steps=MCMC_T//5, disable_progbar=MCMC_SHOW_DISABLE, **kwargs):
         super(MCMC_pyro, self).__init__(kernel=kernel, num_samples=num_samples, initial_params=initial_params, params_dim=params_dim, **kwargs)
         self.kernel_ = kernel
-        self.pyro_kernel = kernel.get_pyro_kernel(parameter_len=self.params_dim)
+        self.pyro_kernel = kernel.get_pyro_kernel(parameter_len=params_dim)
         self.pyro_mcmc = pyro.infer.mcmc.MCMC(kernel=self.pyro_kernel, num_samples=num_samples, initial_params={'prior_parameter': initial_params}, warmup_steps=warmup_steps, disable_progbar=disable_progbar, **kwargs)
         self.data = self.kernel.model.data
 
@@ -691,7 +692,6 @@ if __name__ == '__main__':
                         #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=False, precondition_matrix=-torch.linalg.inv(hessian))
                         kernel = HMC_pyro(model=Model, stepsize=STEPSIZE, full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB, num_steps=NUM_STEPS)
                         #kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=False)
-                        #kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=False, precondition_matrix=-torch.linalg.inv(hessian))
                         #kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=False, precondition_matrix=-torch.linalg.inv(hessian))
                         #kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=True, precondition_matrix=-torch.linalg.inv(hessian))
                         accept_probs = None
