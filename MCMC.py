@@ -138,10 +138,10 @@ class DeterministicSRModel():
         llh_grad = self.abclikelihood.llh_gradient(data=self.data, parameter=parameter, llh_info_dict=llh_info_dict, llh_transform_fn=self.llh_transform_fn, llh_transform_grad_fn=self.llh_transform_grad_fn)
         return logprior_grad + llh_grad
     
-    def logtarget_auto_gradient(self, parameter, llh_info_dict=dict()):
+    def logtarget_auto_gradient(self, parameter):
         parameter = parameter.clone()
         parameter.requires_grad = True
-        logtarget_density, llh_info_dict = self.logtarget_density(parameter=parameter, llh_info_dict=llh_info_dict)
+        logtarget_density, llh_info_dict = self.logtarget_density(parameter=parameter, llh_info_dict=dict())
         logtarget_density.backward()
         gradient = parameter.grad.clone()
         parameter.grad.zero_()
@@ -176,8 +176,7 @@ class Kernel:
                 logtarget_density, llh_info_dict = self.model.logtarget_density(parameter=parameter, llh_info_dict=llh_info_dict)
                 gradient = info_dict["gradient"]
             else:
-                logtarget_density, gradient, llh_info_dict = self.model.logtarget_auto_gradient(parameter=parameter, llh_info_dict=llh_info_dict)
-                print("hi", parameter, "hihi", llh_info_dict, "hihihi", gradient)
+                logtarget_density, gradient, llh_info_dict = self.model.logtarget_auto_gradient(parameter=parameter) #llh_info_dict must be none to compute the gradient correctly
 
         else:
             logtarget_density = info_dict.get("logdensities")
@@ -185,7 +184,6 @@ class Kernel:
                 gradient = info_dict["gradient"]
             else:
                 gradient = self.model.logtarget_gradient(parameter=parameter, llh_info_dict=llh_info_dict)
-                print("hi", parameter, "hihi", llh_info_dict,"hihihi", gradient)
         
         if return_logtarget_density is True:
             if logtarget_density is None:
@@ -292,10 +290,6 @@ class MALA(Kernel):
 
         proposed_para = self.move(current_para=current_para, current_gradient=current_gradient)
         proposed_gradient, proposed_logtarget_density, proposed_para_llh_info_dict = self.gradient(parameter=proposed_para, info_dict=dict(), return_logtarget_density=True)
-
-        print("current_grad", current_gradient, current_para, current_para_info_dict, _)
-        print("proposed_gradient", proposed_gradient, proposed_para, proposed_para_llh_info_dict)
-        abc
 
         move_ratio = self.move_ratio(current_para=current_para, current_gradient=current_gradient, proposed_para=proposed_para, proposed_gradient=proposed_gradient)
         accept_prob = np.exp(torch_max_0(proposed_logtarget_density - current_logtarget_density - move_ratio))
