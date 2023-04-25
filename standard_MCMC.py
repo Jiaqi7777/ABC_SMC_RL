@@ -95,13 +95,14 @@ if __name__ == '__main__':
     if ONLINE_LEARNING:
         r_all_iter = []
         for repeat in range(REPEAT_EXPERIMENT):
+            STEPSIZE = INITIAL_STEPSIZE
             model = Tabular(env=env, n_particle=N_PARTICLE, prior='normal')
             r_all_epi = []
             obs = Buffer(['state0', 'state1', 'action', 'rewards', 'done'])
             s0, _ = env.reset()
             posterior_samples = torch.tensor(model.get_parameter())
             for e in range(EPISODES):
-                env.reset()
+                s0, _ = env.reset()
                 print(f'Episode {e} in repeat {repeat}')
                 R = 0
                 R_star = 0
@@ -121,28 +122,30 @@ if __name__ == '__main__':
                     
                     if ( h + 1)  % FROZEN_T == 0 or done:
                         # print(obs._buffers['state0'][-FROZEN_T:])
-                        print(obs._buffers)
+                        # print(obs._buffers)
                         #MCMC
                         batch_indicies = random.sample(range(min(len(obs._buffers['state0']), BUFFER_SIZE)), k=min(BATCH_SIZE, len(obs._buffers['state0'])))
                         r_hat = partial(generate_samples, model=model, obs=obs._buffers,  batch_indicies=batch_indicies)
                         if BATCH_TRAINING:
-                            mcmc_run = mcmc([obs._buffers, model, dim, batch_indicies, abc_epsilon], torch.tensor(posterior_samples[-1].reshape(-1)), num_samples=training_steps,  warmup_steps=training_steps//5, MCMC_SHOW_DISABLE=MCMC_SHOW_DISABLE)
+                            mcmc_run = mcmc([obs._buffers, model, dim, batch_indicies, abc_epsilon], torch.tensor(posterior_samples[-1].reshape(-1)), num_samples=training_steps,  warmup_steps=warmup_steps, MCMC_SHOW_DISABLE=MCMC_SHOW_DISABLE, stepsize=STEPSIZE)
                         else:
-                            mcmc_run = mcmc([obs._buffers, model, dim, batch_indicies, abc_epsilon], torch.tensor(posterior_samples[-1].reshape(-1)), num_samples=training_steps,  warmup_steps=warmup_steps, MCMC_SHOW_DISABLE=MCMC_SHOW_DISABLE)
+                            mcmc_run = mcmc([obs._buffers, model, dim, batch_indicies, abc_epsilon], torch.tensor(posterior_samples[-1].reshape(-1)), num_samples=training_steps,  warmup_steps=warmup_steps, MCMC_SHOW_DISABLE=MCMC_SHOW_DISABLE, stepsize=STEPSIZE)
                         posterior_samples = mcmc_run.get_samples()["prior_parameter"].reshape((-1, ) + env.n_cell + (env.action_space.n, ))
                         STEPSIZE *= DECREASING_FACTOR
                         # posterior_samples = new_posterior_samples
                         model.plot_policy(paras=posterior_samples.numpy(), title=f'policy_T{training_steps}_{time}', additional_info = env.R, save=save, show=show)
                         # model.plot_value(paras=posterior_samples.numpy(), title=f'value_T{training_steps}_{time}')
-                        print('Mean Q values', torch.round(torch.mean(posterior_samples, 0), decimals=2))
-                        data_plot = posterior_samples.numpy().reshape(posterior_samples.shape[0], -1)[:, -12:-4]
-                        f = mcp.plot_chain_panel(chains=data_plot, names=env.names,
+                        plt.imshow(torch.round(torch.max(torch.mean(posterior_samples, 0), -1).values, decimals=2))
+                        if show:
+                            plt.show()
+                        data_plot = posterior_samples.numpy().reshape(posterior_samples.shape[0], -1)[:, OBSERVE_DATA_START:OBSERVE_DATA_END]#Change the indices of names and Q_star below as well
+                        f = mcp.plot_chain_panel(chains=data_plot, names=env.names[OBSERVE_DATA_START:OBSERVE_DATA_END],
                                                                         settings=dict(add_pm2std=True, fig=dict(figsize=(10,10), dpi=250),
                                                                         mean=dict(color='y', label='mean'),
                                                                         plot=dict(color='k', label='trace')))
                         ax = f.get_axes()
                         for i, ai in enumerate(ax):
-                            ai.axhline(y = Q_star.flatten()[i], linestyle=':', linewidth=5, color = 'g',  label = 'true q')
+                            ai.axhline(y = Q_star.flatten()[OBSERVE_DATA_START:OBSERVE_DATA_END][i], linestyle=':', linewidth=5, color = 'g',  label = 'true q')
                             q = np.percentile(data_plot[:, i], [PLOT_THRESHOLD, 100 - PLOT_THRESHOLD])
                             ai.set_ylim(q)   
                         f.tight_layout()

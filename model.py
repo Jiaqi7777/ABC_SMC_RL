@@ -47,6 +47,7 @@ class Buffer:
         
         if unique and str(list(items.values())) in self.unique_set:
             return 
+        print('New items added', items)
         for k, v in items.items():
             self._buffers[k].append(v)
             # if len(self._buffers[k]) > BUFFER_SIZE:
