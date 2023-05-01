@@ -138,6 +138,7 @@ def compare_r_vs_episodes_repeat(r_1, r_2, figure_path='Figures/', show=True, ti
     plt.plot(r_mean, label = 'epsilon greedy Q-Learning')
     plt.fill_between(range(len(r_2[0])), r_mean-r_std/np.sqrt(N), r_mean+r_std/np.sqrt(N), alpha=0.2)
     plt.legend()
+    #title=f'ComparisonRegret{ENV_NAME}_Epsilon{EPSILON}_T{training_steps}_{time}'
     if save:
         plt.savefig(f'{figure_path+title}.png', bbox_inches='tight')
         print('figure saved at ', f'{figure_path+title}.png')
