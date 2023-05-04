@@ -22,7 +22,7 @@ def likelihood(data):
 
 def mcmc(data, prior_parameter, num_samples=MCMC_SAMPLE, warmup_steps=MCMC_T//10, MCMC_SHOW_DISABLE=MCMC_SHOW_DISABLE, stepsize=STEPSIZE):
     pyro.clear_param_store()
-    kernel = pyro.infer.mcmc.HMC(likelihood, full_mass=FULL_MASS, step_size=stepsize, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB)
+    kernel = pyro.infer.mcmc.HMC(likelihood, full_mass=FULL_MASS, step_size=stepsize, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB, num_steps=NUM_STEPS)
     # kernel = pyro.infer.mcmc.HMC(likelihood, full_mass=True, step_size=stepsize, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB)
     mcmc_run = pyro.infer.mcmc.MCMC(kernel, num_samples=num_samples, warmup_steps=warmup_steps, initial_params={'prior_parameter': prior_parameter}, disable_progbar=MCMC_SHOW_DISABLE)
     mcmc_run.run(data)
@@ -32,6 +32,7 @@ def mcmc(data, prior_parameter, num_samples=MCMC_SAMPLE, warmup_steps=MCMC_T//10
 
 if __name__ == '__main__':
     from GridWorld import *
+    from Maze import *
     from model import *
     from QLearning import *
     from tqdm import tqdm
@@ -49,6 +50,7 @@ if __name__ == '__main__':
     parser.add_argument('--seed', default=SEED, type=int)
     parser.add_argument('--MCMC', default=True, action='store_false', help='Bool type')
     parser.add_argument('-g', '--Greedy', default=GREEDY, action='store_true', help='Bool type')
+    parser.add_argument('--Env', default=ENV_NAME)
     args = parser.parse_args()
     print(args)
     time = args.time
@@ -61,6 +63,7 @@ if __name__ == '__main__':
     MCMC_SHOW_DISABLE=args.MCMC
     warmup_steps = int(training_steps * WARMUP_RATIO)
     GREEDY = args.Greedy
+    env_name = args.Env
 
     N_PARTICLE = 10
     random.seed(seed)
@@ -68,49 +71,59 @@ if __name__ == '__main__':
     np.random.seed(seed)
     torch.manual_seed(seed)
     
-    env = GridWorld((3,4), obstacles=True)
+    if env_name == 'GridWorld':
+        env = GridWorld((3,4), obstacles=True)
+        env.plot_env()
+    if env_name == 'Maze':
+        env = Maze()
     dim = env.observation_space.n * env.action_space.n
     model = Tabular(env=env, n_particle=N_PARTICLE, prior='normal')
     
     S = []
-    for i in range(env.n_cell[0]):
-        for j in range(env.n_cell[1]):
-            S.append((i,j)) 
+    if len(env.n_cell) == 1:
+        S = [(i, ) for i in range(env.n_cell[0])]
+    else:
+        for i in range(env.n_cell[0]):
+            for j in range(env.n_cell[1]):
+                S.append((i,j)) 
     Q = np.ones(shape=(env.n_cell + (env.action_space.n, )))/env.observation_space.n / env.action_space.n
     A = range(env.action_space.n)
-    pi_star, Q_star, V_star = DynamicProgramming(Q, A, S, env)
+    pi_star, Q_star, V_star = DynamicProgramming(Q, A, S, env, gamma=GAMMA, show=show)
     
     env.reset()
     results = []
     if ONLINE_LEARNING:
         r_all_iter = []
         for repeat in range(REPEAT_EXPERIMENT):
+            STEPSIZE = INITIAL_STEPSIZE
             model = Tabular(env=env, n_particle=N_PARTICLE, prior='normal')
             r_all_epi = []
             obs = Buffer(['state0', 'state1', 'action', 'rewards', 'done'])
             s0, _ = env.reset()
             posterior_samples = torch.tensor(model.get_parameter())
             for e in range(EPISODES):
-                env.reset()
+                s0, _ = env.reset()
+                para = model.sample_para()
                 print(f'Episode {e} in repeat {repeat}')
                 R = 0
                 R_star = 0
                 h = 0
                 # while True: #Turn on h += 1
                 for h in tqdm(range(HORIZON)):
-                    action = model.act(s0, posterior_samples, GREEDY=GREEDY)
+                    action = model.act(s0, para, greedy=GREEDY)
                     s1, r, done, *info = env.step(action)
                     #Optimal action
                     # R_star = V_star[s0] + gamma * R_star#env.R[tuple(env.P[s0 + (int(pi_star[s0]), )])] #for regret
                     R += r#sum([r * gamma ** i for i in range(h + 1)])
-                    obs.insert({'state0': s0, 'state1': s1, 'action': action, 'rewards': r, 'done': done})
+                    obs.insert({'state0': s0, 'state1': s1, 'action': int(action), 'rewards': r, 'done': done}, unique=UNIQUE_OBS)
                     s0 = s1
                     # if e==0 and h==0:
                     #     print(posterior_samples[:, 0, 0], h, posterior_samples.shape)
                     #     print(np.argmax(posterior_samples[:, 0, 0], axis=-1))
                     
-                    if ( h + 1)  % FROZEN_T == 0 or done:
-                        print(obs._buffers['state0'][-FROZEN_T:])
+                    if done or ( h + 1)  % FROZEN_T == 0:
+                        # print(obs._buffers['state0'][-FROZEN_T:])
+                        # print(obs._buffers)
                         #MCMC
                         batch_indices = random.sample(range(min(len(obs._buffers['state0']), BUFFER_SIZE)), k=min(BATCH_SIZE, len(obs._buffers['state0'])))
                         r_hat = partial(generate_samples, model=model, obs=obs._buffers,  batch_indices=batch_indices)
@@ -119,19 +132,22 @@ if __name__ == '__main__':
                         else:
                             mcmc_run = mcmc([obs._buffers, model, dim, batch_indices, abc_epsilon], torch.tensor(posterior_samples[-1].reshape(-1)), num_samples=training_steps,  warmup_steps=warmup_steps, MCMC_SHOW_DISABLE=MCMC_SHOW_DISABLE)
                         posterior_samples = mcmc_run.get_samples()["prior_parameter"].reshape((-1, ) + env.n_cell + (env.action_space.n, ))
+                        model.set_parameter(posterior_samples)
                         STEPSIZE *= DECREASING_FACTOR
                         # posterior_samples = new_posterior_samples
                         model.plot_policy(paras=posterior_samples.numpy(), title=f'policy_T{training_steps}_{time}', additional_info = env.R, save=save, show=show)
                         # model.plot_value(paras=posterior_samples.numpy(), title=f'value_T{training_steps}_{time}')
-                        print('Mean Q values', torch.round(torch.mean(posterior_samples, 0), decimals=2))
-                        data_plot = posterior_samples.numpy().reshape(posterior_samples.shape[0], -1)[:, :8]
-                        f = mcp.plot_chain_panel(chains=data_plot, names=env.names,
+                        plt.imshow(torch.round(torch.max(torch.mean(posterior_samples, 0), -1).values, decimals=2))
+                        if show:
+                            plt.show()
+                        data_plot = posterior_samples.numpy().reshape(posterior_samples.shape[0], -1)[:, OBSERVE_DATA_START:OBSERVE_DATA_END]#Change the indices of names and Q_star below as well
+                        f = mcp.plot_chain_panel(chains=data_plot, names=env.names[OBSERVE_DATA_START:OBSERVE_DATA_END],
                                                                         settings=dict(add_pm2std=True, fig=dict(figsize=(10,10), dpi=250),
                                                                         mean=dict(color='y', label='mean'),
                                                                         plot=dict(color='k', label='trace')))
                         ax = f.get_axes()
                         for i, ai in enumerate(ax):
-                            ai.axhline(y = Q_star.flatten()[i], linestyle=':', linewidth=5, color = 'g',  label = 'true q')
+                            ai.axhline(y = Q_star.flatten()[OBSERVE_DATA_START:OBSERVE_DATA_END][i], linestyle=':', linewidth=5, color = 'g',  label = 'true q')
                             q = np.percentile(data_plot[:, i], [PLOT_THRESHOLD, 100 - PLOT_THRESHOLD])
                             ai.set_ylim(q)   
                         f.tight_layout()
@@ -141,16 +157,17 @@ if __name__ == '__main__':
                             plt.show()
                     if done:
                         print("done with", h + 1, 'steps')
+                        print('Return', R)
                         break
                     # h += 1
                 r_all_epi.append(R)
-                with open(f'Returns/MCMC/T{training_steps}_Gdy{GREEDY}_Ep{EPSILON}_Stp{INITIAL_STEPSIZE}_Dcrs{DECREASING_FACTOR}_{time}.npy', 'wb') as f:
+                with open(f'Returns/MCMC/Episode{e}T{training_steps}_Gdy{GREEDY}_Ep{EPSILON}_Stp{INITIAL_STEPSIZE}_Dcrs{DECREASING_FACTOR}_{time}.npy', 'wb') as f:
                     np.save(f, r_all_epi)
-                    print(f'EPISODES return for repeat {repeat} saved at', f'Returns/MCMC/T{training_steps}_Gdy{GREEDY}_Ep{EPSILON}_Stp{INITIAL_STEPSIZE}_Dcrs{DECREASING_FACTOR}_{time}.npy')
+                    print(f'EPISODES return for repeat {repeat} saved at', f'Returns/MCMC/Episode{e}T{training_steps}_Gdy{GREEDY}_Ep{EPSILON}_Stp{INITIAL_STEPSIZE}_Dcrs{DECREASING_FACTOR}_{time}.npy')
             r_all_iter.append(r_all_epi)
-        with open(f'Returns/MCMC/T{training_steps}_Gdy{GREEDY}_Ep{EPSILON}_Stp{INITIAL_STEPSIZE}_Dcrs{DECREASING_FACTOR}_{time}.npy', 'wb') as f:
-            np.save(f, r_all_iter)
-            print('return saved at', f'Returns/MCMC/T{training_steps}_Gdy{GREEDY}_Ep{EPSILON}_Stp{INITIAL_STEPSIZE}_Dcrs{DECREASING_FACTOR}_{time}.npy')
+            with open(f'Returns/MCMC/T{training_steps}_Gdy{GREEDY}_Ep{EPSILON}_Stp{INITIAL_STEPSIZE}_Dcrs{DECREASING_FACTOR}_{time}.npy', 'wb') as f:
+                np.save(f, r_all_iter)
+                print('return saved at', f'Returns/MCMC/T{training_steps}_Gdy{GREEDY}_Ep{EPSILON}_Stp{INITIAL_STEPSIZE}_Dcrs{DECREASING_FACTOR}_{time}.npy')
             
         plt.plot(R)
         if show:

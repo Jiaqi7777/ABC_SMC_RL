@@ -8,9 +8,7 @@ from model import *
 
 class GridWorld:
     def __init__(self, n_cell, starting_position=(0,0), goal_position=(-1,-1), obstacles=False):
-        '''
-        actions: [1,-1]
-        '''
+        self.env_name = 'GridWorld'
         self.n_cell = n_cell
         self.starting_position = starting_position
         if goal_position == (-1, -1):
@@ -44,8 +42,8 @@ class GridWorld:
                 
         self.R = np.full((n_cell[0], n_cell[1]), -1)
         if obstacles:
-            n_obs = min(self.n_cell) - 2
-            self.R[random.sample(range(1, n_cell[0]), n_obs), random.sample(range(1, n_cell[1]), n_obs)] = -20
+            n_obs = np.prod(n_cell) // 2
+            self.R[random.choices(range(0, n_cell[0]), k=n_obs), random.choices(range(0, n_cell[1]), k=n_obs)] = -20
             # self.R[:, range(1, n_cell[1], 4)] = -2
             # self.R[range(1, n_cell[0], 5), :]  = -2
             # self.R[n_cell[0]//2, n_cell[1]//2] = -2
@@ -63,13 +61,15 @@ class GridWorld:
     def step(self, action, state=None):
         done = False
         if state == None:
+            real_step = True
             state = self.state
             self.state = new_state = tuple(self.P[self.state + (action, )])
         else:
+            real_step = False
             new_state = tuple(self.P[state + (action, )])
         if new_state == self.goal_position:
             done = True
-            if state == None:
+            if real_step:
                 self.done = done
         return new_state, self.R[state], done, None
         
@@ -92,7 +92,7 @@ class GridWorld:
         return (new_state, ), reward, done, None
     
     def plot_env(self, value=[]):
-        print(self.R)
+        # print(self.R)
         # norm = colors.BoundaryNorm(bounds, cmap.N)
         value = self.R if value == [] else value
         fig, ax = plt.subplots()
@@ -152,11 +152,12 @@ class GridWorld:
                     
 
 if __name__ == '__main__':
-    random.seed(10)
-    env = GridWorld((10,12), (1,2), obstacles=True)
-    print(env.reset())
-    print(env.observation_space.n)
-    # env.plot_env()
+    for seed in range(555, 557):
+        random.seed(seed)
+        env = GridWorld((3,4), (0,0), obstacles=True)
+        print(env.reset(), seed)
+        print(env.observation_space.n)
+        env.plot_env()
     # env.expert()
     # env.plot_env(env.expert_traj + env.R)
     # print(env.expert_obs._buffers['state1'])
