@@ -103,13 +103,14 @@ if __name__ == '__main__':
             posterior_samples = torch.tensor(model.get_parameter())
             for e in range(EPISODES):
                 s0, _ = env.reset()
+                para = model.sample_para()
                 print(f'Episode {e} in repeat {repeat}')
                 R = 0
                 R_star = 0
                 h = 0
                 # while True: #Turn on h += 1
                 for h in tqdm(range(HORIZON)):
-                    action = model.act(s0, posterior_samples, greedy=GREEDY)
+                    action = model.act(s0, para, greedy=GREEDY)
                     s1, r, done, *info = env.step(action)
                     #Optimal action
                     # R_star = V_star[s0] + gamma * R_star#env.R[tuple(env.P[s0 + (int(pi_star[s0]), )])] #for regret
@@ -120,7 +121,7 @@ if __name__ == '__main__':
                     #     print(posterior_samples[:, 0, 0], h, posterior_samples.shape)
                     #     print(np.argmax(posterior_samples[:, 0, 0], axis=-1))
                     
-                    if ( h + 1)  % FROZEN_T == 0 or done:
+                    if done or ( h + 1)  % FROZEN_T == 0:
                         # print(obs._buffers['state0'][-FROZEN_T:])
                         # print(obs._buffers)
                         #MCMC
@@ -131,6 +132,7 @@ if __name__ == '__main__':
                         else:
                             mcmc_run = mcmc([obs._buffers, model, dim, batch_indicies, abc_epsilon], torch.tensor(posterior_samples[-1].reshape(-1)), num_samples=training_steps,  warmup_steps=warmup_steps, MCMC_SHOW_DISABLE=MCMC_SHOW_DISABLE, stepsize=STEPSIZE)
                         posterior_samples = mcmc_run.get_samples()["prior_parameter"].reshape((-1, ) + env.n_cell + (env.action_space.n, ))
+                        model.set_parameter(posterior_samples)
                         STEPSIZE *= DECREASING_FACTOR
                         # posterior_samples = new_posterior_samples
                         model.plot_policy(paras=posterior_samples.numpy(), title=f'policy_T{training_steps}_{time}', additional_info = env.R, save=save, show=show)

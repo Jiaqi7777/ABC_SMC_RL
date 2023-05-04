@@ -125,9 +125,11 @@ class Tabular:
         """Discretize a sample as per given grid."""
         return tuple(int(np.digitize(s, g)) for s, g in zip(sample_state, self.state_grid))  
 
-    def sample_para(self, weights):
+    def sample_para(self, weights=None):
         # i = random.choices(range(len(self.tables)), weights)
         # print('Best table', i)
+        if weights is None:
+            return random.choice(self.tables)
         return random.choices(self.tables, weights)
 
     def q_value(self, table, s, a): 
