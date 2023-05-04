@@ -1,9 +1,20 @@
 import random
 import numpy as np
 import matplotlib.pyplot as plt
+import torch
+
 def argmaxs(arr):
     mask = arr == arr.max()
     return random.choice(np.array(range(len(arr)))[mask])
+
+def torch_max_0(tensor):
+    if torch.isnan(tensor):
+        return -torch.tensor(1e9)
+    return torch.minimum(torch.zeros(tensor.size()),tensor)
+
+def is_diagonal(matrix):
+    return torch.all(torch.eq(matrix, torch.diag(torch.diagonal(matrix))))
+
 
 def plot_2d(X, Y, Z, title=None, xlabel='s0', ylabel='s1', zlabel='Value', show=False, additional_info=[], save=False, figure_path = 'Figures/MCMC/'):
     arrows = {2:(1,0), 0:(-1,0),1:(0,1),3:(0,-1)}
