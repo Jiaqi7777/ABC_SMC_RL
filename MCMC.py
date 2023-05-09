@@ -825,19 +825,29 @@ class mHMC(HMC):
         q_prime_precondition = q_precondition
         halfstep = 0.5 * stepsize * torch.mv(q_precondition, p) 
         for i in range(fp_iterations):
-            q_prime = q + halfstep + 0.5 * stepsize * torch.mv(q_prime_precondition, p)
-            q_prime_precondition = self.negative_inverse_hessian(parameter=q_prime, info_dict=dict())
-        #     suberror = q_prime - halfstep - 0.5 * stepsize * torch.mv(q_prime_precondition, p)
+            q_prime_new = q + halfstep + 0.5 * stepsize * torch.mv(q_prime_precondition, p)
+            q_prime_precondition = self.negative_inverse_hessian(parameter=q_prime_new, info_dict=dict())
+            
+            if np.sqrt((q_prime_new - q_prime) ** 2).sum() < 1.e-4: #use max of components
+                q_prime = q_prime_new
+                print("yes",i)
+                break
+            else:
+                q_prime = q_prime_new
+                suberror = q_prime - q - halfstep - 0.5 * stepsize * torch.mv(q_prime_precondition, p)
+                print("no",i, np.sqrt((suberror ** 2).sum().numpy()))
+        #     suberror = q_prime - q - halfstep - 0.5 * stepsize * torch.mv(q_prime_precondition, p)
+        #     print("qprime",q_prime.sum())
+        #     print("error")
         #     print("suberror", np.sqrt((suberror ** 2).sum().numpy() ))
-        #     print(np.sqrt(q_prime **2).sum().numpy())
         
-        # error = q_prime - halfstep - 0.5 * stepsize * torch.mv(q_prime_precondition, p)
+        # error = q_prime - q - halfstep - 0.5 * stepsize * torch.mv(q_prime_precondition, p)
         # print("error", np.sqrt((error ** 2).sum().numpy() ))
         return q_prime, q_prime_precondition
     
     def move(self, current_para, current_gradient, current_precondition):
         """see self.move_"""
-        return self.move(current_para=current_para, current_gradient=current_gradient, current_precondition=current_precondition, L=self.L, stepsize=self.stepsize)
+        return self.move_(current_para=current_para, current_gradient=current_gradient, current_precondition=current_precondition, L=self.L, stepsize=self.stepsize)
 
     def move_(self, current_para, current_gradient, current_precondition, L=1, stepsize=0.01):
         """see HMC.move_
@@ -1142,12 +1152,12 @@ if __name__ == '__main__':
                 h = 0
                 # while True: #Turn on h += 1
                 for h in tqdm(range(HORIZON)):
-                    action = model.act(s0, posterior_samples, GREEDY=GREEDY)
+                    action = model.act(s0, posterior_samples, greedy=GREEDY)
                     s1, r, done, *info = env.step(action)
                     #Optimal action
                     # R_star = V_star[s0] + gamma * R_star#env.R[tuple(env.P[s0 + (int(pi_star[s0]), )])] #for regret
                     R += r#sum([r * gamma ** i for i in range(h + 1)])
-                    obs.insert({'state0': s0, 'state1': s1, 'action': action, 'rewards': r, 'done': done})
+                    obs.insert({'state0': s0, 'state1': s1, 'action': action, 'rewards': r, 'done': done}, unique=UNIQUE_OBS)
                     s0 = s1
                     # if e==0 and h==0:
                     #     print(posterior_samples[:, 0, 0], h, posterior_samples.shape)
@@ -1194,12 +1204,13 @@ if __name__ == '__main__':
                         #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=False)
                         #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=False, precondition_matrix=-torch.linalg.inv(hessian))
                         #kernel = HMC_pyro(model=Model, stepsize=STEPSIZE, full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB, num_steps=NUM_STEPS)
-                        #kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=False)
-                        kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=False, precondition_matrix=-torch.linalg.inv(hessian), traj_len=None)
+                        #kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=False, traj_len=None)
+                        #kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=False, precondition_matrix=-torch.linalg.inv(hessian), traj_len=None)
                         #kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=True, precondition_matrix=-torch.linalg.inv(hessian), traj_len=None)
                         #kernel = mMALA(model=Model, stepsize=STEPSIZE, use_autograd=False, use_autohess=False)
                         #kernel = mMALA(model=Model, stepsize=STEPSIZE, use_autograd=True, use_autohess=True)
-                        #kernel = mHMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=False, use_autohess=False, traj_len=None, fp_iterations=50)
+                        kernel = mHMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=False, use_autohess=False, traj_len=None, fp_iterations=5)
+                        #kernel = mHMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=True, use_autohess=True, traj_len=None, fp_iterations=5)
                         accept_probs = None
 
                         if kernel.original is True:
