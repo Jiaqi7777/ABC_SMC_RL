@@ -12,8 +12,8 @@ os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 sys.path.append('/scratch/Rabbit/work/ABC_SMC_RL/')
 print(sys.path)
 '''module import'''
-from Kernels import *
-from Models import *
+from MCMC_Algorithms.Kernels import *
+from MCMC_Algorithms.Models import *
 from parameter import *
 
 def generate_samples(para, model, obs, batch_indices=None, buffer_size=BUFFER_SIZE, batch_training=BATCH_TRAINING):
@@ -27,14 +27,6 @@ def generate_samples(para, model, obs, batch_indices=None, buffer_size=BUFFER_SI
     dones = torch.tensor(np.array(obs['done'])[-buffer_size:][batch_indices].astype(int))
 
     return model.q_value(para, s0.T, a) - torch.where(dones == 1, torch.zeros(len(s0)), model.gamma * model.v_value(para, s1.T).values) #time 
-
-    # samples = []
-    # for s0, a, s1 in zip(obs['state0'], obs['action'], obs['state1']):
-    #     samples.append(model.q_value(para, s0, a) - model.gamma * model.v_value(para, s1))
-    # return np.array(samples)# t
-
-
-
 
 
 class MCMC:
