@@ -1,6 +1,6 @@
 import numpy as np
-from MCMC import *
-from MountainCar import *
+from MCMC.MCMC import *
+from Environment.MountainCar import *
 from model import *
 from parameter import *
 
