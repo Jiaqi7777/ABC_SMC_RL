@@ -1,5 +1,5 @@
 import numpy as np
-from MCMC.MCMC import *
+from MCMC_Algorithms.MCMC import *
 from Environment.MountainCar import *
 from model import *
 from parameter import *
@@ -13,7 +13,7 @@ class SMC:
         self.model = model
         self._parameter = model.get_parameter()
         if kernel == None:
-            kernel = RandomWalk(model=model, sigma=sigma)
+            kernel = RandomWalk(model=model, sigma=PRIOR_SIGMA)
         self._mcmc = MCMC(kernal=kernel)
 
     def update(self, obs, samples_l, update_frequency=5):

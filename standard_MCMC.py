@@ -3,7 +3,7 @@ import pyro.distributions as dist
 import torch
 import matplotlib.pyplot as plt
 from parameter import *
-from MCMC.MCMC import *
+from MCMC_Algorithms.MCMC import *
 from functools import partial
 from QLearning import *
 
@@ -40,7 +40,7 @@ if __name__ == '__main__':
     from Environment.GridWorld import *
     from Environment.Maze import *
     from model import *
-    from MCMC.MCMC import *
+    from MCMC_Algorithms.MCMC import *
     from QLearning import *
     
     parser = argparse.ArgumentParser()

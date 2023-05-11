@@ -42,7 +42,7 @@ print(theta)
 '''
 from SMC import *
 from model import *
-from MCMC.MCMC import *
+from MCMC_Algorithms.MCMC import *
 from Environment.MountainCar import *
 import gym 
 import numpy as np
