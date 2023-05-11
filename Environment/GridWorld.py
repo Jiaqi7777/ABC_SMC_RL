@@ -81,7 +81,6 @@ class GridWorld:
             real_step = True
             state = self.state
             if self.stochastic:
-                print(self.state + (action, ))
                 self.state = new_state = tuple(random.choices(self.stochasticP[self.state + (action, )], self.move_prob)[0])
             else:
                 self.state = new_state = tuple(self.P[self.state + (action, )])

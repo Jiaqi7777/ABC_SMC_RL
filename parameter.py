@@ -2,6 +2,7 @@
 #Env 
 ENV_NAME = 'GridWorld'
 CORRECT_MOVE_PROB = 0.5
+STOCHASTIC = True
 #ENV_NAME = 'MountainCar'
 
 #Test parameters
@@ -20,7 +21,7 @@ CORRECT_MOVE_PROB = 0.5
 #Long Experiment
 HORIZON = 100
 #Number of EPISODES
-EPISODES = 20
+EPISODES = 40
 GAMMA = 1
 REPEAT_EXPERIMENT = 3
 DISCRETE = False
@@ -66,6 +67,7 @@ OBSERVE_DATA_END = -4
 
 #ABC
 EPSILON = 0.05
+M_Z = 10
 
 #Results
 SAVE = False

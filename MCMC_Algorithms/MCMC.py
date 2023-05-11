@@ -16,19 +16,6 @@ from MCMC_Algorithms.Kernels import *
 from MCMC_Algorithms.Models import *
 from parameter import *
 
-def generate_samples(para, model, obs, batch_indices=None, buffer_size=BUFFER_SIZE, batch_training=BATCH_TRAINING):
-    para = para.reshape(model.state_size + (model.action_size, ))
-    if not batch_training:
-        batch_indices = range(min(len(obs['state0']), buffer_size))
-    
-    s0 = np.array(obs['state0'])[-buffer_size:][batch_indices]
-    s1 = np.array(obs['state1'])[-buffer_size:][batch_indices]
-    a = np.array(obs['action'])[-buffer_size:][batch_indices]
-    dones = torch.tensor(np.array(obs['done'])[-buffer_size:][batch_indices].astype(int))
-
-    return model.q_value(para, s0.T, a) - torch.where(dones == 1, torch.zeros(len(s0)), model.gamma * model.v_value(para, s1.T).values) #time 
-
-
 class MCMC:
     """the class to run MCMC"""
     def __init__(self, kernel, warmup_steps=0, num_samples=MCMC_SAMPLE, initial_params=None, params_dim=None, warmup_settings=dict(target_prob=0.7, auto_init_stepsize=True), **kwargs):
@@ -208,7 +195,7 @@ if __name__ == '__main__':
     torch.manual_seed(seed)
     
     if env_name == 'GridWorld':
-        env = GridWorld((3,4), obstacles=True)
+        env = GridWorld((3,4), obstacles=True, stochastic=STOCHASTIC)
         env.plot_env()
     if env_name == 'Maze':
         env = Maze()
@@ -248,6 +235,10 @@ if __name__ == '__main__':
                 for h in tqdm(range(HORIZON)):
                     action = model.act(s0, para, greedy=GREEDY)
                     s1, r, done, *info = env.step(action)
+                    if STOCHASTIC:
+                        s1 = []
+                        for _ in range(M_Z):
+                            s1.append(env.step(action, state=s0))
                     R += r
                     obs.insert({'state0': s0, 'state1': s1, 'action': int(action), 'rewards': r, 'done': done}, unique=UNIQUE_OBS)
                     s0 = s1
@@ -257,23 +248,14 @@ if __name__ == '__main__':
                             batch_indices = random.sample(range(min(len(obs._buffers['state0']), BUFFER_SIZE)), k=min(BATCH_SIZE, len(obs._buffers['state0']))) #TODO: what is this?
                         else:
                             batch_indices = slice(None)
-                        r_hat = partial(generate_samples, model=model, obs=obs._buffers,  batch_indices=batch_indices)
+                            
+                        '''Deterministic'''
+                        # llh_transform_grad_fn = lambda parameter:  tabular_indicator_deterministic(para=parameter.reshape(env.n_cell + (env.action_space.n, )), model=model, obs=obs._buffers)#standard form
+                        # r_hat = partial(generate_samples, model=model, obs=obs._buffers,  batch_indices=batch_indices)
+                        '''Stochastic'''
+                        llh_transform_grad_fn = lambda parameter:  tabular_indicator_stochastic(para=parameter.reshape(env.n_cell + (env.action_space.n, )), model=model, obs=obs._buffers)#stochastic
+                        r_hat = partial(generate_samples_with_z, model=model, obs=obs._buffers,  batch_indices=batch_indices)
                         
-                        def tabular_indicator(para, model, obs):
-                            s0 = obs['state0']
-                            s1 = obs['state1']
-                            a = obs['action']
-                            done = np.array(obs['done'])
-                            s01, s02 = np.array(s0).T
-                            s11, s12 = np.array(s1)[done == False].T
-                            a_prime = np.argmax(para[s11, s12], axis=-1)
-                            Indicator = np.zeros(shape=(len(a), ) + para.shape) #TxTheta
-                            Indicator[range(len(a)), s01, s02, a] = 1.
-                            Indicator[range(len(a_prime)), s11, s12, a_prime] -= model.gamma
-                            return torch.tensor(Indicator, dtype=torch.float32).reshape((len(a),-1))
-                        
-                        llh_transform_grad_fn = lambda parameter:  tabular_indicator(para=parameter.reshape(env.n_cell + (env.action_space.n, )), model=model, obs=obs._buffers)#standard form
-
                         prior = IsotropicGaussianPrior(sd=PRIOR_SIGMA)
                         abclikelihood = GaussianABCLikelihood(epsilon=EPSILON)
                         data = torch.tensor(obs._buffers["rewards"])[-BUFFER_SIZE:][batch_indices]
