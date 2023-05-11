@@ -1,6 +1,7 @@
 #RL
 #Env 
 ENV_NAME = 'GridWorld'
+CORRECT_MOVE_PROB = 0.5
 #ENV_NAME = 'MountainCar'
 
 #Test parameters

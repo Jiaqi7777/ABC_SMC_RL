@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 from model import *
 
 class GridWorld:
-    def __init__(self, n_cell, starting_position=(0,0), goal_position=(-1,-1), obstacles=False):
+    def __init__(self, n_cell, starting_position=(0,0), goal_position=(-1,-1), obstacles=False, stochastic=False):
         self.env_name = 'GridWorld'
         self.n_cell = n_cell
         self.starting_position = starting_position
@@ -19,15 +19,16 @@ class GridWorld:
         self.observation_space_high = (n_cell[0], n_cell[1])
         self.observation_space_low = (0, 0)
         self.action_space = spaces.Discrete(4)
+        self.stochastic = stochastic
+        if self.stochastic:
+            self.move_prob = [CORRECT_MOVE_PROB] + [(1 - CORRECT_MOVE_PROB)/5] * 5
         print('goal: ', goal_position)
         print('start: ', starting_position)
         print('World Scale: ', f'{n_cell[0]}x{n_cell[1]}')
-        self.P = np.zeros((n_cell[0], n_cell[1], self.action_space.n, 2), dtype='int32')
-        # any action taken in terminal state has no effect
         gridworld = np.arange(
-                self.observation_space.n
-                ).reshape((n_cell[0], n_cell[1]))
-        # gridworld[goal_position] = 0
+        self.observation_space.n
+        ).reshape((n_cell[0], n_cell[1]))
+        self.P = np.zeros((n_cell[0], n_cell[1], self.action_space.n, 2), dtype='int32')
         for s in gridworld.flat:
             row, col = np.argwhere(gridworld == s)[0]
             for a, d in zip(
@@ -39,6 +40,22 @@ class GridWorld:
                 s_prime = [next_row, next_col] #gridworld[next_row, next_col]
                 self.P[row, col, a] = s_prime
                 self.P[goal_position + (a, )] = goal_position
+                    
+        if self.stochastic:
+            random_move = np.array([0, -1, 1, 2]) #moving forwards, left, right, back when facing the correct direction
+            self.stochasticP = np.zeros((n_cell[0], n_cell[1], self.action_space.n, len(self.move_prob), 2), dtype='int32')
+            for s in gridworld.flat:
+                row, col = np.argwhere(gridworld == s)[0]
+                for a, d in zip(
+                        range(self.action_space.n),
+                        [(-1, 0), (0, 1), (1, 0), (0, -1)]
+                        ):
+                    next_next_row = max(0, min(row + 2 * d[0], n_cell[0]-1))
+                    next_next_col = max(0, min(col + 2 * d[1], n_cell[1]-1))
+                    self.stochasticP[row, col, a, :4] = self.P[row, col, (a + random_move) % 4] 
+                    self.stochasticP[row, col, a, -2] = [row, col] #stay still
+                    self.stochasticP[row, col, a, -1] = [next_next_row, next_next_col]
+                    self.stochasticP[(*goal_position, a, slice(None))] = [goal_position] * len(self.move_prob)
                 
         self.R = np.full((n_cell[0], n_cell[1]), -1)
         if obstacles:
@@ -63,10 +80,17 @@ class GridWorld:
         if state == None:
             real_step = True
             state = self.state
-            self.state = new_state = tuple(self.P[self.state + (action, )])
+            if self.stochastic:
+                print(self.state + (action, ))
+                self.state = new_state = tuple(random.choices(self.stochasticP[self.state + (action, )], self.move_prob)[0])
+            else:
+                self.state = new_state = tuple(self.P[self.state + (action, )])
         else:
             real_step = False
-            new_state = tuple(self.P[state + (action, )])
+            if self.stochastic:
+                new_state = tuple(random.choices(self.stochasticP[state + (action, )], self.move_prob)[0])
+            else:
+                new_state = tuple(self.P[state + (action, )])
         if new_state == self.goal_position:
             done = True
             if real_step:
@@ -154,10 +178,13 @@ class GridWorld:
 if __name__ == '__main__':
     for seed in range(555, 557):
         random.seed(seed)
-        env = GridWorld((3,4), (0,0), obstacles=True)
+        env = GridWorld((3,4), (0,0), obstacles=True, stochastic=True)
         print(env.reset(), seed)
         print(env.observation_space.n)
-        env.plot_env()
+        # env.plot_env()
+        for t in range(10):
+            print(t)
+            env.step(random.randint(0,3))
     # env.expert()
     # env.plot_env(env.expert_traj + env.R)
     # print(env.expert_obs._buffers['state1'])
