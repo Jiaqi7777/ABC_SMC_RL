@@ -2,7 +2,6 @@ import numpy as np
 from utils import *
 import torch
 import matplotlib
-matplotlib.use('qt4agg')
 import matplotlib.pyplot as plt
 '''module import'''
 from parameter import *
