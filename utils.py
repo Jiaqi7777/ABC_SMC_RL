@@ -1,9 +1,19 @@
 import random
 import numpy as np
 import matplotlib.pyplot as plt
+import torch
+
 def argmaxs(arr):
     mask = arr == arr.max()
     return random.choice(np.array(range(len(arr)))[mask])
+
+def torch_max_0(tensor):
+    if torch.isnan(tensor):
+        return -torch.tensor(1e9)
+    return torch.minimum(torch.zeros(tensor.size()),tensor)
+
+def is_diagonal(matrix):
+    return torch.all(torch.eq(matrix, torch.diag(torch.diagonal(matrix))))
 
 def expand_dims(arr):
     arr = np.array(arr)

@@ -9,13 +9,13 @@ from QLearning import *
 
 
 def likelihood(data):
-    obs, model, dim, batch_indicies, abc_epsilon = data
+    obs, model, dim, batch_indices, abc_epsilon = data
     if not BATCH_TRAINING:
-        batch_indicies = range(min(len(obs['state0']), BUFFER_SIZE))
-    r_hat = torch.tensor(obs['rewards'])[-BUFFER_SIZE:][batch_indicies]
+        batch_indices = range(min(len(obs['state0']), BUFFER_SIZE))
+    r_hat = torch.tensor(obs['rewards'])[-BUFFER_SIZE:][batch_indices]
     
     prior_parameter = pyro.sample("prior_parameter", dist.MultivariateNormal(torch.zeros(dim), PRIOR_SIGMA **2 * torch.eye(dim)))
-    mean = generate_samples(prior_parameter, model, obs, batch_indicies=batch_indicies).reshape(-1)
+    mean = generate_samples(prior_parameter, model, obs, batch_indices=batch_indices).reshape(-1)
     with pyro.plate("data_plate"):
         pyro.sample("obs", dist.MultivariateNormal(mean, abc_epsilon ** 2 * torch.eye(len(r_hat))), obs=r_hat)
 
@@ -125,12 +125,12 @@ if __name__ == '__main__':
                         # print(obs._buffers['state0'][-FROZEN_T:])
                         # print(obs._buffers)
                         #MCMC
-                        batch_indicies = random.sample(range(min(len(obs._buffers['state0']), BUFFER_SIZE)), k=min(BATCH_SIZE, len(obs._buffers['state0'])))
-                        r_hat = partial(generate_samples, model=model, obs=obs._buffers,  batch_indicies=batch_indicies)
+                        batch_indices = random.sample(range(min(len(obs._buffers['state0']), BUFFER_SIZE)), k=min(BATCH_SIZE, len(obs._buffers['state0'])))
+                        r_hat = partial(generate_samples, model=model, obs=obs._buffers,  batch_indices=batch_indices)
                         if BATCH_TRAINING:
-                            mcmc_run = mcmc([obs._buffers, model, dim, batch_indicies, abc_epsilon], torch.tensor(posterior_samples[-1].reshape(-1)), num_samples=training_steps,  warmup_steps=warmup_steps, MCMC_SHOW_DISABLE=MCMC_SHOW_DISABLE, stepsize=STEPSIZE)
+                            mcmc_run = mcmc([obs._buffers, model, dim, batch_indices, abc_epsilon], torch.tensor(posterior_samples[-1].reshape(-1)), num_samples=training_steps,  warmup_steps=training_steps//5, MCMC_SHOW_DISABLE=MCMC_SHOW_DISABLE)
                         else:
-                            mcmc_run = mcmc([obs._buffers, model, dim, batch_indicies, abc_epsilon], torch.tensor(posterior_samples[-1].reshape(-1)), num_samples=training_steps,  warmup_steps=warmup_steps, MCMC_SHOW_DISABLE=MCMC_SHOW_DISABLE, stepsize=STEPSIZE)
+                            mcmc_run = mcmc([obs._buffers, model, dim, batch_indices, abc_epsilon], torch.tensor(posterior_samples[-1].reshape(-1)), num_samples=training_steps,  warmup_steps=warmup_steps, MCMC_SHOW_DISABLE=MCMC_SHOW_DISABLE)
                         posterior_samples = mcmc_run.get_samples()["prior_parameter"].reshape((-1, ) + env.n_cell + (env.action_space.n, ))
                         model.set_parameter(posterior_samples)
                         STEPSIZE *= DECREASING_FACTOR
@@ -177,7 +177,7 @@ if __name__ == '__main__':
         env.uniform_policy()
         obs = env.uniform_obs._buffers
         r_hat = partial(generate_samples, model=model, obs=obs)
-        mcmc_run = mcmc(torch.tensor(obs['rewards']), torch.tensor(model.get_parameter()[0].reshape(-1)), num_samples=training_steps, warmup_steps=training_steps//10)
+        mcmc_run = mcmc([obs, model, dim, slice(None), abc_epsilon], torch.tensor(model.get_parameter()[0].reshape(-1)), num_samples=training_steps, warmup_steps=training_steps//10)
         posterior_samples = mcmc_run.get_samples()["prior_parameter"]
         print(posterior_samples.shape)
 
