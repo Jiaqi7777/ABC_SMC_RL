@@ -1,7 +1,7 @@
 import time
 import gym
 import numpy as np
-from MountainCar import*
+from Environment.MountainCar import*
 import gym
 import matplotlib.pyplot as plt 
 

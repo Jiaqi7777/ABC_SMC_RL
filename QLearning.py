@@ -1,8 +1,9 @@
 import numpy as np
 from utils import *
-from parameter import *
 import torch
 import matplotlib.pyplot as plt
+'''module import'''
+from parameter import *
 def DynamicProgramming(Q, A, S, env, thresh=1e-5, gamma=0.95, show=False):
     loop = 0
     delta = thresh + 0.01
@@ -80,8 +81,8 @@ def QLearningWithData(Q, obs, gamma=0.95, training_steps=100, alpha=0.2):
     return pi, Q, V
     
 if __name__ == '__main__':
-    from GridWorld import *
-    from Maze import *
+    from Environment.GridWorld import *
+    from Environment.Maze import *
     import datetime
     time =  datetime.datetime.now()
     time = time.strftime("%f")

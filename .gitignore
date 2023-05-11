@@ -1,10 +1,12 @@
 *.pyc
+__pycache__
 *checkpoint.ipynb
 MountainCar.ipynb
 *.DS_Store
 .vscode
 *.yml
 log*
+Notebooks
 
 #Models
 Models
