@@ -5,12 +5,14 @@ import matplotlib
 import matplotlib.pyplot as plt
 '''module import'''
 from parameter import *
-def DynamicProgramming(Q, A, S, env, thresh=1e-5, gamma=0.95, show=False):
+def DynamicProgramming(Q, A, S, env, thresh=1e-2, gamma=0.95, show=False, alpha=1):
+    initial_alpha = alpha
+    delta_l=[]
     loop = 0
     delta = thresh + 0.01
     while delta > thresh:
         loop += 1
-    # for i in range(2):
+    # for i in range(800):
         '''1-d state'''
         delta = thresh*0.9
         for s in S:
@@ -21,9 +23,11 @@ def DynamicProgramming(Q, A, S, env, thresh=1e-5, gamma=0.95, show=False):
                     if done:
                         new_q = Q[s + (a,) ] = r
                     else:
-                        new_q = Q[s + (a,) ] = r + gamma * max(Q[s1])
+                        new_q = Q[s + (a,) ] = alpha * (r + gamma * max(Q[s1])) + (1 - alpha) * pre_q
                     delta = max(delta, abs(pre_q - new_q))
-        print(delta)
+        alpha = initial_alpha / loop
+        # print(alpha)
+        delta_l.append(delta)
     
     V = np.max(Q, axis=-1)
     print('Q', np.round(Q, 2), delta)
@@ -32,18 +36,20 @@ def DynamicProgramming(Q, A, S, env, thresh=1e-5, gamma=0.95, show=False):
     print('Policy:', np.argmax(Q, axis=-1))
     pi = np.argmax(Q, axis=-1)
     plt.imshow(V)
+    plt.colorbar()
     if show:
         plt.show()
-    return pi, Q, V
+    return pi, Q, V#, delta_l
 
 def QLearning(Q, env, n_episodes=10, horizon=50, gamma=0.95, epsilon=0.4, alpha=0.2):
+    initial_alpha = alpha
     # while delta > thresh:
     #     loop += 1
     return_all_episodes_qlearning = []
     regret_all_episodes_qlearning = []
     Regret = 0
-    for _ in range(n_episodes):
-        alpha *= 0.95
+    for e in range(n_episodes):
+        alpha = initial_alpha / (e+1)
         R = 0
         Regret = 0
         s0, _ = env.reset()
@@ -116,12 +122,13 @@ if __name__ == '__main__':
     # S = range(env.n_cell)
     A = range(env.action_space.n)
     smooth = 50
-    for alpha in [0.2, 0.3, 0.5, 0.7, 1]:
-        pi, Q, V, return_,regret_ = QLearning(Q, env, n_episodes=1000, horizon=HORIZON)
-        plt.plot(np.convolve(np.array(return_), np.ones(smooth)/smooth, mode='valid'), label=f'alpha={alpha}')
-    plt.legend()
-    plt.show()
-    # pi_star, Q_star, V_star = DynamicProgramming(Q, A, S, env, thresh=1e-1, gamma=1, show=True)
+    # for alpha in [0.2, 0.3, 0.5, 0.7, 1]:
+    #     pi, Q, V, return_,regret_ = QLearning(Q, env, n_episodes=1000, horizon=HORIZON)
+    #     plt.plot(np.convolve(np.array(return_), np.ones(smooth)/smooth, mode='valid'), label=f'Initial alpha={alpha}')
+    pi_star, Q_star, V_star = DynamicProgramming(Q, A, S, env, thresh=1e-1, gamma=1, show=True)
+    # plt.plot(delta_l)
+    # plt.legend()
+    # plt.show()
     # if QLEARNING:
     #     for repeat in range(REPEAT_EXPERIMENT):
     #         env.reset()
