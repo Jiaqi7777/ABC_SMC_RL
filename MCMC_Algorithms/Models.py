@@ -24,15 +24,13 @@ def generate_samples_with_z(para, model, obs, batch_indices=None, buffer_size=BU
         batch_indices = range(min(len(obs['state0']), buffer_size))
     
     s0 = np.array(obs['state0'])[-buffer_size:][batch_indices]
-    s1_lst = np.array(obs['state1'])[-buffer_size:][batch_indices]
-    print(s1_lst.shape, s0.shape)
+    s1_lst = np.swapaxes(np.array(obs['state1'])[-buffer_size:][batch_indices], 0, 1)
     a = np.array(obs['action'])[-buffer_size:][batch_indices]
     dones = torch.tensor(np.array(obs['done'])[-buffer_size:][batch_indices].astype(int))
     s1_value = 0
     for s1 in s1_lst:
         s1_value += model.v_value(para, s1.T).values
-
-    return model.q_value(para, s0.T, a) - torch.where(dones == 1, torch.zeros(len(s0)), model.gamma * s1_value / M_Z) #time 
+    return model.q_value(para, s0.T, a) - torch.where(dones == 1, torch.zeros(len(s0)), model.gamma * s1_value / M_Z)
 
 def tabular_indicator_deterministic(para, model, obs):
     s0 = obs['state0']
@@ -49,15 +47,15 @@ def tabular_indicator_deterministic(para, model, obs):
 
 def tabular_indicator_stochastic(para, model, obs):
     s0 = obs['state0']
-    s1_lst = obs['state1']
+    s1_lst = np.swapaxes(np.array(obs['state1']), 0, 1)
     a = obs['action']
     done = np.array(obs['done'])
     s01, s02 = np.array(s0).T
-    a_prime = np.argmax(para[s11, s12], axis=-1)
     Indicator = np.zeros(shape=(len(a), ) + para.shape) #TxTheta
     Indicator[range(len(a)), s01, s02, a] = 1.
     for s1 in s1_lst:
         s11, s12 = np.array(s1)[done == False].T
+        a_prime = np.argmax(para[s11, s12], axis=-1)
         Indicator[range(len(a_prime)), s11, s12, a_prime] -= model.gamma / M_Z
     return torch.tensor(Indicator, dtype=torch.float32).reshape((len(a),-1))
 

@@ -10,7 +10,7 @@ import sys
 import os
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 sys.path.append('/scratch/Rabbit/work/ABC_SMC_RL/')
-sys.path.append('/guojiaqi/work/ABC_SMC_RL/')
+sys.path.append('/Users/guojiaqi/work/ABC_SMC_RL/')
 print(sys.path)
 '''module import'''
 from MCMC_Algorithms.Kernels import *

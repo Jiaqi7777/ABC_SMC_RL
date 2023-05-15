@@ -67,7 +67,7 @@ OBSERVE_DATA_END = -4
 
 #ABC
 EPSILON = 0.05
-M_Z = 2
+M_Z = 3
 
 #Results
 SAVE = False
