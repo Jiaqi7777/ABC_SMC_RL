@@ -12,7 +12,7 @@ class Kernel:
     """the class of all MCMC kernels"""
     def __init__(self, model, use_autograd=True, use_autohess=True, *args, **kwargs):
         """
-        model: a model of the form DeterministicSRModel
+        model: a model of the form DeterministicRModel
             - model that defines the log target density for the MCMC, and should contain methods: logtarget_density that takes a parameter (torch.tensor) and return a torch.tensor
         autograd: bool, optional
             - For kernels that requires gradient. If True, use autograd to compute gradient, otherwise, use the gradient method defined by the model

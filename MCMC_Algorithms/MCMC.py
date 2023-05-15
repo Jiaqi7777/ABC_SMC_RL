@@ -10,6 +10,7 @@ import sys
 import os
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 sys.path.append('/scratch/Rabbit/work/ABC_SMC_RL/')
+sys.path.append('/guojiaqi/work/ABC_SMC_RL/')
 print(sys.path)
 '''module import'''
 from MCMC_Algorithms.Kernels import *
@@ -236,11 +237,12 @@ if __name__ == '__main__':
                     action = model.act(s0, para, greedy=GREEDY)
                     s1, r, done, *info = env.step(action)
                     if STOCHASTIC:
-                        s1 = []
+                        s1_augmented = []
                         for _ in range(M_Z):
-                            s1.append(env.step(action, state=s0))
+                            s1_augmented.append(env.step(action, state=s0)[0])
+                        # print(s1_augmented)
                     R += r
-                    obs.insert({'state0': s0, 'state1': s1, 'action': int(action), 'rewards': r, 'done': done}, unique=UNIQUE_OBS)
+                    obs.insert({'state0': s0, 'state1': s1_augmented, 'action': int(action), 'rewards': r, 'done': done}, unique=UNIQUE_OBS)
                     s0 = s1
                     if done or ( h + 1)  % FROZEN_T == 0:
                         #MCMC
@@ -259,7 +261,7 @@ if __name__ == '__main__':
                         prior = IsotropicGaussianPrior(sd=PRIOR_SIGMA)
                         abclikelihood = GaussianABCLikelihood(epsilon=EPSILON)
                         data = torch.tensor(obs._buffers["rewards"])[-BUFFER_SIZE:][batch_indices]
-                        Model = DeterministicSRModel(prior=prior, abclikelihood=abclikelihood, data=data, llh_transform_fn=r_hat, llh_transform_grad_fn=llh_transform_grad_fn)
+                        Model = DeterministicRModel(prior=prior, abclikelihood=abclikelihood, data=data, llh_transform_fn=r_hat, llh_transform_grad_fn=llh_transform_grad_fn)
 
                         def fn(parameter):
                             current_logtarget_density, _ = Model.logtarget_density(parameter=parameter, llh_info_dict=dict())
@@ -374,7 +376,7 @@ if __name__ == '__main__':
         prior = IsotropicGaussianPrior()
         abclikelihood = GaussianABCLikelihood(epsilon=EPSILON)
         data = torch.tensor(obs["rewards"])
-        Model = DeterministicSRModel(prior=prior, abclikelihood=abclikelihood, data=data, llh_transform_fn=r_hat, llh_transform_grad_fn=llh_transform_grad_fn)
+        Model = DeterministicRModel(prior=prior, abclikelihood=abclikelihood, data=data, llh_transform_fn=r_hat, llh_transform_grad_fn=llh_transform_grad_fn)
 
         def fn(parameter):
             current_logtarget_density, _ = Model.logtarget_density(parameter=parameter, llh_info_dict=dict())

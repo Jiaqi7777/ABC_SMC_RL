@@ -25,6 +25,7 @@ def generate_samples_with_z(para, model, obs, batch_indices=None, buffer_size=BU
     
     s0 = np.array(obs['state0'])[-buffer_size:][batch_indices]
     s1_lst = np.array(obs['state1'])[-buffer_size:][batch_indices]
+    print(s1_lst.shape, s0.shape)
     a = np.array(obs['action'])[-buffer_size:][batch_indices]
     dones = torch.tensor(np.array(obs['done'])[-buffer_size:][batch_indices].astype(int))
     s1_value = 0
