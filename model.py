@@ -44,15 +44,18 @@ class Buffer:
     def insert(self, items, unique=False):
         if set(items.keys()) != set(self._buffers.keys()):
             raise IndexError
-        
-        if unique and str(list(items.values())) in self.unique_set:
+        unique_check = list(items.values())
+        unique_check.remove(items['state1'])
+        unique_check = str(unique_check)
+        print(unique_check)
+        if unique and unique_check in self.unique_set:
             return 
-        print('New items added', items)
+        print('New items added', unique_check)
         for k, v in items.items():
             self._buffers[k].append(v)
             # if len(self._buffers[k]) > BUFFER_SIZE:
             #     self._buffers[k].pop(0)
-        self.unique_set.append(str(list(items.values())))
+        self.unique_set.append(unique_check)
         
     def get_minibatch(self, batch_size):
         if batch_size == 1:
