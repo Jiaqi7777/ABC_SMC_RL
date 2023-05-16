@@ -157,3 +157,11 @@ def compare_r_vs_episodes_repeat(r_1, r_2, figure_path='Figures/', show=True, ti
         plt.show()
     plt.clf()
     
+def save_results(results, folder, stochastic, episode, training_steps, greedy, epsilon, initial_stepsize, decreasing_factor, time, m_z, repeat, episodic=False):
+    Episodes = f'Episode{episode}_' if episodic else ''
+    file_path = f'{folder}/MCMC/T{training_steps}_Repeat{repeat}_{Episodes}Sto{stochastic}_M{m_z}_Gdy{greedy}_Ep{epsilon}_Stp{initial_stepsize}_Dcrs{decreasing_factor}_{time}.npy'
+    with open(file_path, 'wb') as f:
+        np.save(f, results)
+    print(f'{Episodes}{folder} for repeat {repeat} saved at', file_path)
+
+    
