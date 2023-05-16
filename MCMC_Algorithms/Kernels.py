@@ -334,7 +334,8 @@ class HMC(Kernel):
             - If True, autograd is used to compute the gradient of the target density, otherwise the manually implemented gradient function is used specified in the model
         """
         print('HMC stepsize', stepsize)
-        super(HMC, self).__init__(model=model, *args, **kwargs)   
+        super(HMC, self).__init__(model=model, *args, **kwargs)  
+        self.traj_len = traj_len 
         self.stepsize = stepsize
         self.precondition = precondition_matrix
         self.use_autograd = use_autograd
