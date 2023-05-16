@@ -3,6 +3,11 @@ from gym import spaces
 import random
 from matplotlib import colors, colormaps
 import matplotlib.pyplot as plt
+import sys
+import os
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
+sys.path.append('/scratch/Rabbit/work/ABC_SMC_RL/')
+sys.path.append('/Users/guojiaqi/work/ABC_SMC_RL/')
 '''module import'''
 from model import *
 
@@ -163,15 +168,28 @@ class GridWorld:
       
     def uniform_policy(self):
         self.uniform_obs = Buffer(['state0', 'state1', 'action', 'rewards', 'done'])
-        for r in range(self.n_cell[0]):
-            for c in range(self.n_cell[1]):
-                for a in range(self.action_space.n):
-                    done = False
-                    s0 = (r, c)
-                    s1 = tuple(self.P[s0 + (a, )])
-                    if s1 == self.goal_position:
-                        done = True
-                    self.uniform_obs.insert({'state0': s0, 'state1': s1, 'action': a, 'rewards': self.R[s1], 'done': done})
+        if self.stochastic:
+            for r in range(self.n_cell[0]):
+                for c in range(self.n_cell[1]):
+                    for a in range(self.action_space.n):
+                        for i in range(len(self.move_prob)):
+                            done = False
+                            s0 = (r, c)
+                            s1 = tuple(self.stochasticP[s0 + (a, )][i])
+                            if s1 == self.goal_position:
+                                done = True
+                            self.uniform_obs.insert({'state0': s0, 'state1': s1, 'action': a, 'rewards': self.R[s1], 'done': done}, unique=True, unique_verbose=False)
+            print('Unique data numbers', len(self.uniform_obs._buffers['state0']))
+        else:
+            for r in range(self.n_cell[0]):
+                for c in range(self.n_cell[1]):
+                    for a in range(self.action_space.n):
+                        done = False
+                        s0 = (r, c)
+                        s1 = tuple(self.P[s0 + (a, )])
+                        if s1 == self.goal_position:
+                            done = True
+                        self.uniform_obs.insert({'state0': s0, 'state1': s1, 'action': a, 'rewards': self.R[s1], 'done': done})
                     
 
 if __name__ == '__main__':
@@ -184,7 +202,7 @@ if __name__ == '__main__':
         for t in range(10):
             print(t)
             env.step(random.randint(0,3))
-    # env.expert()
+    env.uniform_policy()
     # env.plot_env(env.expert_traj + env.R)
     # print(env.expert_obs._buffers['state1'])
     # env = GridWorld((3,4), (1,2), (2,3), obstacles=True)

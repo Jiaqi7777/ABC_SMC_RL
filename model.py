@@ -37,11 +37,11 @@ def uniform_grid(low, high, bins=(10,10), include_low=1, verbose=False):
     return grid
 
 class Buffer:
-    def __init__(self, entry_keys, seed=555):
+    def __init__(self, entry_keys, seed=SEED):
         self._buffers = {key: [] for key in entry_keys}
         self.unique_set = []
 
-    def insert(self, items, unique=False):
+    def insert(self, items, unique=False, unique_verbose=True):
         if set(items.keys()) != set(self._buffers.keys()):
             raise IndexError
         unique_check = list(items.values())
@@ -49,7 +49,8 @@ class Buffer:
         unique_check = str(unique_check)
         if unique and unique_check in self.unique_set:
             return 
-        print('New items added', unique_check)
+        if unique_verbose:
+            print('New items added', unique_check)
         for k, v in items.items():
             self._buffers[k].append(v)
             # if len(self._buffers[k]) > BUFFER_SIZE:

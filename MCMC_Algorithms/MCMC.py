@@ -11,7 +11,7 @@ import os
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 sys.path.append('/scratch/Rabbit/work/ABC_SMC_RL/')
 sys.path.append('/Users/guojiaqi/work/ABC_SMC_RL/')
-print(sys.path)
+print('system path', sys.path)
 '''module import'''
 from MCMC_Algorithms.Kernels import *
 from MCMC_Algorithms.Models import *
@@ -158,12 +158,12 @@ def MCMC_update(obs, posterior_samples, model):
     else:
         batch_indices = slice(None)
         
-    '''Deterministic'''
-    # llh_transform_grad_fn = lambda parameter:  tabular_indicator_deterministic(para=parameter.reshape(env.n_cell + (env.action_space.n, )), model=model, obs=obs._buffers)#standard form
-    # r_hat = partial(generate_samples, model=model, obs=obs._buffers,  batch_indices=batch_indices)
-    '''Stochastic'''
-    llh_transform_grad_fn = lambda parameter:  tabular_indicator_stochastic(para=parameter.reshape(env.n_cell + (env.action_space.n, )), model=model, obs=obs._buffers)#stochastic
-    r_hat = partial(generate_samples_with_z, model=model, obs=obs._buffers,  batch_indices=batch_indices)
+    '''Determinisitc or Stochastic Offline'''
+    llh_transform_grad_fn = lambda parameter:  tabular_indicator_deterministic(para=parameter.reshape(env.n_cell + (env.action_space.n, )), model=model, obs=obs._buffers)#standard form
+    r_hat = partial(generate_samples, model=model, obs=obs._buffers,  batch_indices=batch_indices)
+    '''Stochastic Online'''
+    # llh_transform_grad_fn = lambda parameter:  tabular_indicator_stochastic(para=parameter.reshape(env.n_cell + (env.action_space.n, )), model=model, obs=obs._buffers)#stochastic
+    # r_hat = partial(generate_samples_with_z, model=model, obs=obs._buffers,  batch_indices=batch_indices)
     
     prior = IsotropicGaussianPrior(sd=PRIOR_SIGMA)
     abclikelihood = GaussianABCLikelihood(epsilon=EPSILON)
@@ -291,7 +291,7 @@ if __name__ == '__main__':
     
     if env_name == 'GridWorld':
         env = GridWorld((3,4), obstacles=True, stochastic=STOCHASTIC)
-        env.plot_env()
+        # env.plot_env()
     if env_name == 'Maze':
         env = Maze()
     dim = env.observation_space.n * env.action_space.n
@@ -361,7 +361,7 @@ if __name__ == '__main__':
             
     else:
         env.uniform_policy()
-        obs = env.uniform_obs._buffers
+        obs = env.uniform_obs
         posterior_samples = model.get_parameter()
         
         posterior_samples, accept_probs, logdensities, proposed_logdensities = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model)
