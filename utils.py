@@ -21,7 +21,7 @@ def expand_dims(arr):
         return arr
     return arr.reshape(1, -1)
 
-def plot_2d(X, Y, Z, env_name='GridWorld', action_dim=4, title=None, xlabel='s0', ylabel='s1', zlabel='Value', show=False, additional_info=[], save=False, figure_path = 'Figures/MCMC/'):
+def plot_2d(X, Y, Z, env_name='GridWorld', action_dim=4, title=None, xlabel='s0', ylabel='s1', zlabel='Value', show=False, additional_info=[], save=False, figure_path = '../Figures/MCMC/'):
     Z = expand_dims(Z)
     arrows = {2:(1,0), 0:(-1,0),1:(0,1),3:(0,-1)} if action_dim == 4 else {0:(0, -1), 1:(0,1)}
     scale = 0.25
@@ -53,7 +53,7 @@ def plot_2d(X, Y, Z, env_name='GridWorld', action_dim=4, title=None, xlabel='s0'
 def plot_3d(X, Y, Z, title=None, xlabel='s0', ylabel='s1', zlabel='Value', show=False):
     if len(Z.shape) == 1:
         Z = np.expand_dims(Z, axis=0)
-    figure_path = 'Figures/'
+    figure_path = '../Figures/'
     ax = plt.axes(projection='3d')
     ax.plot_surface(X, Y, Z, rstride=1, cstride=1,
             cmap='viridis', edgecolor='none')
@@ -81,7 +81,7 @@ def replace_line(file_path, variable, new_value):
             f.write(line)
     f.close()
     
-def plot_return_for_epsiodes(r_all_episodes, figure_path='Figures/', show=False):
+def plot_return_for_epsiodes(r_all_episodes, figure_path='../Figures/', show=False):
     colors = plt.cm.rainbow(np.linspace(0, 1, len(r_all_episodes)))
     for t, i in enumerate(r_all_episodes):
         plt.plot(i, label=f'Time {t}', color=colors[t])
@@ -96,7 +96,7 @@ def plot_return_for_epsiodes(r_all_episodes, figure_path='Figures/', show=False)
         plt.show()
     plt.clf()
     
-def plot_return_vs_episodes(r_all_episodes, smooth=1, figure_path='Figures/', show=False, save=False):
+def plot_return_vs_episodes(r_all_episodes, smooth=1, figure_path='../Figures/', show=False, save=False):
     r_all_episodes = np.convolve(np.array(r_all_episodes), np.ones(smooth)/smooth, mode='valid')
     plt.plot(r_all_episodes)
     plt.xlabel('episodes')
@@ -110,7 +110,7 @@ def plot_return_vs_episodes(r_all_episodes, smooth=1, figure_path='Figures/', sh
         plt.show()
     plt.clf()
     
-def plot_return_vs_episodes_repeat(r_all_episodes_repeat, figure_path='Figures/', show=False, title='', save=False):
+def plot_return_vs_episodes_repeat(r_all_episodes_repeat, figure_path='../Figures/', show=False, title='', save=False):
     N = len(r_all_episodes_repeat)
     r_mean = np.mean(r_all_episodes_repeat, axis=0)
     r_std = np.std(r_all_episodes_repeat, axis=0)
@@ -131,7 +131,7 @@ def get_outliers(data, threshold=5):
     outliers = np.any((data < q[0]) | (data > q[1]), axis=1)
     return outliers
 
-def compare_r_vs_episodes_repeat(r_1, r_2, figure_path='Figures/', show=True, title='', save=False, smooth=1, datatype='Return'):
+def compare_r_vs_episodes_repeat(r_1, r_2, figure_path='../Figures/', show=True, title='', save=False, smooth=1, datatype='Return'):
     r_1 = np.apply_along_axis(lambda m: np.convolve(m, np.ones(smooth)/smooth, mode='valid'), axis=-1, arr=np.array(r_1))
     r_2 = np.apply_along_axis(lambda m: np.convolve(m, np.ones(smooth)/smooth, mode='valid'), axis=-1, arr=np.array(r_2))
 
@@ -159,7 +159,7 @@ def compare_r_vs_episodes_repeat(r_1, r_2, figure_path='Figures/', show=True, ti
     
 def save_results(results, folder, stochastic, episode, training_steps, greedy, epsilon, initial_stepsize, decreasing_factor, time, m_z, repeat, episodic=False):
     Episodes = f'Episode{episode}_' if episodic else ''
-    file_path = f'{folder}/MCMC/T{training_steps}_Repeat{repeat}_{Episodes}Sto{stochastic}_M{m_z}_Gdy{greedy}_Ep{epsilon}_Stp{initial_stepsize}_Dcrs{decreasing_factor}_{time}.npy'
+    file_path = f'../{folder}/MCMC/T{training_steps}_Repeat{repeat}_{Episodes}Sto{stochastic}_M{m_z}_Gdy{greedy}_Ep{epsilon}_Stp{initial_stepsize}_Dcrs{decreasing_factor}_{time}.npy'
     with open(file_path, 'wb') as f:
         np.save(f, results)
     print(f'{Episodes}{folder} for repeat {repeat} saved at', file_path)
