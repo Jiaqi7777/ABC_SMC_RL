@@ -151,7 +151,8 @@ class MCMC_pyro(MCMC):
         raise NotImplementedError
     
 #MCMC
-def MCMC_update():
+def MCMC_update(obs, posterior_samples, model):
+    global STEPSIZE
     if BATCH_TRAINING:
         batch_indices = random.sample(range(min(len(obs._buffers['state0']), BUFFER_SIZE)), k=min(BATCH_SIZE, len(obs._buffers['state0']))) #TODO: what is this?
     else:
@@ -201,8 +202,9 @@ def MCMC_update():
         posterior_samples = mcmc.run().reshape((-1, ) + env.n_cell + (env.action_space.n, ))
 
     STEPSIZE *= DECREASING_FACTOR
+    return posterior_samples, accept_probs, logdensities, proposed_logdensities
     
-def display_results(posterior_samples, model):
+def display_results(posterior_samples, model, accept_probs):
     model.plot_policy(paras=posterior_samples.numpy(), title=f'policy_T{training_steps}_{time}', additional_info = env.R, save=save, show=show)
     # model.plot_value(paras=posterior_samples.numpy(), title=f'value_T{training_steps}_{time}')
     plt.imshow(torch.round(torch.max(torch.mean(posterior_samples, 0), -1).values, decimals=2))
@@ -338,93 +340,9 @@ if __name__ == '__main__':
                     s0 = s1
                     if done or ( h + 1)  % FROZEN_T == 0:
                         #MCMC
-                        if BATCH_TRAINING:
-                            batch_indices = random.sample(range(min(len(obs._buffers['state0']), BUFFER_SIZE)), k=min(BATCH_SIZE, len(obs._buffers['state0']))) #TODO: what is this?
-                        else:
-                            batch_indices = slice(None)
-                            
-                        '''Deterministic'''
-                        # llh_transform_grad_fn = lambda parameter:  tabular_indicator_deterministic(para=parameter.reshape(env.n_cell + (env.action_space.n, )), model=model, obs=obs._buffers)#standard form
-                        # r_hat = partial(generate_samples, model=model, obs=obs._buffers,  batch_indices=batch_indices)
-                        '''Stochastic'''
-                        llh_transform_grad_fn = lambda parameter:  tabular_indicator_stochastic(para=parameter.reshape(env.n_cell + (env.action_space.n, )), model=model, obs=obs._buffers)#stochastic
-                        r_hat = partial(generate_samples_with_z, model=model, obs=obs._buffers,  batch_indices=batch_indices)
-                        
-                        prior = IsotropicGaussianPrior(sd=PRIOR_SIGMA)
-                        abclikelihood = GaussianABCLikelihood(epsilon=EPSILON)
-                        data = torch.tensor(obs._buffers["rewards"])[-BUFFER_SIZE:][batch_indices]
-                        Model = DeterministicRModel(prior=prior, abclikelihood=abclikelihood, data=data, llh_transform_fn=r_hat, llh_transform_grad_fn=llh_transform_grad_fn)
-
-                        def fn(parameter):
-                            current_logtarget_density, _ = Model.logtarget_density(parameter=parameter, llh_info_dict=dict())
-                            return current_logtarget_density
-                        # hessian = torch.autograd.functional.hessian(fn, posterior_samples[0].reshape(-1)) + 1e-6 * torch.eye(len(posterior_samples[0]).reshape(-1))
-                        #kernel = RandomWalk(model=Model, stepsize=STEPSIZE)
-                        #kernel = RandomWalk(model=Model, stepsize=STEPSIZE, covariance_matrix=-torch.linalg.inv(hessian))
-                        #kernel = pCN(model=Model, stepsize=STEPSIZE)
-                        #kernel = MALA(model=Model, stepsize=STEPSIZE, precondition_matrix=None)
-                        #kernel = MALA(model=Model, stepsize=STEPSIZE, precondition_matrix=-torch.linalg.inv(hessian))
-                        #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=False)
-                        #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=False, precondition_matrix=-torch.linalg.inv(hessian))
-                        # kernel = HMC_pyro(model=Model, stepsize=STEPSIZE, full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB, num_steps=NUM_STEPS)
-                        kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=False)
-                        # kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=False, precondition_matrix=-torch.linalg.inv(hessian), traj_len=None)
-                        # kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=True, precondition_matrix=-torch.linalg.inv(hessian), traj_len=None)
-                        #kernel = mMALA(model=Model, stepsize=STEPSIZE, use_autograd=False, use_autohess=False)
-                        #kernel = mMALA(model=Model, stepsize=STEPSIZE, use_autograd=True, use_autohess=True)
-                        #kernel = mHMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=False, use_autohess=False, traj_len=None, fp_iterations=50)
-                        accept_probs = None
-
-                        if kernel.original is True:
-                            mcmc = MCMC(num_samples=training_steps, kernel=kernel, initial_params=posterior_samples[-1].reshape(-1), warmup_steps=np.int64(np.floor(training_steps*WARMUP_RATIO)), warup_settings=dict(target_prob=0.7, auto_init_stepsize=True))
-                            posterior_samples = mcmc.run().reshape((-1, ) + env.n_cell + (env.action_space.n, ))
-                            logdensities = mcmc.get_logdensities()
-                            proposed_logdensities = mcmc.get_proposed_logdensities()
-                            accept_probs = mcmc.get_accept_prob()
-
-                        else:
-                            mcmc = MCMC_pyro(num_samples=training_steps, kernel=kernel, initial_params=posterior_samples[-1].reshape(-1), warmup_steps=np.int64(np.floor(training_steps*WARMUP_RATIO)), disable_progbar=MCMC_SHOW_DISABLE)
-                            posterior_samples = mcmc.run().reshape((-1, ) + env.n_cell + (env.action_space.n, ))
-
-                        STEPSIZE *= DECREASING_FACTOR
-                        model.plot_policy(paras=posterior_samples.numpy(), title=f'policy_T{training_steps}_{time}', additional_info = env.R, save=save, show=show)
-                        # model.plot_value(paras=posterior_samples.numpy(), title=f'value_T{training_steps}_{time}')
-                        plt.imshow(torch.round(torch.max(torch.mean(posterior_samples, 0), -1).values, decimals=2))
-                        if show:
-                            plt.show()
-                        data_plot = posterior_samples.numpy().reshape(posterior_samples.shape[0], -1)[:, OBSERVE_DATA_START:OBSERVE_DATA_END]#Change the indices of names and Q_star below as well
-                        f = mcp.plot_chain_panel(chains=data_plot, names=env.names[OBSERVE_DATA_START:OBSERVE_DATA_END],
-                                                                        settings=dict(add_pm2std=True, fig=dict(figsize=(10,10), dpi=250),
-                                                                        mean=dict(color='y', label='mean'),
-                                                                        plot=dict(color='k', label='trace')))
-                        ax = f.get_axes()
-                        for i, ai in enumerate(ax):
-                            ai.axhline(y = Q_star.flatten()[OBSERVE_DATA_START:OBSERVE_DATA_END][i], linestyle=':', linewidth=5, color = 'g',  label = 'true q')
-                            q = np.percentile(data_plot[:, i], [PLOT_THRESHOLD, 100 - PLOT_THRESHOLD])
-                            ai.set_ylim(q)   
-                        f.tight_layout()
-                        handles, labels = ai.get_legend_handles_labels()
-                        ai.legend(handles, labels, bbox_to_anchor=(2, 0.2), loc='right')
-                        if show:
-                            plt.show()
-
-                        if accept_probs is not None:
-                            fig, ax = plt.subplots(1,1,sharex=True)
-
-                            ax.plot(proposed_logdensities.numpy(), label="proposed samples")
-                            ax.plot(logdensities.numpy(), label="accepted samples")
-                            ax.set_xlabel("samples")
-                            ax.set_ylabel("log density")
-
-                            ax2 = ax.twinx()
-                            ax2.plot(accept_probs.numpy(), label="log acceptance probability", c="tab:green")
-                            ax2.set_ylabel("log acceptance probability")
-
-                            fig.legend()
-                            fig.tight_layout()
-
-                            if show:
-                                plt.show()
+                        posterior_samples, accept_probs, logdensities, proposed_logdensities = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model)
+                        model.set_parameter(posterior_samples)
+                        display_results(posterior_samples=posterior_samples, model=model, accept_probs=accept_probs)
 
                     if done:
                         print("done with", h + 1, 'steps')
@@ -444,48 +362,8 @@ if __name__ == '__main__':
     else:
         env.uniform_policy()
         obs = env.uniform_obs._buffers
-        r_hat = partial(generate_samples, model=model, obs=obs)
         posterior_samples = model.get_parameter()
         
-        llh_transform_grad_fn = lambda parameter:  tabular_indicator_deterministic(para=parameter.reshape(env.n_cell + (env.action_space.n, )), model=model, obs=obs._buffers)#standard form
-
-        prior = IsotropicGaussianPrior()
-        abclikelihood = GaussianABCLikelihood(epsilon=EPSILON)
-        data = torch.tensor(obs["rewards"])
-        Model = DeterministicRModel(prior=prior, abclikelihood=abclikelihood, data=data, llh_transform_fn=r_hat, llh_transform_grad_fn=llh_transform_grad_fn)
-
-        def fn(parameter):
-            current_logtarget_density, _ = Model.logtarget_density(parameter=parameter, llh_info_dict=dict())
-            return current_logtarget_density
-
-        hessian = torch.autograd.functional.hessian(fn,posterior_samples[-3].reshape(-1)) + 1.e-6
-        #kernel = RandomWalk(model=Model, stepsize=STEPSIZE)
-        #kernel = RandomWalk(model=Model, stepsize=STEPSIZE, covariance_matrix=-torch.linalg.inv(hessian))
-        #kernel = pCN(model=Model, stepsize=STEPSIZE)
-        #kernel = MALA(model=Model, stepsize=STEPSIZE, precondition_matrix=None)
-        kernel = MALA(model=Model, stepsize=STEPSIZE, precondition_matrix=-torch.linalg.inv(hessian))
-        #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=False)
-        #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=False, precondition_matrix=-torch.linalg.inv(hessian))
-
-        mcmc = MCMC(num_samples=training_steps, kernel=kernel, initial_params=posterior_samples[-1].reshape(-1))
-        posterior_samples = mcmc.run().reshape((-1, ) + env.n_cell + (env.action_space.n, ))
-
-        
-        #mcmc_run = mcmc(torch.tensor(obs['rewards']), torch.tensor(model.get_parameter()[0].reshape(-1)), num_samples=training_steps, warmup_steps=training_steps//10)
-        #posterior_samples = mcmc_run.get_samples()["prior_parameter"]
-        model.plot_policy(paras=posterior_samples.numpy().reshape((-1, ) + env.n_cell + (env.action_space.n, )), title=f'policy_T{training_steps}_{time}', additional_info = env.R, save=save, show=show)
-        # print('ESS:', ess(chain.T))
-        posterior_samples = posterior_samples.reshape(len(posterior_samples),-1)
-        f = mcp.plot_chain_panel(chains=posterior_samples.numpy()[training_steps // 5:, :4], names=env.names,
-                                                                        settings=dict(add_pm2std=True, fig=dict(figsize=(10,10), dpi=250),
-                                                                        mean=dict(color='y', label='mean'),
-                                                                        plot=dict(color='k', label='trace')))
-        ax = f.get_axes()
-        for i, ai in enumerate(ax):
-            ai.axhline(y = Q_star.flatten()[i], linestyle=':', linewidth=5, color = 'g',  label = 'true q')
-        # reset positions to avoid overlap    
-        f.tight_layout()
-        handles, labels = ai.get_legend_handles_labels()
-        ai.legend(handles, labels, bbox_to_anchor=(2, 0.2), loc='right')
-        if show:
-            plt.show()
+        posterior_samples, accept_probs, logdensities, proposed_logdensities = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model)
+        model.set_parameter(posterior_samples)
+        display_results(posterior_samples=posterior_samples, model=model, accept_probs=accept_probs)

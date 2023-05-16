@@ -47,7 +47,6 @@ class Buffer:
         unique_check = list(items.values())
         unique_check.remove(items['state1'])
         unique_check = str(unique_check)
-        print(unique_check)
         if unique and unique_check in self.unique_set:
             return 
         print('New items added', unique_check)
