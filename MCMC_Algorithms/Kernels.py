@@ -504,7 +504,7 @@ class HMC(Kernel):
             eps = np.exp(logeps)
             logeps_bar = m**(-kappa) * logeps + (1 - m**(-kappa)) * logeps_bar
 
-            pbar.set_description("Warmup: Most recent alpha {}, with stepsize {}".format(str(np.round(accept_prob.numpy(),2)), str(np.round(eps,2))))
+            pbar.set_description("Warmup: Most recent alpha {}, with stepsize {}".format(str(np.round(accept_prob.numpy(), 6)), str(np.round(eps, 6))))
 
         stepsize = np.exp(logeps_bar)
         if set_stepsize is True:   

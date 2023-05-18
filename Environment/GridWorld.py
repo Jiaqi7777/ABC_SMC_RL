@@ -62,14 +62,14 @@ class GridWorld:
                     self.stochasticP[row, col, a, -1] = [next_next_row, next_next_col]
                     self.stochasticP[(*goal_position, a, slice(None))] = [goal_position] * len(self.move_prob)
                 
-        self.R = np.full((n_cell[0], n_cell[1]), -1)
+        self.R = np.full((n_cell[0], n_cell[1]), - 0.1)
         if obstacles:
             n_obs = np.prod(n_cell) // 2
-            self.R[random.choices(range(0, n_cell[0]), k=n_obs), random.choices(range(0, n_cell[1]), k=n_obs)] = -20
+            self.R[random.choices(range(0, n_cell[0]), k=n_obs), random.choices(range(0, n_cell[1]), k=n_obs)] = - 1
             # self.R[:, range(1, n_cell[1], 4)] = -2
             # self.R[range(1, n_cell[0], 5), :]  = -2
             # self.R[n_cell[0]//2, n_cell[1]//2] = -2
-        self.R[starting_position] = -1
+        self.R[starting_position] = - 0.1
         self.R[goal_position] = 0
         self.names = [f'{i,j,a}' for i in range(n_cell[1]) for j in range(n_cell[0]) for a in range(4)]
 
@@ -80,9 +80,9 @@ class GridWorld:
         self.expert_obs = Buffer(['state0', 'state1', 'action', 'rewards', 'done'])
         return self.state, None
     
-    def step(self, action, state=None):
+    def step(self, action, state=None, multiple=False):
         done = False
-        if state == None:
+        if state is None:
             real_step = True
             state = self.state
             if self.stochastic:
@@ -92,11 +92,24 @@ class GridWorld:
         else:
             real_step = False
             if self.stochastic:
-                new_state = tuple(random.choices(self.stochasticP[state + (action, )], self.move_prob)[0])
+                if multiple:
+                    if np.array(state).shape > np.array(self.starting_position).shape:
+                        new_state = [random.choices(self.stochasticP[tuple(s) + (a, )], self.move_prob, k=multiple) for s, a in zip(state, action)]
+                    else:
+                        new_state = random.choices(self.stochasticP[state + (action, )], self.move_prob, k=multiple)
+                    return np.array(new_state), self.R[tuple(map(tuple, np.array(state).T))]
+                else:
+                    new_state = tuple(random.choices(self.stochasticP[state + (action, )], self.move_prob)[0])
             else:
-                new_state = tuple(self.P[state + (action, )])
-        if new_state == self.goal_position:
-            done = True
+                if np.array(state).shape > np.array(self.starting_position).shape:
+                    new_state = [tuple(self.P[s + (a, )]) for s, a in zip(state, action)]
+                else:
+                    new_state = tuple(self.P[state + (action, )])
+        if not multiple:
+            if new_state == self.goal_position:
+                done = True
+        else:
+            done = torch.where(torch.all(torch.tensor(new_state) == torch.tensor(self.goal_position), dim=1), True, False)
             if real_step:
                 self.done = done
         return new_state, self.R[state], done, None
@@ -166,9 +179,9 @@ class GridWorld:
     def plot_env_with_R(self):
         self.plot_env(self.expert_traj + self.R)         
       
-    def uniform_policy(self):
+    def uniform_policy(self, unique_verbose=False, data_percentage=1):
         self.uniform_obs = Buffer(['state0', 'state1', 'action', 'rewards', 'done'])
-        if self.stochastic:
+        if False:#self.stochastic:
             for r in range(self.n_cell[0]):
                 for c in range(self.n_cell[1]):
                     for a in range(self.action_space.n):
@@ -176,33 +189,37 @@ class GridWorld:
                             done = False
                             s0 = (r, c)
                             s1 = tuple(self.stochasticP[s0 + (a, )][i])
-                            if s1 == self.goal_position:
+                            if s0 == self.goal_position:
                                 done = True
-                            self.uniform_obs.insert({'state0': s0, 'state1': s1, 'action': a, 'rewards': self.R[s1], 'done': done}, unique=True, unique_verbose=False)
+                            self.uniform_obs.insert({'state0': s0, 'state1': s1, 'action': a, 'rewards': self.R[s0], 'done': done}, unique=True, unique_verbose=unique_verbose)
             print('Unique data numbers', len(self.uniform_obs._buffers['state0']))
         else:
             for r in range(self.n_cell[0]):
                 for c in range(self.n_cell[1]):
                     for a in range(self.action_space.n):
+                        if data_percentage < 1 and np.random.uniform(0, 1) > data_percentage:
+                            continue
                         done = False
                         s0 = (r, c)
                         s1 = tuple(self.P[s0 + (a, )])
-                        if s1 == self.goal_position:
+                        if s0 == self.goal_position:
                             done = True
-                        self.uniform_obs.insert({'state0': s0, 'state1': s1, 'action': a, 'rewards': self.R[s1], 'done': done})
+                        self.uniform_obs.insert({'state0': s0, 'state1': s1, 'action': a, 'rewards': self.R[s0], 'done': done}, unique_verbose=unique_verbose)
+            print('Unique data numbers', len(self.uniform_obs._buffers['state0']))
                     
 
 if __name__ == '__main__':
     for seed in range(555, 557):
         random.seed(seed)
-        env = GridWorld((3,4), (0,0), obstacles=True, stochastic=True)
+        env = GridWorld((3,4), (0,0), obstacles=True, stochastic=False)
         print(env.reset(), seed)
         print(env.observation_space.n)
         # env.plot_env()
         for t in range(10):
             print(t)
             env.step(random.randint(0,3))
-    env.uniform_policy()
+    env.uniform_policy(unique_verbose=True)
+    print(env.step(action=0, state = (1,2), multiple=3))
     # env.plot_env(env.expert_traj + env.R)
     # print(env.expert_obs._buffers['state1'])
     # env = GridWorld((3,4), (1,2), (2,3), obstacles=True)

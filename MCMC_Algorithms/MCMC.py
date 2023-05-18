@@ -151,19 +151,21 @@ class MCMC_pyro(MCMC):
         raise NotImplementedError
     
 #MCMC
-def MCMC_update(obs, posterior_samples, model):
+def MCMC_update(obs, posterior_samples, model, env):
     global STEPSIZE
     if BATCH_TRAINING:
         batch_indices = random.sample(range(min(len(obs._buffers['state0']), BUFFER_SIZE)), k=min(BATCH_SIZE, len(obs._buffers['state0']))) #TODO: what is this?
     else:
         batch_indices = slice(None)
-        
-    '''Determinisitc or Stochastic Offline'''
-    llh_transform_grad_fn = lambda parameter:  tabular_indicator_deterministic(para=parameter.reshape(env.n_cell + (env.action_space.n, )), model=model, obs=obs._buffers)#standard form
-    r_hat = partial(generate_samples, model=model, obs=obs._buffers,  batch_indices=batch_indices)
-    '''Stochastic Online'''
-    # llh_transform_grad_fn = lambda parameter:  tabular_indicator_stochastic(para=parameter.reshape(env.n_cell + (env.action_space.n, )), model=model, obs=obs._buffers)#stochastic
-    # r_hat = partial(generate_samples_with_z, model=model, obs=obs._buffers,  batch_indices=batch_indices)
+    
+    if STOCHASTIC:
+        '''Stochastic'''
+        llh_transform_grad_fn = lambda parameter:  tabular_indicator_stochastic(para=parameter.reshape(env.n_cell + (env.action_space.n, )), model=model, obs=obs._buffers, env=env)#stochastic
+        r_hat = partial(generate_samples_with_z, model=model, obs=obs._buffers, env=env, batch_indices=batch_indices, generate_new_samples=True)
+    else:
+        '''Determinisitc'''
+        llh_transform_grad_fn = lambda parameter:  tabular_indicator_deterministic(para=parameter.reshape(env.n_cell + (env.action_space.n, )), model=model, obs=obs._buffers)#standard form
+        r_hat = partial(generate_samples, model=model, obs=obs._buffers,  batch_indices=batch_indices)
     
     prior = IsotropicGaussianPrior(sd=PRIOR_SIGMA)
     abclikelihood = GaussianABCLikelihood(epsilon=EPSILON)
@@ -181,14 +183,15 @@ def MCMC_update(obs, posterior_samples, model):
     #kernel = MALA(model=Model, stepsize=STEPSIZE, precondition_matrix=-torch.linalg.inv(hessian))
     #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=False)
     #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=False, precondition_matrix=-torch.linalg.inv(hessian))
-    # kernel = HMC_pyro(model=Model, stepsize=STEPSIZE, full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB, num_steps=NUM_STEPS)
-    kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=False)
+    kernel = HMC_pyro(model=Model, stepsize=STEPSIZE, full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB, num_steps=NUM_STEPS)
+    # kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=False)
     # kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=False, precondition_matrix=-torch.linalg.inv(hessian), traj_len=None)
     # kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=True, precondition_matrix=-torch.linalg.inv(hessian), traj_len=None)
     #kernel = mMALA(model=Model, stepsize=STEPSIZE, use_autograd=False, use_autohess=False)
     #kernel = mMALA(model=Model, stepsize=STEPSIZE, use_autograd=True, use_autohess=True)
     #kernel = mHMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=False, use_autohess=False, traj_len=None, fp_iterations=50)
     accept_probs = None
+    STEPSIZE *= DECREASING_FACTOR
 
     if kernel.original is True:
         mcmc = MCMC(num_samples=training_steps, kernel=kernel, initial_params=posterior_samples[-1].reshape(-1), warmup_steps=np.int64(np.floor(training_steps*WARMUP_RATIO)), warup_settings=dict(target_prob=0.7, auto_init_stepsize=True))
@@ -196,13 +199,12 @@ def MCMC_update(obs, posterior_samples, model):
         logdensities = mcmc.get_logdensities()
         proposed_logdensities = mcmc.get_proposed_logdensities()
         accept_probs = mcmc.get_accept_prob()
+        return posterior_samples, accept_probs, logdensities, proposed_logdensities
 
     else:
         mcmc = MCMC_pyro(num_samples=training_steps, kernel=kernel, initial_params=posterior_samples[-1].reshape(-1), warmup_steps=np.int64(np.floor(training_steps*WARMUP_RATIO)), disable_progbar=MCMC_SHOW_DISABLE)
         posterior_samples = mcmc.run().reshape((-1, ) + env.n_cell + (env.action_space.n, ))
-
-    STEPSIZE *= DECREASING_FACTOR
-    return posterior_samples, accept_probs, logdensities, proposed_logdensities
+        return posterior_samples, accept_probs
     
 def display_results(posterior_samples, model, accept_probs):
     model.plot_policy(paras=posterior_samples.numpy(), title=f'policy_T{training_steps}_{time}', additional_info = env.R, save=save, show=show)
@@ -226,29 +228,31 @@ def display_results(posterior_samples, model, accept_probs):
     if show:
         plt.show()
 
-    if accept_probs is not None:
-        fig, ax = plt.subplots(1,1,sharex=True)
+    # if accept_probs is not None:
+    #     fig, ax = plt.subplots(1,1,sharex=True)
 
-        ax.plot(proposed_logdensities.numpy(), label="proposed samples")
-        ax.plot(logdensities.numpy(), label="accepted samples")
-        ax.set_xlabel("samples")
-        ax.set_ylabel("log density")
+    #     ax.plot(proposed_logdensities.numpy(), label="proposed samples")
+    #     ax.plot(logdensities.numpy(), label="accepted samples")
+    #     ax.set_xlabel("samples")
+    #     ax.set_ylabel("log density")
 
-        ax2 = ax.twinx()
-        ax2.plot(accept_probs.numpy(), label="log acceptance probability", c="tab:green")
-        ax2.set_ylabel("log acceptance probability")
+    #     ax2 = ax.twinx()
+    #     ax2.plot(accept_probs.numpy(), label="log acceptance probability", c="tab:green")
+    #     ax2.set_ylabel("log acceptance probability")
 
-        fig.legend()
-        fig.tight_layout()
+    #     fig.legend()
+    #     fig.tight_layout()
 
-        if show:
-            plt.show()
+    #     if show:
+    #         plt.show()
 
 
 if __name__ == '__main__':
     from tqdm import tqdm
+    import json
     from mcmcplot import mcmcplot as mcp
     from arviz import ess, plot_autocorr, plot_trace
+    from sklearn.metrics import mean_squared_error
     import datetime
     import argparse
     '''module import'''
@@ -268,6 +272,8 @@ if __name__ == '__main__':
     parser.add_argument('--MCMC', default=True, action='store_false', help='Bool type')
     parser.add_argument('-g', '--Greedy', default=GREEDY, action='store_true', help='Bool type')
     parser.add_argument('--Env', default=ENV_NAME)
+    parser.add_argument('--stochastic', default=False)
+    parser.add_argument('--online', default=False)
     args = parser.parse_args()
     print(args)
     time = args.time
@@ -282,6 +288,9 @@ if __name__ == '__main__':
     warmup_steps = int(training_steps * WARMUP_RATIO)
     GREEDY = args.Greedy
     env_name = args.Env
+    STOCHASTIC = args.stochastic
+    ONLINE_LEARNING = args.online
+    
 
     N_PARTICLE = 10
     random.seed(seed)
@@ -330,17 +339,17 @@ if __name__ == '__main__':
                 for h in tqdm(range(HORIZON)):
                     action = model.act(s0, para, greedy=GREEDY)
                     s1, r, done, *info = env.step(action)
-                    if STOCHASTIC:
-                        s1_augmented = []
-                        for _ in range(M_Z):
-                            s1_augmented.append(env.step(action, state=s0)[0])
+                    # if STOCHASTIC:
+                    #     s1_augmented = []
+                    #     for _ in range(M_Z):
+                    #         s1_augmented.append(env.step(action, state=s0)[0])
                         # print(s1_augmented)
                     R += r
-                    obs.insert({'state0': s0, 'state1': s1_augmented, 'action': int(action), 'rewards': r, 'done': done}, unique=UNIQUE_OBS)
+                    obs.insert({'state0': s0, 'state1': s1, 'action': int(action), 'rewards': r, 'done': done}, unique=UNIQUE_OBS)
                     s0 = s1
                     if done or ( h + 1)  % FROZEN_T == 0:
                         #MCMC
-                        posterior_samples, accept_probs, logdensities, proposed_logdensities = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model)
+                        posterior_samples, accept_probs = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env)
                         model.set_parameter(posterior_samples)
                         display_results(posterior_samples=posterior_samples, model=model, accept_probs=accept_probs)
 
@@ -360,10 +369,27 @@ if __name__ == '__main__':
             plt.show()
             
     else:
-        env.uniform_policy()
-        obs = env.uniform_obs
-        posterior_samples = model.get_parameter()
-        
-        posterior_samples, accept_probs, logdensities, proposed_logdensities = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model)
-        model.set_parameter(posterior_samples)
-        display_results(posterior_samples=posterior_samples, model=model, accept_probs=accept_probs)
+        error_all = []
+        epsilon_lst = [10, 1, 1e-1, 1e-2, 1e-3, 1e-4]
+        data_percentage_lst = np.linspace(0.1, 1, 10)
+        for EPSILON in epsilon_lst:
+            error_all_percentage = []
+            for data_percentage in data_percentage_lst:
+                env.uniform_policy(data_percentage=data_percentage)
+                obs = env.uniform_obs
+                posterior_samples = model.get_parameter()
+                posterior_samples, accept_probs = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env)
+                model.set_parameter(posterior_samples)
+                display_results(posterior_samples=posterior_samples, model=model, accept_probs=accept_probs)
+                error_all_percentage.append(mean_squared_error(Q_star.flatten(), posterior_samples[-1].flatten()))
+            error_all.append(error_all_percentage)
+        experiment_info = {
+            'epsilon_list': epsilon_lst, 
+            'data_percentage': data_percentage_lst,
+            'errors': error_all
+        }
+        json_data = json.dumps(experiment_info)
+        file_path = f"../Results/E1/T{training_steps}_{time}.json"
+        with open(file_path, "w") as file:
+            file.write(json_data)
+        print(f"Dictionary saved to {file_path}")
