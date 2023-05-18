@@ -369,6 +369,7 @@ if __name__ == '__main__':
             plt.show()
             
     else:
+        file_path = f"../Results/E1/T{training_steps}_Sto{STOCHASTIC}_{time}.json"
         error_all = []
         epsilon_lst = [10, 1, 1e-1, 1e-2, 1e-3, 1e-4]
         data_percentage_lst = np.linspace(0.1, 1, 10)
@@ -382,14 +383,14 @@ if __name__ == '__main__':
                 model.set_parameter(posterior_samples)
                 display_results(posterior_samples=posterior_samples, model=model, accept_probs=accept_probs)
                 error_all_percentage.append(mean_squared_error(Q_star.flatten(), posterior_samples[-1].flatten()))
+                print(error_all_percentage)
             error_all.append(error_all_percentage)
-        experiment_info = {
-            'epsilon_list': epsilon_lst, 
-            'data_percentage': data_percentage_lst,
-            'errors': error_all
-        }
-        json_data = json.dumps(experiment_info)
-        file_path = f"../Results/E1/T{training_steps}_{time}.json"
-        with open(file_path, "w") as file:
-            file.write(json_data)
-        print(f"Dictionary saved to {file_path}")
+            experiment_info = {
+                'epsilon_list': epsilon_lst, 
+                'data_percentage': data_percentage_lst,
+                'errors': error_all
+            }
+            json_data = json.dumps(experiment_info)
+            with open(file_path, "w") as file:
+                file.write(json_data)
+            print(f"Dictionary saved to {file_path}")
