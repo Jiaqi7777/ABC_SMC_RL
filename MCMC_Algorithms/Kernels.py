@@ -581,7 +581,7 @@ class mHMC(HMC):
     
     def move(self, current_para, current_gradient, current_precondition):
         """see self.move_"""
-        return self.move(current_para=current_para, current_gradient=current_gradient, current_precondition=current_precondition, L=self.L, stepsize=self.stepsize)
+        return self.move_(current_para=current_para, current_gradient=current_gradient, current_precondition=current_precondition, L=self.L, stepsize=self.stepsize)
 
     def move_(self, current_para, current_gradient, current_precondition, L=1, stepsize=0.01):
         """see HMC.move_

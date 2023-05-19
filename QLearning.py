@@ -5,7 +5,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 '''module import'''
 from parameter import *
-def DynamicProgramming(Q, A, S, env, thresh=1e-2, gamma=0.95, show=False, alpha=1):
+def DynamicProgramming(Q, A, S, env, thresh=1e-5, gamma=0.95, show=False, alpha=1):
     initial_alpha = alpha
     delta_l=[]
     loop = 0

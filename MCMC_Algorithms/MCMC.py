@@ -160,12 +160,12 @@ def MCMC_update(obs, posterior_samples, model, env):
     
     if STOCHASTIC:
         '''Stochastic'''
-        llh_transform_grad_fn = lambda parameter:  tabular_indicator_stochastic(para=parameter.reshape(env.n_cell + (env.action_space.n, )), model=model, obs=obs._buffers, env=env)#stochastic
         r_hat = partial(generate_samples_with_z, model=model, obs=obs._buffers, env=env, batch_indices=batch_indices, generate_new_samples=True)
+        llh_transform_grad_fn = lambda parameter:  tabular_indicator_stochastic(para=parameter.reshape(env.n_cell + (env.action_space.n, )), model=model, obs=obs._buffers, env=env)#stochastic
     else:
         '''Determinisitc'''
-        llh_transform_grad_fn = lambda parameter:  tabular_indicator_deterministic(para=parameter.reshape(env.n_cell + (env.action_space.n, )), model=model, obs=obs._buffers)#standard form
         r_hat = partial(generate_samples, model=model, obs=obs._buffers,  batch_indices=batch_indices)
+        llh_transform_grad_fn = lambda parameter:  tabular_indicator_deterministic(para=parameter.reshape(env.n_cell + (env.action_space.n, )), model=model, obs=obs._buffers)#standard form
     
     prior = IsotropicGaussianPrior(sd=PRIOR_SIGMA)
     abclikelihood = GaussianABCLikelihood(epsilon=EPSILON)
@@ -349,7 +349,7 @@ if __name__ == '__main__':
                     s0 = s1
                     if done or ( h + 1)  % FROZEN_T == 0:
                         #MCMC
-                        posterior_samples, accept_probs = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env)
+                        posterior_samples, accept_probs = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env)[:2]
                         model.set_parameter(posterior_samples)
                         display_results(posterior_samples=posterior_samples, model=model, accept_probs=accept_probs)
 
@@ -379,15 +379,16 @@ if __name__ == '__main__':
                 env.uniform_policy(data_percentage=data_percentage)
                 obs = env.uniform_obs
                 posterior_samples = model.get_parameter()
-                posterior_samples, accept_probs = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env)
+                posterior_samples, accept_probs = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env)[:2]
                 model.set_parameter(posterior_samples)
                 display_results(posterior_samples=posterior_samples, model=model, accept_probs=accept_probs)
                 error_all_percentage.append(mean_squared_error(Q_star.flatten(), posterior_samples[-1].flatten()))
                 print(error_all_percentage)
             error_all.append(error_all_percentage)
             experiment_info = {
+                'args': vars(args), 
                 'epsilon_list': epsilon_lst, 
-                'data_percentage': data_percentage_lst,
+                'data_percentage': data_percentage_lst.tolist(),
                 'errors': error_all
             }
             json_data = json.dumps(experiment_info)

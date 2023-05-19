@@ -205,7 +205,7 @@ class GridWorld:
                         if s0 == self.goal_position:
                             done = True
                         self.uniform_obs.insert({'state0': s0, 'state1': s1, 'action': a, 'rewards': self.R[s0], 'done': done}, unique_verbose=unique_verbose)
-            print('Unique data numbers', len(self.uniform_obs._buffers['state0']))
+            print('Buffer data numbers', len(self.uniform_obs._buffers['state0']))
                     
 
 if __name__ == '__main__':
