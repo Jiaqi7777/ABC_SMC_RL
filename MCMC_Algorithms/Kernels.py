@@ -12,7 +12,7 @@ class Kernel:
     """the class of all MCMC kernels"""
     def __init__(self, model, use_autograd=True, use_autohess=True, *args, **kwargs):
         """
-        model: a model of the form DeterministicRModel
+        model: a model of the form DeterministicSRModel
             - model that defines the log target density for the MCMC, and should contain methods: logtarget_density that takes a parameter (torch.tensor) and return a torch.tensor
         autograd: bool, optional
             - For kernels that requires gradient. If True, use autograd to compute gradient, otherwise, use the gradient method defined by the model
@@ -35,7 +35,7 @@ class Kernel:
     def warmup(self, *args, **kwargs):
         raise NotImplementedError
     
-    def gradient(self, parameter, info_dict=dict(), return_logtarget_density=True):
+    def gradient(self, parameter, info_dict=dict(), return_logtarget_density=True, llh=False):
         """compute the gradient of the target density with respect to the parameter, with an option to return the logtarget density
         parameter: torch.tensor
             - parameter for which the gradient is computed
@@ -61,11 +61,17 @@ class Kernel:
             if self.use_autograd:
                 logtarget_density, gradient, llh_info_dict = self.model.logtarget_auto_gradient(parameter=parameter) #llh_info_dict must be none to compute the gradient correctly
             else:
-                gradient, llh_grad_info_dict = self.model.logtarget_gradient(parameter=parameter, llh_info_dict=llh_info_dict)
+                if llh:
+                    gradient, llh_grad_info_dict = self.model.llh_gradient(parameter=parameter, llh_info_dict=llh_info_dict)
+                else:
+                    gradient, llh_grad_info_dict = self.model.logtarget_gradient(parameter=parameter, llh_info_dict=llh_info_dict)
         
         if return_logtarget_density is True:
             if logtarget_density is None or llh_info_dict is None:
-                logtarget_density, llh_info_dict = self.model.logtarget_density(parameter=parameter, llh_info_dict=llh_info_dict)
+                if llh: 
+                    logtarget_density, llh_info_dict = self.model.llh(parameter=parameter, llh_info_dict=llh_info_dict)
+                else:
+                    logtarget_density, llh_info_dict = self.model.logtarget_density(parameter=parameter, llh_info_dict=llh_info_dict)
             return gradient, logtarget_density, llh_info_dict, llh_grad_info_dict
         
         return gradient, llh_grad_info_dict
@@ -646,6 +652,84 @@ class HMC_pyro(Kernel):
         self.pyro_kernel =  pyro.infer.mcmc.HMC(model=pyro_model, step_size=self.stepsize, **self.kwargs)
         return self.pyro_kernel
 
+class HMC_Z(HMC):
+    def __init__(self, model, traj_len=2*np.pi, num_steps=None, stepsize=0.5, use_autograd=True, use_autohess=True, *args, **kwargs):
+        super(HMC_Z, self).__init__(model=model, traj_len=traj_len, num_steps=num_steps, stepsize=stepsize, use_autograd=use_autograd, use_autohess=use_autohess, *args, **kwargs)
+        self.stepsize = stepsize
+        self.kwargs = kwargs
+        self.original = True         
+    
+    def move_(self, current_para, current_gradient, L=1, stepsize=0.01, additional_para=None):
+        """
+        L: int
+            - number of Leapfrog steps
+        return:
+            - q: torch.tensor
+                - the final proposed position
+            - p0: torch.tensor
+                - the initial proposed momentum
+            - p: torch.tensor
+                - the final proposed momentum
+            - q_info_dict: dict
+                - the info dict returned by the log likelihood function at q, see Kernel().gradient
+        """
+        if self.precondition is not None:
+            p0 = torch.distributions.multivariate_normal.MultivariateNormal(loc=torch.zeros(current_para.size()), precision_matrix=self.precondition).sample()
+        else:
+            p0 = torch.normal(mean=torch.zeros(current_para.size()), std=1.)
+
+        p = p0 + stepsize * current_gradient * 0.5
+        q = current_para
+
+        for i in range(L):
+            q_move = torch.mv(self.precondition, p) if self.precondition is not None else p
+            q = q + stepsize * q_move
+            if i != (L-1):
+                gradient, _ = self.gradient(parameter=[q, additional_para], info_dict=dict(), return_logtarget_density=False)
+                p = p + stepsize * gradient
+        proposed_gradient, proposed_logtarget_density, proposed_para_llh_info_dict, proposed_para_llh_grad_info_dict = self.gradient(parameter=[q, additional_para], info_dict=dict(), return_logtarget_density=True)
+        
+        p = p + stepsize * proposed_gradient * 0.5
+        p = -p
+        
+        q_info_dict = {"logdensities":proposed_logtarget_density, "gradient":proposed_gradient, "llh_info_dict":proposed_para_llh_info_dict, "llh_grad_info_dict":proposed_para_llh_grad_info_dict}
+        return q, p0, p, q_info_dict
+    
+    def propose_accept_(self, current_para, stepsize=0.1, L=1, current_para_info_dict=None):
+        current_para, current_z = current_para
+        current_gradient, current_logtarget_density, *_ = self.gradient(parameter=[current_para, current_z], return_logtarget_density=True, llh=True)
+
+        proposed_para, p0, p, q_info_dict = self.move_(current_para=current_para, current_gradient=current_gradient, L=L, stepsize=stepsize, additional_para=current_z)
+
+        return proposed_para
+    
+
+class Z(Kernel):
+    def __init__(self, model, use_autograd=True, use_autohess=True, *args, **kwargs):
+        super(Z, self).__init__(model, use_autograd, use_autohess, *args, **kwargs)
+        
+    def move_(self, indices):
+        proposed_blocked_z = self.model.z_transform_fn(indices)
+        return proposed_blocked_z
+    
+    def propose_accept(self, current_para, indices=None, current_z_info_dict=None):
+        current_para, current_z = current_para
+        current_z_llh_info_dict = current_z_info_dict["llh_info_dict"] if current_z_info_dict.get("llh_info_dict") is not None else dict()
+        proposed_blocked_z = self.move_(indices=indices)
+        proposed_z = current_z.copy()
+        print(indices, current_z.shape, proposed_blocked_z.shape)
+        proposed_z[slice(None), indices] = proposed_blocked_z
+        if current_z_info_dict.get("logdensities") is not None:
+            current_llh = current_z_info_dict["logdensities"]
+        else:
+            current_llh, _ = self.model.llh(parameter=[current_para, current_z], llh_info_dict=current_z_llh_info_dict)
+
+        proposed_llh, proposed_para_llh_info_dict = self.model.llh(parameter=[current_para, proposed_z], llh_info_dict=dict())
+        accept_prob = np.exp(torch_max_0(proposed_llh - current_llh))
+
+        proposed_z_info_dict = {"llh_info_dict": proposed_para_llh_info_dict, "logdensities": proposed_llh}
+
+        return accept_prob, proposed_blocked_z, proposed_z_info_dict
 
 # class AM(Kernel):
 #     def __init__(self, model=None, stepsize=0.1, prior=Prior(sigma=PRIOR_SIGMA), likelihood=ABCLikelihood(epsilon=EPSILON), tractability=False, sd=1, am_epsilon=1e-5):

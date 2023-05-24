@@ -18,17 +18,25 @@ def generate_samples(para, model, obs, batch_indices=None, buffer_size=BUFFER_SI
 
     return model.q_value(para, s0.T, a) - torch.where(dones == 1, torch.zeros(len(s0)), model.gamma * model.v_value(para, s1.T).values) #time 
 
-def generate_samples_with_z(para, model, obs, env, batch_indices=None, buffer_size=BUFFER_SIZE, batch_training=BATCH_TRAINING, generate_new_samples=False):
-    para = para.reshape(model.state_size + (model.action_size, ))
+def generate_z(indices=slice(None), obs=None, env=None):
+    s0 = np.array(obs['state0'])[indices]
+    a = np.array(obs['action'])[indices]
+    propsoed_z = np.swapaxes(np.array(env.step(action=a, state=s0, multiple=M_Z)[0]), 0, 1)
+    return propsoed_z
+
+def generate_samples_with_z(para, model, obs, batch_indices=None, buffer_size=BUFFER_SIZE, batch_training=BATCH_TRAINING):
+    '''
+    para is [para, z]'''
     if not batch_training:
         batch_indices = range(min(len(obs['state0']), buffer_size))
     
     s0 = np.array(obs['state0'])[-buffer_size:][batch_indices]
     a = np.array(obs['action'])[-buffer_size:][batch_indices]
-    if generate_new_samples:
-        s1_lst = np.swapaxes(np.array(env.step(action=a, state=s0, multiple=M_Z)[0]), 0, 1)
-    else:
-        s1_lst = np.swapaxes(np.array(obs['state1'])[-buffer_size:][batch_indices], 0, 1)
+
+    para, s1_lst = para
+    para = para.reshape(model.state_size + (model.action_size, ))
+    # else:
+    #     s1_lst = np.swapaxes(np.array(obs['state1'])[-buffer_size:][batch_indices], 0, 1)
     dones = torch.tensor(np.array(obs['done'])[-buffer_size:][batch_indices].astype(int))
     s1_value = 0
     for s1 in s1_lst:
@@ -49,9 +57,10 @@ def tabular_indicator_deterministic(para, model, obs):
     return torch.tensor(Indicator, dtype=torch.float32).reshape((len(a), -1))
 
 def tabular_indicator_stochastic(para, model, obs, env):
+    para, s1_lst = para
     s0 = obs['state0']
     a = obs['action']
-    s1_lst = np.swapaxes(np.array(env.step(action=a, state=s0, multiple=M_Z)[0]), 0, 1)
+    # s1_lst = np.swapaxes(np.array(env.step(action=a, state=s0, multiple=M_Z)[0]), 0, 1)
     done = np.array(obs['done'])
     s01, s02 = np.array(s0).T
     Indicator = np.zeros(shape=(len(a), ) + para.shape) #TxTheta
@@ -159,7 +168,7 @@ class GaussianABCLikelihood():
         mean = self.compute_mean(parameter=parameter, mean_fn=mean_fn, llh_info_dict=llh_info_dict)
         mean_jacobian = mean_jacobian_fn(parameter=parameter)
         
-        gradient = 1. / (self.epsilon**2) *  torch.mv(torch.t(mean_jacobian),(data - mean))
+        gradient = 1. / (self.epsilon**2) *  torch.mv(torch.t(mean_jacobian),( - mean))
         return gradient, {"mean_jacobian":mean_jacobian}
     
     def llh_hessian(self, parameter, llh_transform_grad_fn=None, llh_transform_hessian_fn=None, llh_grad_info_dict=dict(), **kwargs):
@@ -192,7 +201,7 @@ class GaussianABCLikelihood():
         return (self.epsilon ** 2) * torch.eye(data_len)
 
 
-class DeterministicRModel():
+class DeterministicSRModel():
     """the overall model of the ABC likelihood model with prior and likelihood (with deterministic reward and state transition)"""
     def __init__(self, prior, abclikelihood, data, llh_transform_fn=None, llh_transform_grad_fn=None, llh_transform_hessian_fn=None, *args):
         """
@@ -235,6 +244,11 @@ class DeterministicRModel():
         llh, llh_info_dict = self.llh(parameter=parameter, llh_info_dict=llh_info_dict)
         return logprior + llh, llh_info_dict
     
+    def llh_gradient(self, parameter, llh_info_dict=dict()):
+        """compute the gradient of the llh with respect to the parameter and return the gradient, using the explicit derivation of the gradient"""
+        llh_grad, llh_grad_info = self.abclikelihood.llh_gradient(data=self.data, parameter=parameter, llh_info_dict=llh_info_dict, llh_transform_fn=self.llh_transform_fn, llh_transform_grad_fn=self.llh_transform_grad_fn)
+        return llh_grad, llh_grad_info
+    
     def logtarget_gradient(self, parameter, llh_info_dict=dict()):
         """compute the gradient of the log target density with respect to the parameter and return the gradient, using the explicit derivation of the gradient"""
         logprior_grad = self.prior.logprior_gradient(parameter=parameter)
@@ -254,6 +268,90 @@ class DeterministicRModel():
                 - a dictionary of info output by the abclikelihood.llh function
         """
         parameter = parameter.clone()
+        parameter.requires_grad = True
+        logtarget_density, llh_info_dict = self.logtarget_density(parameter=parameter, llh_info_dict=dict()) # must use the llh_transform_fn to compute the density
+        logtarget_density.backward()
+        gradient = parameter.grad.clone()
+        parameter.grad.zero_()
+        parameter.requires_grad = False
+        logtarget_density = logtarget_density.detach()
+        return logtarget_density, gradient, llh_info_dict
+    
+    def logtarget_hessian(self, parameter, llh_info_dict=dict(), llh_grad_info_dict=dict()):
+        """compute the hessian of the log target density with respect to the parameter and return the hessian, using explicit derivation of the hessian
+        parameter: torch.tensor
+            - the parameter the gradient is computed at
+        llh_info_dict: dict, optional
+            - a dictionary of info returned by abclikelihood.llh function
+        llh_grad_info_dict: dict, optional
+            - a dictionary of gradient info returned by abclikelihood.gradient function
+        return:
+            - hessian: torch.tensor
+                - the hessian at the parameter
+        """
+        logprior_hessian = self.prior.logprior_hessian(parameter=parameter)
+        llh_hessian = self.abclikelihood.llh_hessian(data=self.data, parameter=parameter, llh_info_dict=llh_info_dict, llh_grad_info_dict=llh_grad_info_dict, llh_transform_fn=self.llh_transform_fn, llh_transform_grad_fn=self.llh_transform_grad_fn, llh_transform_hessian_fn=self.llh_transform_hessian_fn)
+        return logprior_hessian + llh_hessian
+    
+    def logtarget_auto_hessian(self, parameter):
+        """compute the hessian of the log target density with respect to the parameter and return the hessian, using automatic differentiation. See self.logtarget_hessian"""
+        def fn(parameter):
+            logtarget_density, _ = self.logtarget_density(parameter=parameter, llh_info_dict=dict())
+            return logtarget_density
+        return torch.autograd.functional.hessian(fn, parameter)
+
+    def pyro_model(self, data, parameter_len):
+        """the equivalent pyro model, for use in pyro MCMC functions
+        data: torch.tensor
+            - this input is required as a standard format of a pyro model
+        parameter_len: int
+            - the dimension of the parameter
+        """
+        prior_parameter = pyro.sample("prior_parameter", dist.MultivariateNormal(torch.zeros(parameter_len), self.prior.covariance_matrix(parameter_len=parameter_len)))
+        mean = self.abclikelihood.compute_mean(parameter=prior_parameter, mean_fn=self.llh_transform_fn, llh_info_dict=dict())
+        with pyro.plate("data_plate"):
+            pyro.sample("obs", dist.MultivariateNormal(mean, self.abclikelihood.covariance_matrix(data_len=len(self.data))), obs=data)
+            
+class StochasticSModel(DeterministicSRModel):
+    """the overall model of the ABC likelihood model with prior and likelihood (with stochastic state transition)"""
+    def __init__(self, prior, abclikelihood, data, z_transform_fn=None, llh_transform_fn=None, llh_transform_grad_fn=None, llh_transform_hessian_fn=None, *args):
+        super(StochasticSModel, self).__init__(prior, abclikelihood, data, llh_transform_fn=llh_transform_fn, llh_transform_grad_fn=llh_transform_grad_fn, llh_transform_hessian_fn=llh_transform_hessian_fn, *args)
+        self.z_transform_fn = z_transform_fn
+
+    def llh(self, parameter, llh_info_dict=dict()):
+        """compute the loglikelihood given the abclikelihood and return the loglikelihood with the llh_info_dict"""
+        """
+        parameter: dictionary
+            - this include both the model parameters and the z value 
+        """
+        llh, llh_info_dict = self.abclikelihood.llh(data=self.data, parameter=parameter, llh_info_dict=llh_info_dict, llh_transform_fn=self.llh_transform_fn)
+        return llh, llh_info_dict
+
+    def logtarget_density(self, parameter, llh_info_dict=dict()):
+        """compute the log target density (logprior + llh) given the abclikelihood and prior and return the log target density with the llh_info_dict"""
+        logprior = self.logprior(parameter=parameter[0])
+        llh, llh_info_dict = self.llh(parameter=parameter, llh_info_dict=llh_info_dict)
+        return logprior + llh, llh_info_dict
+    
+    def logtarget_gradient(self, parameter, llh_info_dict=dict()):
+        """compute the gradient of the log target density with respect to the parameter and return the gradient, using the explicit derivation of the gradient"""
+        logprior_grad = self.prior.logprior_gradient(parameter=parameter[0])
+        llh_grad, llh_grad_info = self.abclikelihood.llh_gradient(data=self.data, parameter=parameter, llh_info_dict=llh_info_dict, llh_transform_fn=self.llh_transform_fn, llh_transform_grad_fn=self.llh_transform_grad_fn)
+        return logprior_grad + llh_grad, llh_grad_info
+    
+    def logtarget_auto_gradient(self, parameter):
+        """compute the gradient of the log target density with respect to the parameter and return the gradient, using automatic differentiation with pytorch
+        parameter: torch.tensor (no gradient needed)
+            - the parameter the gradient is computed at
+        return:
+            - logtarget_density: torch.tensor
+                - the log target density of the target density with respect to the input parameter
+            - gradient: torch.tensor
+                - the gradient of the log target density with respect to and at the input parameter
+            - llh_info_dict: dict
+                - a dictionary of info output by the abclikelihood.llh function
+        """
+        parameter = torch.tensor(parameter).clone()
         parameter.requires_grad = True
         logtarget_density, llh_info_dict = self.logtarget_density(parameter=parameter, llh_info_dict=dict()) # must use the llh_transform_fn to compute the density
         logtarget_density.backward()

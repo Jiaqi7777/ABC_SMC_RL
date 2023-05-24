@@ -6,6 +6,7 @@ from functools import partial
 import pyro
 import pyro.distributions as dist
 from tqdm.notebook import tqdm
+import math
 import sys
 import os
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
@@ -150,6 +151,89 @@ class MCMC_pyro(MCMC):
     def get_accept_prob(self):
         raise NotImplementedError
     
+class MCMC_Gibbs(MCMC):
+    """the class to run Gibbs sampler for z"""
+    def __init__(self, variables, kernel_functions, block_size=5, num_samples=MCMC_SAMPLE, initial_params=None, params_dim=None, warmup_steps=MCMC_T//5, disable_progbar=MCMC_SHOW_DISABLE, warmup_settings=dict(target_prob=0.7, auto_init_stepsize=True), **kwargs):
+        """
+        kernel_functions: dictionary {'para': para_kernel, 'z': z_kernel}
+            - dictionary of a parameter kernel which conditioned on u, z, r, and a z kernel which could generate a block of z given u, and return the likelihood function
+        block_size: block size of z that are being updated together
+        """
+        self.num_samples = num_samples
+        self.kernel = kernel_functions
+        assert initial_params is not None or params_dim is not None, "Should either specify initial_params or params_dim"
+        if initial_params is not None:
+            self.initial_params = initial_params
+            self.params_dim = {var: torch.tensor(initial_param).shape for var, initial_param in zip(variables, initial_params)}
+        else:
+            self.initial_params = torch.zeros(params_dim)
+            self.params_dim = params_dim
+
+        assert warmup_steps is None or isinstance(warmup_steps,int) or isinstance(warmup_steps, np.integer), "warmup_steps must be None or integer"
+        self.warmup_steps = 0 if warmup_steps is None else warmup_steps
+        self.warmup_settings = warmup_settings  
+        
+        self.variables = variables      
+        self.block_size = block_size
+        
+        self.reset_stat()
+        
+    def run(self):
+        
+        self.reset_stat()
+        
+        current_para, current_z = self.initial_params
+        current_z_llh, current_z_llh_info_dict  = self.kernel['z'].model.llh(parameter=[current_para, current_z], llh_info_dict=dict())
+        current_z_info_dict = {"logdensities":current_z_llh, "llh_info_dict":current_z_llh_info_dict}
+        self.samples['para'][0] = current_para
+        self.samples['z'][0] = torch.tensor(current_z)
+        self.logdensities['z'][0] = current_z_llh
+        self.proposed_logdensities['z'][0] = current_z_llh
+
+        pbar = tqdm(range(self.num_samples))
+        t = len(self.kernel['para'].model.data)
+        for i in pbar: 
+            current_para = self.kernel['para'].propose_accept(current_para=[current_para, current_z])
+            for j in range(math.ceil(t // self.block_size)):
+                '''proposed_block_z: block_size x M_Z x 2'''
+                indices = [j * self.block_size, min((j + 1) * self.block_size, t)]
+                z_accept_prob, proposed_block_z, proposed_z_info_dict = self.kernel['z'].propose_accept(current_para=[current_para, current_z], 
+                                                            indices=range(indices[0], indices[1]), current_z_info_dict=current_z_info_dict)
+                    
+
+                if np.random.uniform(0,1) < z_accept_prob:
+                    current_z[slice(None), indices[0]: indices[1]] = proposed_block_z
+                    current_z_info_dict = proposed_z_info_dict
+                    
+                    self.accepted['z'] += 1
+
+            pbar.set_description("Acceptance probability {}".format(np.round(self.accepted['z']/(i+1), 2)))
+
+            self.samples['para'][i+1] = current_para
+            self.samples['z'][i+1] = torch.tensor(current_z)
+            self.logdensities['z'][i+1] = current_z_info_dict["logdensities"]
+            self.proposed_logdensities['z'][i+1] = proposed_z_info_dict["logdensities"]
+            self.accept_prob['z'][i+1] = z_accept_prob
+
+        return self.samples['para']
+    
+    def warmup(self, para_key, init_para, init_para_info_dict=dict()):
+        current_para, current_para_info_dict, info = self.kernel[para_key].warmup(init_para=init_para, 
+                                                                        init_para_info_dict=init_para_info_dict,
+                                                                        iterations=self.warmup_steps, 
+                                                                        set_stepsize=True,
+                                                                        **self.warmup_settings)
+
+        return current_para, current_para_info_dict, info
+    
+    def reset_stat(self):
+        self.samples = {var: torch.zeros(((self.num_samples+1, ) + tuple(dim))) for var, dim in self.params_dim.items()}
+        self.logdensities = {var: torch.zeros(self.num_samples+1) for var in self.params_dim.keys()}
+        self.proposed_logdensities = {var: torch.zeros(self.num_samples+1) for var in self.params_dim.keys()}
+        self.accepted = {var: 0 for var in self.params_dim.keys()}
+        self.accept_prob = {var: torch.zeros(self.num_samples+1) for var in self.params_dim.keys()}   
+
+    
 #MCMC
 def MCMC_update(obs, posterior_samples, model, env):
     global STEPSIZE
@@ -158,43 +242,53 @@ def MCMC_update(obs, posterior_samples, model, env):
     else:
         batch_indices = slice(None)
     
+    prior = IsotropicGaussianPrior(sd=PRIOR_SIGMA)
+    abclikelihood = GaussianABCLikelihood(epsilon=EPSILON)
+    data = torch.tensor(obs._buffers["rewards"])[-BUFFER_SIZE:][batch_indices]
     if STOCHASTIC:
         '''Stochastic'''
-        r_hat = partial(generate_samples_with_z, model=model, obs=obs._buffers, env=env, batch_indices=batch_indices, generate_new_samples=True)
-        llh_transform_grad_fn = lambda parameter:  tabular_indicator_stochastic(para=parameter.reshape(env.n_cell + (env.action_space.n, )), model=model, obs=obs._buffers, env=env)#stochastic
+        z_sample = generate_z(env=env, obs=obs._buffers)
+        r_hat = partial(generate_samples_with_z, model=model, obs=obs._buffers, batch_indices=batch_indices)
+        z_transform_func = partial(generate_z, env=env, obs=obs._buffers)
+        llh_transform_grad_fn = lambda parameter:  tabular_indicator_stochastic(para=[parameter[0].reshape(env.n_cell + (env.action_space.n, )), z_sample], model=model, obs=obs._buffers, env=env)#stochastic
+        Model = StochasticSModel(prior=prior, abclikelihood=abclikelihood, data=data, z_transform_fn=z_transform_func, llh_transform_fn=r_hat, llh_transform_grad_fn=llh_transform_grad_fn)
+
     else:
         '''Determinisitc'''
         r_hat = partial(generate_samples, model=model, obs=obs._buffers,  batch_indices=batch_indices)
         llh_transform_grad_fn = lambda parameter:  tabular_indicator_deterministic(para=parameter.reshape(env.n_cell + (env.action_space.n, )), model=model, obs=obs._buffers)#standard form
-    
-    prior = IsotropicGaussianPrior(sd=PRIOR_SIGMA)
-    abclikelihood = GaussianABCLikelihood(epsilon=EPSILON)
-    data = torch.tensor(obs._buffers["rewards"])[-BUFFER_SIZE:][batch_indices]
-    Model = DeterministicRModel(prior=prior, abclikelihood=abclikelihood, data=data, llh_transform_fn=r_hat, llh_transform_grad_fn=llh_transform_grad_fn)
+        Model = DeterministicSRModel(prior=prior, abclikelihood=abclikelihood, data=data, llh_transform_fn=r_hat, llh_transform_grad_fn=llh_transform_grad_fn)
 
     def fn(parameter):
         current_logtarget_density, _ = Model.logtarget_density(parameter=parameter, llh_info_dict=dict())
         return current_logtarget_density
-    # hessian = torch.autograd.functional.hessian(fn, posterior_samples[0].reshape(-1)) + 1e-6 * torch.eye(len(posterior_samples[0]).reshape(-1))
-    #kernel = RandomWalk(model=Model, stepsize=STEPSIZE)
-    #kernel = RandomWalk(model=Model, stepsize=STEPSIZE, covariance_matrix=-torch.linalg.inv(hessian))
-    #kernel = pCN(model=Model, stepsize=STEPSIZE)
-    #kernel = MALA(model=Model, stepsize=STEPSIZE, precondition_matrix=None)
-    #kernel = MALA(model=Model, stepsize=STEPSIZE, precondition_matrix=-torch.linalg.inv(hessian))
-    #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=False)
-    #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=False, precondition_matrix=-torch.linalg.inv(hessian))
-    kernel = HMC_pyro(model=Model, stepsize=STEPSIZE, full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB, num_steps=NUM_STEPS)
-    # kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=False)
-    # kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=False, precondition_matrix=-torch.linalg.inv(hessian), traj_len=None)
-    # kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=True, precondition_matrix=-torch.linalg.inv(hessian), traj_len=None)
-    #kernel = mMALA(model=Model, stepsize=STEPSIZE, use_autograd=False, use_autohess=False)
-    #kernel = mMALA(model=Model, stepsize=STEPSIZE, use_autograd=True, use_autohess=True)
-    #kernel = mHMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=False, use_autohess=False, traj_len=None, fp_iterations=50)
+    if STOCHASTIC:
+        kernel = HMC_Z(model=Model, stepsize=STEPSIZE, use_autograd=False)
+        z_kernel = Z(model=Model)
+    else:
+        # hessian = torch.autograd.functional.hessian(fn, posterior_samples[0].reshape(-1)) + 1e-6 * torch.eye(len(posterior_samples[0]).reshape(-1))
+        #kernel = RandomWalk(model=Model, stepsize=STEPSIZE)
+        #kernel = RandomWalk(model=Model, stepsize=STEPSIZE, covariance_matrix=-torch.linalg.inv(hessian))
+        #kernel = pCN(model=Model, stepsize=STEPSIZE)
+        #kernel = MALA(model=Model, stepsize=STEPSIZE, precondition_matrix=None)
+        #kernel = MALA(model=Model, stepsize=STEPSIZE, precondition_matrix=-torch.linalg.inv(hessian))
+        #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=False)
+        #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=False, precondition_matrix=-torch.linalg.inv(hessian))
+        kernel = HMC_pyro(model=Model, stepsize=STEPSIZE, full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB, num_steps=NUM_STEPS)
+        # kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=False)
+        # kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=False, precondition_matrix=-torch.linalg.inv(hessian), traj_len=None)
+        # kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=True, precondition_matrix=-torch.linalg.inv(hessian), traj_len=None)
+        #kernel = mMALA(model=Model, stepsize=STEPSIZE, use_autograd=False, use_autohess=False)
+        #kernel = mMALA(model=Model, stepsize=STEPSIZE, use_autograd=True, use_autohess=True)
+        #kernel = mHMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=False, use_autohess=False, traj_len=None, fp_iterations=50)
     accept_probs = None
     STEPSIZE *= DECREASING_FACTOR
 
     if kernel.original is True:
-        mcmc = MCMC(num_samples=training_steps, kernel=kernel, initial_params=posterior_samples[-1].reshape(-1), warmup_steps=np.int64(np.floor(training_steps*WARMUP_RATIO)), warup_settings=dict(target_prob=0.7, auto_init_stepsize=True))
+        if STOCHASTIC:
+            mcmc = MCMC_Gibbs(variables=['para', 'z'], kernel_functions={'para': kernel, 'z': z_kernel}, num_samples=training_steps, initial_params=[posterior_samples[-1].reshape(-1), z_sample], warmup_steps=np.int64(np.floor(training_steps*WARMUP_RATIO)), warup_settings=dict(target_prob=0.7, auto_init_stepsize=True))
+        else:
+            mcmc = MCMC(num_samples=training_steps, kernel=kernel, initial_params=posterior_samples[-1].reshape(-1), warmup_steps=np.int64(np.floor(training_steps*WARMUP_RATIO)), warup_settings=dict(target_prob=0.7, auto_init_stepsize=True))
         posterior_samples = mcmc.run().reshape((-1, ) + env.n_cell + (env.action_space.n, ))
         logdensities = mcmc.get_logdensities()
         proposed_logdensities = mcmc.get_proposed_logdensities()
@@ -202,7 +296,10 @@ def MCMC_update(obs, posterior_samples, model, env):
         return posterior_samples, accept_probs, logdensities, proposed_logdensities
 
     else:
-        mcmc = MCMC_pyro(num_samples=training_steps, kernel=kernel, initial_params=posterior_samples[-1].reshape(-1), warmup_steps=np.int64(np.floor(training_steps*WARMUP_RATIO)), disable_progbar=MCMC_SHOW_DISABLE)
+        if STOCHASTIC:
+            raise NotImplementedError('pyro model for stochastic hasn\'t been implemented' )
+        else:
+            mcmc = MCMC_pyro(num_samples=training_steps, kernel=kernel, initial_params=posterior_samples[-1].reshape(-1), warmup_steps=np.int64(np.floor(training_steps*WARMUP_RATIO)), disable_progbar=MCMC_SHOW_DISABLE)
         posterior_samples = mcmc.run().reshape((-1, ) + env.n_cell + (env.action_space.n, ))
         return posterior_samples, accept_probs
     
@@ -272,7 +369,7 @@ if __name__ == '__main__':
     parser.add_argument('--MCMC', default=True, action='store_false', help='Bool type')
     parser.add_argument('-g', '--Greedy', default=GREEDY, action='store_true', help='Bool type')
     parser.add_argument('--Env', default=ENV_NAME)
-    parser.add_argument('--stochastic', default=False)
+    parser.add_argument('--sto', default=False)
     parser.add_argument('--online', default=False)
     args = parser.parse_args()
     print(args)
@@ -288,7 +385,7 @@ if __name__ == '__main__':
     warmup_steps = int(training_steps * WARMUP_RATIO)
     GREEDY = args.Greedy
     env_name = args.Env
-    STOCHASTIC = args.stochastic
+    STOCHASTIC = args.sto
     ONLINE_LEARNING = args.online
     
 
