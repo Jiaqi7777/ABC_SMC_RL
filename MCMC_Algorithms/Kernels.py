@@ -717,7 +717,6 @@ class Z(Kernel):
         current_z_llh_info_dict = current_z_info_dict["llh_info_dict"] if current_z_info_dict.get("llh_info_dict") is not None else dict()
         proposed_blocked_z = self.move_(indices=indices)
         proposed_z = current_z.copy()
-        print(indices, current_z.shape, proposed_blocked_z.shape)
         proposed_z[slice(None), indices] = proposed_blocked_z
         if current_z_info_dict.get("logdensities") is not None:
             current_llh = current_z_info_dict["logdensities"]
@@ -729,7 +728,7 @@ class Z(Kernel):
 
         proposed_z_info_dict = {"llh_info_dict": proposed_para_llh_info_dict, "logdensities": proposed_llh}
 
-        return accept_prob, proposed_blocked_z, proposed_z_info_dict
+        return accept_prob, proposed_z, proposed_z_info_dict
 
 # class AM(Kernel):
 #     def __init__(self, model=None, stepsize=0.1, prior=Prior(sigma=PRIOR_SIGMA), likelihood=ABCLikelihood(epsilon=EPSILON), tractability=False, sd=1, am_epsilon=1e-5):

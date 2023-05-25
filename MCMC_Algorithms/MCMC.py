@@ -197,17 +197,17 @@ class MCMC_Gibbs(MCMC):
             for j in range(math.ceil(t // self.block_size)):
                 '''proposed_block_z: block_size x M_Z x 2'''
                 indices = [j * self.block_size, min((j + 1) * self.block_size, t)]
-                z_accept_prob, proposed_block_z, proposed_z_info_dict = self.kernel['z'].propose_accept(current_para=[current_para, current_z], 
+                z_accept_prob, proposed_z, proposed_z_info_dict = self.kernel['z'].propose_accept(current_para=[current_para, current_z], 
                                                             indices=range(indices[0], indices[1]), current_z_info_dict=current_z_info_dict)
                     
 
                 if np.random.uniform(0,1) < z_accept_prob:
-                    current_z[slice(None), indices[0]: indices[1]] = proposed_block_z
+                    current_z = proposed_z
                     current_z_info_dict = proposed_z_info_dict
                     
                     self.accepted['z'] += 1
 
-            pbar.set_description("Acceptance probability {}".format(np.round(self.accepted['z']/(i+1), 2)))
+            pbar.set_description("Acceptance probability {}".format(np.round(self.accepted['z']/(i+1)/self.block_size, 2)))
 
             self.samples['para'][i+1] = current_para
             self.samples['z'][i+1] = torch.tensor(current_z)
