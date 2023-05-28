@@ -695,13 +695,24 @@ class HMC_Z(HMC):
         q_info_dict = {"logdensities":proposed_logtarget_density, "gradient":proposed_gradient, "llh_info_dict":proposed_para_llh_info_dict, "llh_grad_info_dict":proposed_para_llh_grad_info_dict}
         return q, p0, p, q_info_dict
     
-    def propose_accept_(self, current_para, stepsize=0.1, L=1, current_para_info_dict=None):
+    def propose_accept_(self, current_para, stepsize=0.01, L=1, current_para_info_dict=None):
+        # current_gradient, current_logtarget_density, *_ = self.gradient(parameter=[current_para, current_z], return_logtarget_density=True, llh=True)
+
+        # proposed_para, p0, p, q_info_dict = self.move_(current_para=current_para, current_gradient=current_gradient, stepsize=self.stepsize, L=self.L, additional_para=current_z)
+    
+        #
         current_para, current_z = current_para
-        current_gradient, current_logtarget_density, *_ = self.gradient(parameter=[current_para, current_z], return_logtarget_density=True, llh=True)
+        current_gradient, current_logtarget_density, *_ = self.gradient(parameter=[current_para, current_z], info_dict=current_para_info_dict, return_logtarget_density=True, llh=True)
 
-        proposed_para, p0, p, q_info_dict = self.move_(current_para=current_para, current_gradient=current_gradient, L=L, stepsize=stepsize, additional_para=current_z)
+        proposed_para, p0, p, q_info_dict = self.move_(current_para=current_para, current_gradient=current_gradient, stepsize=self.stepsize, L=self.L, additional_para=current_z)
+        proposed_logtarget_density = q_info_dict["logdensities"]
+        proposed_para_info_dict = q_info_dict
 
-        return proposed_para
+        H_old = self.hamiltonian(q=current_para, p=p0, q_logtarget_density=current_logtarget_density)
+        H_new =  self.hamiltonian(q=proposed_para, p=p, q_logtarget_density=proposed_logtarget_density)
+        accept_prob = np.exp(torch_max_0(H_old - H_new))
+
+        return accept_prob, proposed_para, proposed_para_info_dict
     
 
 class Z(Kernel):

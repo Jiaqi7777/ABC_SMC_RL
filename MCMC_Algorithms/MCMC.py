@@ -183,8 +183,13 @@ class MCMC_Gibbs(MCMC):
         self.reset_stat()
         
         current_para, current_z = self.initial_params
+        
+        current_logtarget_density, current_para_llh_info_dict  = self.kernel['para'].model.logtarget_density(parameter=[current_para, current_z], llh_info_dict=dict())
+        current_para_info_dict = {"logdensities":current_logtarget_density, "llh_info_dict":current_para_llh_info_dict}
+
         current_z_llh, current_z_llh_info_dict  = self.kernel['z'].model.llh(parameter=[current_para, current_z], llh_info_dict=dict())
         current_z_info_dict = {"logdensities":current_z_llh, "llh_info_dict":current_z_llh_info_dict}
+        
         self.samples['para'][0] = current_para
         self.samples['z'][0] = torch.tensor(current_z)
         self.logdensities['z'][0] = current_z_llh
@@ -193,7 +198,12 @@ class MCMC_Gibbs(MCMC):
         pbar = tqdm(range(self.num_samples))
         t = len(self.kernel['para'].model.data)
         for i in pbar: 
-            current_para = self.kernel['para'].propose_accept(current_para=[current_para, current_z])
+            para_accept_prob, proposed_para, proposed_para_info_dict = self.kernel['para'].propose_accept(current_para=[current_para, current_z], current_para_info_dict=current_para_info_dict)
+            if np.random.uniform(0,1) < para_accept_prob:
+                current_para = proposed_para
+                current_para_info_dict = proposed_para_info_dict
+                
+                self.accepted['para'] += 1
             for j in range(math.ceil(t // self.block_size)):
                 '''proposed_block_z: block_size x M_Z x 2'''
                 indices = [j * self.block_size, min((j + 1) * self.block_size, t)]
@@ -207,7 +217,7 @@ class MCMC_Gibbs(MCMC):
                     
                     self.accepted['z'] += 1
 
-            pbar.set_description("Acceptance probability {}".format(np.round(self.accepted['z']/(i+1)/self.block_size, 2)))
+            pbar.set_description("Acceptance probability {}".format(np.round(self.accepted['para']/(i+1), 2)))
 
             self.samples['para'][i+1] = current_para
             self.samples['z'][i+1] = torch.tensor(current_z)
@@ -466,10 +476,10 @@ if __name__ == '__main__':
             plt.show()
             
     else:
-        file_path = f"../Results/E1/T{training_steps}_Sto{STOCHASTIC}_{time}.json"
+        file_path = f"Results/E1/T{training_steps}_Sto{STOCHASTIC}_{time}.json"
         error_all = []
-        epsilon_lst = [10, 1, 1e-1, 1e-2, 1e-3, 1e-4]
-        data_percentage_lst = np.linspace(0.1, 1, 10)
+        epsilon_lst = [1e-1]#[10, 1, 1e-1, 1e-2, 1e-3, 1e-4]
+        data_percentage_lst = [1]#np.linspace(0.1, 1, 10)
         for EPSILON in epsilon_lst:
             error_all_percentage = []
             for data_percentage in data_percentage_lst:
@@ -485,10 +495,11 @@ if __name__ == '__main__':
             experiment_info = {
                 'args': vars(args), 
                 'epsilon_list': epsilon_lst, 
-                'data_percentage': data_percentage_lst.tolist(),
+                'data_percentage': np.array(data_percentage_lst).tolist(),
                 'errors': error_all
             }
-            json_data = json.dumps(experiment_info)
-            with open(file_path, "w") as file:
-                file.write(json_data)
-            print(f"Dictionary saved to {file_path}")
+            if save:
+                json_data = json.dumps(experiment_info)
+                with open(file_path, "w") as file:
+                    file.write(json_data)
+                print(f"Dictionary saved to {file_path}")
