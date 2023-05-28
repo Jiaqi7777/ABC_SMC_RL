@@ -695,7 +695,7 @@ class HMC_Z(HMC):
         q_info_dict = {"logdensities":proposed_logtarget_density, "gradient":proposed_gradient, "llh_info_dict":proposed_para_llh_info_dict, "llh_grad_info_dict":proposed_para_llh_grad_info_dict}
         return q, p0, p, q_info_dict
     
-    def propose_accept_(self, current_para, stepsize=0.01, L=1, current_para_info_dict=None):
+    def propose_accept(self, current_para, indices=None, stepsize=0.01, L=1, current_para_info_dict=None):
         # current_gradient, current_logtarget_density, *_ = self.gradient(parameter=[current_para, current_z], return_logtarget_density=True, llh=True)
 
         # proposed_para, p0, p, q_info_dict = self.move_(current_para=current_para, current_gradient=current_gradient, stepsize=self.stepsize, L=self.L, additional_para=current_z)
@@ -723,14 +723,14 @@ class Z(Kernel):
         proposed_blocked_z = self.model.z_transform_fn(indices)
         return proposed_blocked_z
     
-    def propose_accept(self, current_para, indices=None, current_z_info_dict=None):
+    def propose_accept(self, current_para, indices=None, current_para_info_dict=None):
         current_para, current_z = current_para
-        current_z_llh_info_dict = current_z_info_dict["llh_info_dict"] if current_z_info_dict.get("llh_info_dict") is not None else dict()
+        current_z_llh_info_dict = current_para_info_dict["llh_info_dict"] if current_para_info_dict.get("llh_info_dict") is not None else dict()
         proposed_blocked_z = self.move_(indices=indices)
         proposed_z = current_z.copy()
         proposed_z[slice(None), indices] = proposed_blocked_z
-        if current_z_info_dict.get("logdensities") is not None:
-            current_llh = current_z_info_dict["logdensities"]
+        if current_para_info_dict.get("logdensities") is not None:
+            current_llh = current_para_info_dict["logdensities"]
         else:
             current_llh, _ = self.model.llh(parameter=[current_para, current_z], llh_info_dict=current_z_llh_info_dict)
 

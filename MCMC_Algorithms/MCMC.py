@@ -153,7 +153,7 @@ class MCMC_pyro(MCMC):
     
 class MCMC_Gibbs(MCMC):
     """the class to run Gibbs sampler for z"""
-    def __init__(self, variables, kernel_functions, block_size=5, num_samples=MCMC_SAMPLE, initial_params=None, params_dim=None, warmup_steps=MCMC_T//5, disable_progbar=MCMC_SHOW_DISABLE, warmup_settings=dict(target_prob=0.7, auto_init_stepsize=True), **kwargs):
+    def __init__(self, variables, kernel_functions, block_size={'para': 10000, 'z': 5}, num_samples=MCMC_SAMPLE, initial_params=None, params_dim=None, warmup_steps=MCMC_T//5, disable_progbar=MCMC_SHOW_DISABLE, warmup_settings=dict(target_prob=0.7, auto_init_stepsize=True), **kwargs):
         """
         kernel_functions: dictionary {'para': para_kernel, 'z': z_kernel}
             - dictionary of a parameter kernel which conditioned on u, z, r, and a z kernel which could generate a block of z given u, and return the likelihood function
@@ -182,49 +182,39 @@ class MCMC_Gibbs(MCMC):
         
         self.reset_stat()
         
-        current_para, current_z = self.initial_params
-        
-        current_logtarget_density, current_para_llh_info_dict  = self.kernel['para'].model.logtarget_density(parameter=[current_para, current_z], llh_info_dict=dict())
-        current_para_info_dict = {"logdensities":current_logtarget_density, "llh_info_dict":current_para_llh_info_dict}
-
-        current_z_llh, current_z_llh_info_dict  = self.kernel['z'].model.llh(parameter=[current_para, current_z], llh_info_dict=dict())
-        current_z_info_dict = {"logdensities":current_z_llh, "llh_info_dict":current_z_llh_info_dict}
-        
-        self.samples['para'][0] = current_para
-        self.samples['z'][0] = torch.tensor(current_z)
-        self.logdensities['z'][0] = current_z_llh
-        self.proposed_logdensities['z'][0] = current_z_llh
-
         pbar = tqdm(range(self.num_samples))
-        t = len(self.kernel['para'].model.data)
-        for i in pbar: 
-            para_accept_prob, proposed_para, proposed_para_info_dict = self.kernel['para'].propose_accept(current_para=[current_para, current_z], current_para_info_dict=current_para_info_dict)
-            if np.random.uniform(0,1) < para_accept_prob:
-                current_para = proposed_para
-                current_para_info_dict = proposed_para_info_dict
-                
-                self.accepted['para'] += 1
-            for j in range(math.ceil(t // self.block_size)):
-                '''proposed_block_z: block_size x M_Z x 2'''
-                indices = [j * self.block_size, min((j + 1) * self.block_size, t)]
-                z_accept_prob, proposed_z, proposed_z_info_dict = self.kernel['z'].propose_accept(current_para=[current_para, current_z], 
-                                                            indices=range(indices[0], indices[1]), current_z_info_dict=current_z_info_dict)
-                    
-
-                if np.random.uniform(0,1) < z_accept_prob:
-                    current_z = proposed_z
-                    current_z_info_dict = proposed_z_info_dict
-                    
-                    self.accepted['z'] += 1
-
+        current_para = self.initial_params
+        current_para_info_dict = dict()
+        data_length = dict()
+        for k, var in enumerate(self.variables):
+            current_logtarget_density, current_para_llh_info_dict  = self.kernel[var].model.logtarget_density(parameter=current_para, llh_info_dict=dict())
+            current_para_info_dict[var] = {"logdensities":current_logtarget_density, "llh_info_dict":current_para_llh_info_dict}
+            self.samples[var][0] = torch.tensor(current_para[k])
+            self.logdensities[var][0] = current_logtarget_density
+            self.proposed_logdensities[var][0] = current_logtarget_density
+            data_length[var] = len(self.kernel[var].model.data)
+        
+        for i in pbar:
+            for k, var in enumerate(self.variables):
+                for j in range(math.ceil(data_length[var] / self.block_size[var])):
+                    '''proposed_block_z: block_size x M_Z x 2'''
+                    indices = [j * self.block_size[var], min((j + 1) * self.block_size[var], data_length[var])]
+                    accept_prob, proposed_para, proposed_para_info_dict = self.kernel[var].propose_accept(current_para=current_para, 
+                                                                indices=range(indices[0], indices[1]), current_para_info_dict=current_para_info_dict[var])
+                        
+                    if np.random.uniform(0, 1) < accept_prob:
+                        current_para[k] = proposed_para
+                        current_para_info_dict[var] = proposed_para_info_dict
+                        self.accepted[var] += 1
+                        
+                self.samples[var][i+1] = torch.tensor(current_para[k])
+                self.logdensities[var][i+1] = current_para_info_dict[var]["logdensities"]
+                self.proposed_logdensities['z'][i+1] = proposed_para_info_dict["logdensities"]
+                self.accept_prob[var][i+1] = accept_prob
+            
+            
             pbar.set_description("Acceptance probability {}".format(np.round(self.accepted['para']/(i+1), 2)))
-
-            self.samples['para'][i+1] = current_para
-            self.samples['z'][i+1] = torch.tensor(current_z)
-            self.logdensities['z'][i+1] = current_z_info_dict["logdensities"]
-            self.proposed_logdensities['z'][i+1] = proposed_z_info_dict["logdensities"]
-            self.accept_prob['z'][i+1] = z_accept_prob
-
+            
         return self.samples['para']
     
     def warmup(self, para_key, init_para, init_para_info_dict=dict()):
