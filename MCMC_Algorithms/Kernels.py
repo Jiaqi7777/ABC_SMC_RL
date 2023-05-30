@@ -497,11 +497,9 @@ class HMC(Kernel):
                                                                             current_para_info_dict=current_para_info_dict,
                                                                             L=L,
                                                                             stepsize=eps)
-                print(i)
             except ValueError: #parameter diverge
                 accept_prob = torch.tensor(0.)
-                print("hi")
-
+                print('Value Error occured')
             if np.random.uniform(0,1) < accept_prob:
                 current_para = proposed_para
                 current_para_info_dict = proposed_para_info_dict
@@ -512,11 +510,12 @@ class HMC(Kernel):
             eps = np.exp(logeps)
             logeps_bar = m**(-kappa) * logeps + (1 - m**(-kappa)) * logeps_bar
 
-            pbar.set_description("Warmup: Most recent alpha {}, with stepsize {}".format(str(np.round(accept_prob.numpy(), 6)), str(np.round(eps, 6))))
+            pbar.set_description("Warmup: Most recent alpha {}, with stepsize {}".format(str(np.round(accept_prob.numpy(), 3)), str(np.round(eps, 3))))
 
         stepsize = np.exp(logeps_bar)
         if set_stepsize is True:   
             self.set_stepsize(stepsize=stepsize)
+            self.set_L(num_steps=None, traj_len=self.traj_len, stepsize=stepsize, set_L=True)
             print("HMC stepsize set up {}".format(self.stepsize))
 
         return current_para, current_para_info_dict, stepsize

@@ -471,23 +471,28 @@ if __name__ == '__main__':
             plt.show()
             
     else:
-        file_path = f"Results/E1/T{training_steps}_Sto{STOCHASTIC}_{time}.json"
+        experiment_code = 1
+        file_path = f"../Results/E{experiment_code}/T{training_steps}_Sto{STOCHASTIC}_{time}.json"
         error_all = []
-        epsilon_lst = [1e-1]#[10, 1, 1e-1, 1e-2, 1e-3, 1e-4]
-        data_percentage_lst = [1]#np.linspace(0.1, 1, 10)
-        for EPSILON in epsilon_lst:
-            error_all_percentage = []
-            for data_percentage in data_percentage_lst:
-                env.uniform_policy(data_percentage=data_percentage)
-                obs = env.uniform_obs
-                posterior_samples = model.get_parameter()
-                # posterior_samples, accept_probs = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env)[:2]
-                posterior_samples, accept_probs, logdensities, proposed_logdensities = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env)
-                model.set_parameter(posterior_samples)
-                display_results(posterior_samples=posterior_samples, model=model, accept_probs=accept_probs, logdensities=logdensities, proposed_logdensities=proposed_logdensities)
-                error_all_percentage.append(mean_squared_error(Q_star.flatten(), posterior_samples[-1].flatten()))
-                print(error_all_percentage)
-            error_all.append(error_all_percentage)
+        epsilon_lst = [10, 1, 1e-1, 1e-2, 1e-3, 1e-4]
+        data_percentage_lst = np.linspace(0.1, 1, 10)
+        for repeat in range(REPEAT_EXPERIMENT):
+            error_all_epsilon = []
+            for EPSILON in epsilon_lst:
+                error_all_percentage = []
+                for data_percentage in data_percentage_lst:
+                    print(f'Experiment with epsilon={EPSILON}, %={data_percentage}')
+                    env.uniform_policy(data_percentage=data_percentage)
+                    obs = env.uniform_obs
+                    posterior_samples = model.get_parameter()
+                    # posterior_samples, accept_probs = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env)[:2]
+                    posterior_samples, accept_probs, logdensities, proposed_logdensities = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env)
+                    model.set_parameter(posterior_samples)
+                    display_results(posterior_samples=posterior_samples, model=model, accept_probs=accept_probs, logdensities=logdensities, proposed_logdensities=proposed_logdensities)
+                    error_all_percentage.append(mean_squared_error(Q_star.flatten(), posterior_samples[-1].flatten()))
+                    print(error_all_percentage)
+                error_all_epsilon.append(error_all_percentage)
+            error_all.append(error_all_epsilon)
             experiment_info = {
                 'args': vars(args), 
                 'epsilon_list': epsilon_lst, 
@@ -499,3 +504,4 @@ if __name__ == '__main__':
                 with open(file_path, "w") as file:
                     file.write(json_data)
                 print(f"Dictionary saved to {file_path}")
+        plot_repeat(error_all, labels=epsilon_lst, label='Epsilon', x=data_percentage_lst, smooth=1, xlabel='data percentage', ylabel='MSE', title='MSE for offline learning vs DP')

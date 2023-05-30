@@ -164,4 +164,27 @@ def save_results(results, folder, stochastic, episode, training_steps, greedy, e
         np.save(f, results)
     print(f'{Episodes}{folder} for repeat {repeat} saved at', file_path)
 
+def plot_repeat(data, x, smooth=5, figure_path='../Figures/', labels=[], label='', show=True, save=False, xlabel='', ylabel='MSE', title=None):
+    data = np.swapaxes(np.array(data), 0, 1)
+    if len(labels) != len(data):
+        labels=[''] * len(data)
+    for d, l in zip(data, labels):
+        print(data.shape)
+        smoothed_d = np.apply_along_axis(lambda m: np.convolve(m, np.ones(smooth) / smooth, mode='valid'), axis=-1, arr=np.array(d))
+        N = len(smoothed_d)
+        d_mean = np.mean(smoothed_d, axis=0)
+        d_std = np.std(smoothed_d, axis=0)
+        plt.plot(d_mean, label = f'{label} = {l}')
+        plt.fill_between(range(len(smoothed_d[0])), d_mean-d_std / np.sqrt(N), d_mean + d_std / np.sqrt(N), alpha=0.2)
+    plt.xlabel(xlabel)
+    plt.ylabel(ylabel)
+    plt.title(f'{ylabel} averaging over {N} random runs, smoothed over {smooth} steps' if title is None else title)
+    plt.xticks(range(len(smoothed_d[0])), x)
+    plt.legend()
+    if save:
+        plt.savefig(f'{figure_path+title}.png', bbox_inches='tight')
+        print('figure saved at ', f'{figure_path+title}.png')
     
+    if show:
+        plt.show()
+    plt.clf()

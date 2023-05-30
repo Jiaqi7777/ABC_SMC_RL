@@ -322,6 +322,9 @@ class StochasticSModel(DeterministicSRModel):
         super(StochasticSModel, self).__init__(prior, abclikelihood, data, llh_transform_fn=llh_transform_fn, llh_transform_grad_fn=llh_transform_grad_fn, llh_transform_hessian_fn=llh_transform_hessian_fn, *args)
         self.z_transform_fn = z_transform_fn
 
+    def set_var(self, var):
+        self.var = var
+    
     def logtarget_density(self, parameter, llh_info_dict=dict()):
         """compute the log target density (logprior + llh) given the abclikelihood and prior and return the log target density with the llh_info_dict"""
         logprior = self.logprior(parameter=parameter[0])
