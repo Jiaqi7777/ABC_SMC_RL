@@ -182,7 +182,7 @@ class MCMC_Gibbs(MCMC):
         
         self.reset_stat()
         
-        pbar = tqdm(range(self.num_samples))
+        pbar = tqdm(range(self.num_samples), position=0, leave=True)
         current_para = self.initial_params
         current_para_info_dict = dict()
         data_length = dict()
