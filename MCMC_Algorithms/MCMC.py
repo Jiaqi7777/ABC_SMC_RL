@@ -186,6 +186,9 @@ class MCMC_Gibbs(MCMC):
         current_para = self.initial_params
         current_para_info_dict = dict()
         data_length = dict()
+        
+
+        
         for var in self.variables:
             self.kernel[var].model.set_var(var)
             self.kernel[var].model.set_samples(current_para)
@@ -195,6 +198,11 @@ class MCMC_Gibbs(MCMC):
             self.logdensities[var][0] = current_logtarget_density
             self.proposed_logdensities[var][0] = current_logtarget_density
             data_length[var] = len(self.kernel[var].model.data)
+            if self.warmup_steps > 0:
+                try: 
+                    current_para[var], current_para_info_dict[var], _ = self.warmup(var=var, init_para=current_para[var], init_para_info_dict=current_para_info_dict)
+                except NotImplementedError:
+                    print("Warmup is not implemented for the current kernel. Skip to sampling...")
         
         for i in pbar:
             for var in self.variables:
@@ -220,8 +228,8 @@ class MCMC_Gibbs(MCMC):
             
         return self.samples['para']
     
-    def warmup(self, para_key, init_para, init_para_info_dict=dict()):
-        current_para, current_para_info_dict, info = self.kernel[para_key].warmup(init_para=init_para, 
+    def warmup(self, var, init_para, init_para_info_dict=dict()):
+        current_para, current_para_info_dict, info = self.kernel[var].warmup(init_para=init_para, 
                                                                         init_para_info_dict=init_para_info_dict,
                                                                         iterations=self.warmup_steps, 
                                                                         set_stepsize=True,
