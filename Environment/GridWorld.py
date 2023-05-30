@@ -93,7 +93,7 @@ class GridWorld:
             real_step = False
             if self.stochastic:
                 if multiple:
-                    if np.array(state).shape > np.array(self.starting_position).shape:
+                    if len(np.array(state).shape) > len(np.array(self.starting_position).shape):
                         new_state = [random.choices(self.stochasticP[tuple(s) + (a, )], self.move_prob, k=multiple) for s, a in zip(state, action)]
                     else:
                         new_state = random.choices(self.stochasticP[state + (action, )], self.move_prob, k=multiple)

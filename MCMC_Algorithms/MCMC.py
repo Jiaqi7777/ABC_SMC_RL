@@ -164,7 +164,7 @@ class MCMC_Gibbs(MCMC):
         assert initial_params is not None or params_dim is not None, "Should either specify initial_params or params_dim"
         if initial_params is not None:
             self.initial_params = initial_params
-            self.params_dim = {var: torch.tensor(initial_param).shape for var, initial_param in zip(variables, initial_params)}
+            self.params_dim = {var: torch.tensor(initial_params[var]).shape for var in variables}
         else:
             self.initial_params = torch.zeros(params_dim)
             self.params_dim = params_dim
@@ -186,32 +186,35 @@ class MCMC_Gibbs(MCMC):
         current_para = self.initial_params
         current_para_info_dict = dict()
         data_length = dict()
-        for k, var in enumerate(self.variables):
-            current_logtarget_density, current_para_llh_info_dict  = self.kernel[var].model.logtarget_density(parameter=current_para, llh_info_dict=dict())
+        for var in self.variables:
+            self.kernel[var].model.set_var(var)
+            self.kernel[var].model.set_samples(current_para)
+            current_logtarget_density, current_para_llh_info_dict  = self.kernel[var].model.logtarget_density(parameter=current_para[var], llh_info_dict=dict())
             current_para_info_dict[var] = {"logdensities":current_logtarget_density, "llh_info_dict":current_para_llh_info_dict}
-            self.samples[var][0] = torch.tensor(current_para[k])
+            self.samples[var][0] = torch.tensor(current_para[var])
             self.logdensities[var][0] = current_logtarget_density
             self.proposed_logdensities[var][0] = current_logtarget_density
             data_length[var] = len(self.kernel[var].model.data)
         
         for i in pbar:
-            for k, var in enumerate(self.variables):
+            for var in self.variables:
+                self.kernel[var].model.set_var(var)
                 for j in range(math.ceil(data_length[var] / self.block_size[var])):
                     '''proposed_block_z: block_size x M_Z x 2'''
                     indices = [j * self.block_size[var], min((j + 1) * self.block_size[var], data_length[var])]
-                    accept_prob, proposed_para, proposed_para_info_dict = self.kernel[var].propose_accept(current_para=current_para, 
+                    accept_prob, proposed_para, proposed_para_info_dict = self.kernel[var].propose_accept(current_para=current_para[var], 
                                                                 indices=range(indices[0], indices[1]), current_para_info_dict=current_para_info_dict[var])
                         
                     if np.random.uniform(0, 1) < accept_prob:
-                        current_para[k] = proposed_para
+                        current_para[var] = proposed_para
                         current_para_info_dict[var] = proposed_para_info_dict
                         self.accepted[var] += 1
                         
-                self.samples[var][i+1] = torch.tensor(current_para[k])
+                self.samples[var][i+1] = torch.tensor(current_para[var])
                 self.logdensities[var][i+1] = current_para_info_dict[var]["logdensities"]
                 self.proposed_logdensities['z'][i+1] = proposed_para_info_dict["logdensities"]
                 self.accept_prob[var][i+1] = accept_prob
-            
+                self.kernel[var].model.set_samples(current_para)
             
             pbar.set_description("Acceptance probability {}".format(np.round(self.accepted['para']/(i+1), 2)))
             
@@ -250,7 +253,7 @@ def MCMC_update(obs, posterior_samples, model, env):
         z_sample = generate_z(env=env, obs=obs._buffers)
         r_hat = partial(generate_samples_with_z, model=model, obs=obs._buffers, batch_indices=batch_indices)
         z_transform_func = partial(generate_z, env=env, obs=obs._buffers)
-        llh_transform_grad_fn = lambda parameter:  tabular_indicator_stochastic(para=[parameter[0].reshape(env.n_cell + (env.action_space.n, )), z_sample], model=model, obs=obs._buffers)#stochastic
+        llh_transform_grad_fn = lambda parameter:  tabular_indicator_stochastic(para={'para': parameter['para'].reshape(env.n_cell + (env.action_space.n, )), 'z': parameter['z']}, model=model, obs=obs._buffers)#stochastic
         Model = StochasticSModel(prior=prior, abclikelihood=abclikelihood, data=data, z_transform_fn=z_transform_func, llh_transform_fn=r_hat, llh_transform_grad_fn=llh_transform_grad_fn)
 
     else:
@@ -263,7 +266,7 @@ def MCMC_update(obs, posterior_samples, model, env):
         current_logtarget_density, _ = Model.logtarget_density(parameter=parameter, llh_info_dict=dict())
         return current_logtarget_density
     if STOCHASTIC:
-        kernel = HMC_Z(model=Model, stepsize=STEPSIZE, use_autograd=USE_AUTOGRAD, traj_len=0.1)
+        kernel = HMC(model=Model, stepsize=STEPSIZE, use_autograd=USE_AUTOGRAD, traj_len=0.1)
         z_kernel = Z(model=Model)
     else:
         # hessian = torch.autograd.functional.hessian(fn, posterior_samples[0].reshape(-1)) + 1e-6 * torch.eye(len(posterior_samples[0]).reshape(-1))
@@ -286,7 +289,7 @@ def MCMC_update(obs, posterior_samples, model, env):
 
     if kernel.original is True:
         if STOCHASTIC:
-            mcmc = MCMC_Gibbs(variables=['para', 'z'], kernel_functions={'para': kernel, 'z': z_kernel}, num_samples=training_steps, initial_params=[posterior_samples[-1].reshape(-1), z_sample], warmup_steps=np.int64(np.floor(training_steps*WARMUP_RATIO)), warup_settings=dict(target_prob=0.7, auto_init_stepsize=True))
+            mcmc = MCMC_Gibbs(variables=['para', 'z'], kernel_functions={'para': kernel, 'z': z_kernel}, num_samples=training_steps, initial_params={'para': posterior_samples[-1].reshape(-1), 'z': z_sample}, warmup_steps=np.int64(np.floor(training_steps*WARMUP_RATIO)), warup_settings=dict(target_prob=0.7, auto_init_stepsize=True))
         else:
             mcmc = MCMC(num_samples=training_steps, kernel=kernel, initial_params=posterior_samples[-1].reshape(-1), warmup_steps=np.int64(np.floor(training_steps*WARMUP_RATIO)), warup_settings=dict(target_prob=0.7, auto_init_stepsize=True))
         posterior_samples = mcmc.run().reshape((-1, ) + env.n_cell + (env.action_space.n, ))
@@ -474,8 +477,8 @@ if __name__ == '__main__':
         experiment_code = 1
         file_path = f"../Results/E{experiment_code}/T{training_steps}_Sto{STOCHASTIC}_{time}.json"
         error_all = []
-        epsilon_lst = [10, 1, 1e-1, 1e-2, 1e-3, 1e-4]
-        data_percentage_lst = np.linspace(0.1, 1, 10)
+        epsilon_lst = [10, 1, 1e-1, 1e-2, 1e-3, 1e-4][2:3]
+        data_percentage_lst = np.linspace(0.1, 1, 10)[-1:]
         for repeat in range(REPEAT_EXPERIMENT):
             error_all_epsilon = []
             for EPSILON in epsilon_lst:

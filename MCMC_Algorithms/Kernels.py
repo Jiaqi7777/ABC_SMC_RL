@@ -35,7 +35,7 @@ class Kernel:
     def warmup(self, *args, **kwargs):
         raise NotImplementedError
     
-    def gradient(self, parameter, info_dict=dict(), return_logtarget_density=True, llh=False):
+    def gradient(self, parameter, info_dict=dict(), return_logtarget_density=True):
         """compute the gradient of the target density with respect to the parameter, with an option to return the logtarget density
         parameter: torch.tensor
             - parameter for which the gradient is computed
@@ -61,17 +61,11 @@ class Kernel:
             if self.use_autograd:
                 logtarget_density, gradient, llh_info_dict = self.model.logtarget_auto_gradient(parameter=parameter) #llh_info_dict must be none to compute the gradient correctly
             else:
-                if llh:
-                    gradient, llh_grad_info_dict = self.model.llh_gradient(parameter=parameter, llh_info_dict=llh_info_dict)
-                else:
-                    gradient, llh_grad_info_dict = self.model.logtarget_gradient(parameter=parameter, llh_info_dict=llh_info_dict)
+                gradient, llh_grad_info_dict = self.model.logtarget_gradient(parameter=parameter, llh_info_dict=llh_info_dict)
 
         if return_logtarget_density is True:
             if logtarget_density is None or llh_info_dict is None:
-                if llh: 
-                    logtarget_density, llh_info_dict = self.model.llh(parameter=parameter, llh_info_dict=llh_info_dict)
-                else:
-                    logtarget_density, llh_info_dict = self.model.logtarget_density(parameter=parameter, llh_info_dict=llh_info_dict)
+                logtarget_density, llh_info_dict = self.model.logtarget_density(parameter=parameter, llh_info_dict=llh_info_dict)
             return gradient, logtarget_density, llh_info_dict, llh_grad_info_dict
         
         return gradient, llh_grad_info_dict
@@ -389,11 +383,11 @@ class HMC(Kernel):
         q_info_dict = {"logdensities":proposed_logtarget_density, "gradient":proposed_gradient, "llh_info_dict":proposed_para_llh_info_dict, "llh_grad_info_dict":proposed_para_llh_grad_info_dict}
         return q, p0, p, q_info_dict
 
-    def propose_accept(self, current_para, current_para_info_dict=dict()):
+    def propose_accept(self, current_para, current_para_info_dict=dict(), indices=None):
         """see RandomWalk"""
-        return self.propose_accept_(current_para=current_para, current_para_info_dict=current_para_info_dict, L=self.L, stepsize=self.stepsize)
+        return self.propose_accept_(current_para=current_para, current_para_info_dict=current_para_info_dict, indices=indices, L=self.L, stepsize=self.stepsize)
 
-    def propose_accept_(self, current_para, L=1, stepsize=0.01, current_para_info_dict=dict()):
+    def propose_accept_(self, current_para, L=1, stepsize=0.01, current_para_info_dict=dict(), indices=None):
         """see RandomWalk"""
         current_gradient, current_logtarget_density, *_ = self.gradient(parameter=current_para, info_dict=current_para_info_dict, return_logtarget_density=True)
 
@@ -697,9 +691,9 @@ class HMC_Z(HMC):
         return q, p0, p, q_info_dict
     
     def propose_accept(self, current_para, indices=None, stepsize=0.01, L=1, current_para_info_dict=None):
-        current_gradient, current_logtarget_density, *_ = self.gradient(parameter=current_para, info_dict=current_para_info_dict, return_logtarget_density=True, llh=True)
+        current_gradient, current_logtarget_density, *_ = self.gradient(parameter=current_para, info_dict=current_para_info_dict, return_logtarget_density=True)
 
-        proposed_para, p0, p, q_info_dict = self.move_(current_para=current_para[0], current_gradient=current_gradient, stepsize=self.stepsize, L=self.L, additional_para=current_z)
+        proposed_para, p0, p, q_info_dict = self.move_(current_para=current_para[0], current_gradient=current_gradient, stepsize=self.stepsize, L=self.L, additional_para=current_para[-1])
         proposed_logtarget_density = q_info_dict["logdensities"]
         proposed_para_info_dict = q_info_dict
 
@@ -719,22 +713,21 @@ class Z(Kernel):
         return proposed_blocked_z
     
     def propose_accept(self, current_para, indices=None, current_para_info_dict=None):
-        current_para, current_z = current_para
-        current_z_llh_info_dict = current_para_info_dict["llh_info_dict"] if current_para_info_dict.get("llh_info_dict") is not None else dict()
-        proposed_blocked_z = self.move_(indices=indices)
-        proposed_z = current_z.copy()
-        proposed_z[slice(None), indices] = proposed_blocked_z
+        current_para_llh_info_dict = current_para_info_dict["llh_info_dict"] if current_para_info_dict.get("llh_info_dict") is not None else dict()
+        proposed_blocked_para = self.move_(indices=indices)
+        proposed_para = current_para.copy()
+        proposed_para[slice(None), indices] = proposed_blocked_para
         if current_para_info_dict.get("logdensities") is not None:
             current_llh = current_para_info_dict["logdensities"]
         else:
-            current_llh, _ = self.model.llh(parameter=[current_para, current_z], llh_info_dict=current_z_llh_info_dict)
+            current_llh, _ = self.model.llh(parameter=current_para, llh_info_dict=current_para_llh_info_dict)
 
-        proposed_llh, proposed_para_llh_info_dict = self.model.llh(parameter=[current_para, proposed_z], llh_info_dict=dict())
+        proposed_llh, proposed_para_llh_info_dict = self.model.llh(parameter=proposed_para, llh_info_dict=dict())
         accept_prob = np.exp(torch_max_0(proposed_llh - current_llh))
 
-        proposed_z_info_dict = {"llh_info_dict": proposed_para_llh_info_dict, "logdensities": proposed_llh}
+        proposed_para_info_dict = {"llh_info_dict": proposed_para_llh_info_dict, "logdensities": proposed_llh}
 
-        return accept_prob, proposed_z, proposed_z_info_dict
+        return accept_prob, proposed_para, proposed_para_info_dict
 
 # class AM(Kernel):
 #     def __init__(self, model=None, stepsize=0.1, prior=Prior(sigma=PRIOR_SIGMA), likelihood=ABCLikelihood(epsilon=EPSILON), tractability=False, sd=1, am_epsilon=1e-5):

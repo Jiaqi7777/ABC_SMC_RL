@@ -26,22 +26,23 @@ def generate_z(indices=slice(None), obs=None, env=None):
 
 def generate_samples_with_z(para, model, obs, batch_indices=None, buffer_size=BUFFER_SIZE, batch_training=BATCH_TRAINING):
     '''
-    para is [para, z]'''
+    para is {'para': para, 'z': z]'''
     if not batch_training:
         batch_indices = range(min(len(obs['state0']), buffer_size))
     
     s0 = np.array(obs['state0'])[-buffer_size:][batch_indices]
     a = np.array(obs['action'])[-buffer_size:][batch_indices]
 
-    para, s1_lst = para
-    para = para.reshape(model.state_size + (model.action_size, ))
+    para_ = para['para']
+    s1_lst = para['z']
+    para_ = para_.reshape(model.state_size + (model.action_size, ))
     # else:
     #     s1_lst = np.swapaxes(np.array(obs['state1'])[-buffer_size:][batch_indices], 0, 1)
     dones = torch.tensor(np.array(obs['done'])[-buffer_size:][batch_indices].astype(int))
     s1_value = 0
     for s1 in s1_lst:
-        s1_value += model.v_value(para, s1.T).values
-    return model.q_value(para, s0.T, a) - torch.where(dones == 1, torch.zeros(len(s0)), model.gamma * s1_value / M_Z)
+        s1_value += model.v_value(para_, s1.T).values
+    return model.q_value(para_, s0.T, a) - torch.where(dones == 1, torch.zeros(len(s0)), model.gamma * s1_value / M_Z)
 
 def tabular_indicator_deterministic(para, model, obs):
     s0 = obs['state0']
@@ -57,17 +58,18 @@ def tabular_indicator_deterministic(para, model, obs):
     return torch.tensor(Indicator, dtype=torch.float32).reshape((len(a), -1))
 
 def tabular_indicator_stochastic(para, model, obs):
-    para, s1_lst = para
+    para_ = para['para']
+    s1_lst = para['z']
     s0 = obs['state0']
     a = obs['action']
     # s1_lst = np.swapaxes(np.array(env.step(action=a, state=s0, multiple=M_Z)[0]), 0, 1)
     done = np.array(obs['done'])
     s01, s02 = np.array(s0).T
-    Indicator = np.zeros(shape=(len(a), ) + para.shape) #TxTheta
+    Indicator = np.zeros(shape=(len(a), ) + para_.shape) #TxTheta
     Indicator[range(len(a)), s01, s02, a] = 1.
     for s1 in s1_lst:
         s11, s12 = np.array(s1)[done == False].T
-        a_prime = np.argmax(para[s11, s12], axis=-1)
+        a_prime = np.argmax(para_[s11, s12], axis=-1)
         Indicator[range(len(a_prime)), s11, s12, a_prime] -= model.gamma / M_Z
     # for i in range(len(s0)):
     #     for s1 in s1_lst:
@@ -248,11 +250,6 @@ class DeterministicSRModel():
         llh, llh_info_dict = self.llh(parameter=parameter, llh_info_dict=llh_info_dict)
         return logprior + llh, llh_info_dict
     
-    def llh_gradient(self, parameter, llh_info_dict=dict()):
-        """compute the gradient of the llh with respect to the parameter and return the gradient, using the explicit derivation of the gradient"""
-        llh_grad, llh_grad_info = self.abclikelihood.llh_gradient(data=self.data, parameter=parameter, llh_info_dict=llh_info_dict, llh_transform_fn=self.llh_transform_fn, llh_transform_grad_fn=self.llh_transform_grad_fn)
-        return llh_grad, llh_grad_info
-    
     def logtarget_gradient(self, parameter, llh_info_dict=dict()):
         """compute the gradient of the log target density with respect to the parameter and return the gradient, using the explicit derivation of the gradient"""
         logprior_grad = self.prior.logprior_gradient(parameter=parameter)
@@ -321,29 +318,60 @@ class StochasticSModel(DeterministicSRModel):
     def __init__(self, prior, abclikelihood, data, z_transform_fn=None, llh_transform_fn=None, llh_transform_grad_fn=None, llh_transform_hessian_fn=None, *args):
         super(StochasticSModel, self).__init__(prior, abclikelihood, data, llh_transform_fn=llh_transform_fn, llh_transform_grad_fn=llh_transform_grad_fn, llh_transform_hessian_fn=llh_transform_hessian_fn, *args)
         self.z_transform_fn = z_transform_fn
+        self.var = None
 
     def set_var(self, var):
         self.var = var
+        
+    def set_samples(self, samples):
+        '''samples: dict'''
+        self.samples = samples
+        
+    def llh(self, parameter, llh_info_dict=dict()):
+        """compute the loglikelihood given the abclikelihood and return the loglikelihood with the llh_info_dict"""
+        if isinstance(parameter, dict):
+            samples = parameter
+        else:
+            samples = self.samples.copy()
+            if self.var is not None:
+                samples[self.var] = parameter
+        llh, llh_info_dict = self.abclikelihood.llh(data=self.data, parameter=samples, llh_info_dict=llh_info_dict, llh_transform_fn=self.llh_transform_fn)
+        return llh, llh_info_dict
     
     def logtarget_density(self, parameter, llh_info_dict=dict()):
         """compute the log target density (logprior + llh) given the abclikelihood and prior and return the log target density with the llh_info_dict"""
-        logprior = self.logprior(parameter=parameter[0])
-        llh, llh_info_dict = self.llh(parameter=parameter, llh_info_dict=llh_info_dict)
+        samples = self.samples.copy()
+        if self.var is not None:
+            samples[self.var] = parameter
+        if self.var == 'z':
+            logprior = 0 
+        else:
+            logprior = self.logprior(parameter=parameter)
+        llh, llh_info_dict = self.llh(parameter=samples, llh_info_dict=llh_info_dict)
         return logprior + llh, llh_info_dict
     
     def logtarget_gradient(self, parameter, llh_info_dict=dict()):
         """compute the gradient of the log target density with respect to the parameter and return the gradient, using the explicit derivation of the gradient"""
-        logprior_grad = self.prior.logprior_gradient(parameter=parameter[0])
-        llh_grad, llh_grad_info = self.abclikelihood.llh_gradient(data=self.data, parameter=parameter, llh_info_dict=llh_info_dict, llh_transform_fn=self.llh_transform_fn, llh_transform_grad_fn=self.llh_transform_grad_fn)
+        samples = self.samples.copy()
+        if self.var is not None:
+            samples[self.var] = parameter
+        if self.var == 'z':
+            logprior_grad = 0 
+        else:
+            logprior_grad = self.prior.logprior_gradient(parameter=parameter)
+        llh_grad, llh_grad_info = self.abclikelihood.llh_gradient(data=self.data, parameter=samples, llh_info_dict=llh_info_dict, llh_transform_fn=self.llh_transform_fn, llh_transform_grad_fn=self.llh_transform_grad_fn)
         return logprior_grad + llh_grad, llh_grad_info
     
     def logtarget_auto_gradient(self, parameter):
-        parameter_ = parameter[0].clone()
-        parameter_.requires_grad = True
-        logtarget_density, llh_info_dict = self.logtarget_density(parameter=[parameter_, parameter[1]], llh_info_dict=dict()) # must use the llh_transform_fn to compute the density
+        parameter = parameter.clone()
+        parameter.requires_grad = True
+        samples = self.samples.copy()
+        if self.var is not None:
+            samples[self.var] = parameter
+        logtarget_density, llh_info_dict = self.logtarget_density(parameter=samples, llh_info_dict=dict()) # must use the llh_transform_fn to compute the density
         logtarget_density.backward()
-        gradient = parameter_.grad.clone()
-        parameter_.grad.zero_()
-        parameter_.requires_grad = False
+        gradient = parameter.grad.clone()
+        parameter.grad.zero_()
+        parameter.requires_grad = False
         logtarget_density = logtarget_density.detach()
         return logtarget_density, gradient, llh_info_dict
