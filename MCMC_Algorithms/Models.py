@@ -56,7 +56,7 @@ def tabular_indicator_deterministic(para, model, obs):
     Indicator[range(len(a_prime)), s11, s12, a_prime] -= model.gamma
     return torch.tensor(Indicator, dtype=torch.float32).reshape((len(a), -1))
 
-def tabular_indicator_stochastic(para, model, obs, env):
+def tabular_indicator_stochastic(para, model, obs):
     para, s1_lst = para
     s0 = obs['state0']
     a = obs['action']
@@ -69,7 +69,11 @@ def tabular_indicator_stochastic(para, model, obs, env):
         s11, s12 = np.array(s1)[done == False].T
         a_prime = np.argmax(para[s11, s12], axis=-1)
         Indicator[range(len(a_prime)), s11, s12, a_prime] -= model.gamma / M_Z
-    return torch.tensor(Indicator, dtype=torch.float32).reshape((len(a),-1))
+    # for i in range(len(s0)):
+    #     for s1 in s1_lst:
+    #         a_prime = np.argmax(s1[i][0], s1[i][1])
+    #         Indicator[i, s1[i][0], s1[i][1], a_prime] -= model.gamma / M_Z
+    return torch.tensor(Indicator, dtype=torch.float32).reshape((len(a), -1))
 
 class IsotropicGaussianPrior:
     def __init__(self, sd=1., mean=0.):
@@ -168,7 +172,7 @@ class GaussianABCLikelihood():
         mean = self.compute_mean(parameter=parameter, mean_fn=mean_fn, llh_info_dict=llh_info_dict)
         mean_jacobian = mean_jacobian_fn(parameter=parameter)
         
-        gradient = 1. / (self.epsilon**2) *  torch.mv(torch.t(mean_jacobian),( - mean))
+        gradient = 1. / (self.epsilon**2) *  torch.mv(torch.t(mean_jacobian), (data - mean))
         return gradient, {"mean_jacobian":mean_jacobian}
     
     def llh_hessian(self, parameter, llh_transform_grad_fn=None, llh_transform_hessian_fn=None, llh_grad_info_dict=dict(), **kwargs):
@@ -318,15 +322,6 @@ class StochasticSModel(DeterministicSRModel):
         super(StochasticSModel, self).__init__(prior, abclikelihood, data, llh_transform_fn=llh_transform_fn, llh_transform_grad_fn=llh_transform_grad_fn, llh_transform_hessian_fn=llh_transform_hessian_fn, *args)
         self.z_transform_fn = z_transform_fn
 
-    def llh(self, parameter, llh_info_dict=dict()):
-        """compute the loglikelihood given the abclikelihood and return the loglikelihood with the llh_info_dict"""
-        """
-        parameter: dictionary
-            - this include both the model parameters and the z value 
-        """
-        llh, llh_info_dict = self.abclikelihood.llh(data=self.data, parameter=parameter, llh_info_dict=llh_info_dict, llh_transform_fn=self.llh_transform_fn)
-        return llh, llh_info_dict
-
     def logtarget_density(self, parameter, llh_info_dict=dict()):
         """compute the log target density (logprior + llh) given the abclikelihood and prior and return the log target density with the llh_info_dict"""
         logprior = self.logprior(parameter=parameter[0])
@@ -338,3 +333,14 @@ class StochasticSModel(DeterministicSRModel):
         logprior_grad = self.prior.logprior_gradient(parameter=parameter[0])
         llh_grad, llh_grad_info = self.abclikelihood.llh_gradient(data=self.data, parameter=parameter, llh_info_dict=llh_info_dict, llh_transform_fn=self.llh_transform_fn, llh_transform_grad_fn=self.llh_transform_grad_fn)
         return logprior_grad + llh_grad, llh_grad_info
+    
+    def logtarget_auto_gradient(self, parameter):
+        parameter_ = parameter[0].clone()
+        parameter_.requires_grad = True
+        logtarget_density, llh_info_dict = self.logtarget_density(parameter=[parameter_, parameter[1]], llh_info_dict=dict()) # must use the llh_transform_fn to compute the density
+        logtarget_density.backward()
+        gradient = parameter_.grad.clone()
+        parameter_.grad.zero_()
+        parameter_.requires_grad = False
+        logtarget_density = logtarget_density.detach()
+        return logtarget_density, gradient, llh_info_dict

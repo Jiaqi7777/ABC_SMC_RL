@@ -65,7 +65,7 @@ class Kernel:
                     gradient, llh_grad_info_dict = self.model.llh_gradient(parameter=parameter, llh_info_dict=llh_info_dict)
                 else:
                     gradient, llh_grad_info_dict = self.model.logtarget_gradient(parameter=parameter, llh_info_dict=llh_info_dict)
-        
+
         if return_logtarget_density is True:
             if logtarget_density is None or llh_info_dict is None:
                 if llh: 
@@ -497,8 +497,10 @@ class HMC(Kernel):
                                                                             current_para_info_dict=current_para_info_dict,
                                                                             L=L,
                                                                             stepsize=eps)
+                print(i)
             except ValueError: #parameter diverge
                 accept_prob = torch.tensor(0.)
+                print("hi")
 
             if np.random.uniform(0,1) < accept_prob:
                 current_para = proposed_para
@@ -696,15 +698,9 @@ class HMC_Z(HMC):
         return q, p0, p, q_info_dict
     
     def propose_accept(self, current_para, indices=None, stepsize=0.01, L=1, current_para_info_dict=None):
-        # current_gradient, current_logtarget_density, *_ = self.gradient(parameter=[current_para, current_z], return_logtarget_density=True, llh=True)
+        current_gradient, current_logtarget_density, *_ = self.gradient(parameter=current_para, info_dict=current_para_info_dict, return_logtarget_density=True, llh=True)
 
-        # proposed_para, p0, p, q_info_dict = self.move_(current_para=current_para, current_gradient=current_gradient, stepsize=self.stepsize, L=self.L, additional_para=current_z)
-    
-        #
-        current_para, current_z = current_para
-        current_gradient, current_logtarget_density, *_ = self.gradient(parameter=[current_para, current_z], info_dict=current_para_info_dict, return_logtarget_density=True, llh=True)
-
-        proposed_para, p0, p, q_info_dict = self.move_(current_para=current_para, current_gradient=current_gradient, stepsize=self.stepsize, L=self.L, additional_para=current_z)
+        proposed_para, p0, p, q_info_dict = self.move_(current_para=current_para[0], current_gradient=current_gradient, stepsize=self.stepsize, L=self.L, additional_para=current_z)
         proposed_logtarget_density = q_info_dict["logdensities"]
         proposed_para_info_dict = q_info_dict
 

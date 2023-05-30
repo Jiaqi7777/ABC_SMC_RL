@@ -236,7 +236,7 @@ class MCMC_Gibbs(MCMC):
     
 #MCMC
 def MCMC_update(obs, posterior_samples, model, env):
-    global STEPSIZE
+    global STEPSIZE, Model
     if BATCH_TRAINING:
         batch_indices = random.sample(range(min(len(obs._buffers['state0']), BUFFER_SIZE)), k=min(BATCH_SIZE, len(obs._buffers['state0']))) #TODO: what is this?
     else:
@@ -244,13 +244,13 @@ def MCMC_update(obs, posterior_samples, model, env):
     
     prior = IsotropicGaussianPrior(sd=PRIOR_SIGMA)
     abclikelihood = GaussianABCLikelihood(epsilon=EPSILON)
-    data = torch.tensor(obs._buffers["rewards"])[-BUFFER_SIZE:][batch_indices]
+    data = torch.tensor(obs._buffers["rewards"], dtype=torch.float32)[-BUFFER_SIZE:][batch_indices]
     if STOCHASTIC:
         '''Stochastic'''
         z_sample = generate_z(env=env, obs=obs._buffers)
         r_hat = partial(generate_samples_with_z, model=model, obs=obs._buffers, batch_indices=batch_indices)
         z_transform_func = partial(generate_z, env=env, obs=obs._buffers)
-        llh_transform_grad_fn = lambda parameter:  tabular_indicator_stochastic(para=[parameter[0].reshape(env.n_cell + (env.action_space.n, )), z_sample], model=model, obs=obs._buffers, env=env)#stochastic
+        llh_transform_grad_fn = lambda parameter:  tabular_indicator_stochastic(para=[parameter[0].reshape(env.n_cell + (env.action_space.n, )), z_sample], model=model, obs=obs._buffers)#stochastic
         Model = StochasticSModel(prior=prior, abclikelihood=abclikelihood, data=data, z_transform_fn=z_transform_func, llh_transform_fn=r_hat, llh_transform_grad_fn=llh_transform_grad_fn)
 
     else:
@@ -263,7 +263,7 @@ def MCMC_update(obs, posterior_samples, model, env):
         current_logtarget_density, _ = Model.logtarget_density(parameter=parameter, llh_info_dict=dict())
         return current_logtarget_density
     if STOCHASTIC:
-        kernel = HMC_Z(model=Model, stepsize=STEPSIZE, use_autograd=False)
+        kernel = HMC_Z(model=Model, stepsize=STEPSIZE, use_autograd=USE_AUTOGRAD, traj_len=0.1)
         z_kernel = Z(model=Model)
     else:
         # hessian = torch.autograd.functional.hessian(fn, posterior_samples[0].reshape(-1)) + 1e-6 * torch.eye(len(posterior_samples[0]).reshape(-1))
@@ -272,15 +272,15 @@ def MCMC_update(obs, posterior_samples, model, env):
         #kernel = pCN(model=Model, stepsize=STEPSIZE)
         #kernel = MALA(model=Model, stepsize=STEPSIZE, precondition_matrix=None)
         #kernel = MALA(model=Model, stepsize=STEPSIZE, precondition_matrix=-torch.linalg.inv(hessian))
-        #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=False)
-        #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=False, precondition_matrix=-torch.linalg.inv(hessian))
-        kernel = HMC_pyro(model=Model, stepsize=STEPSIZE, full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB, num_steps=NUM_STEPS)
-        # kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=False)
-        # kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=False, precondition_matrix=-torch.linalg.inv(hessian), traj_len=None)
-        # kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=True, precondition_matrix=-torch.linalg.inv(hessian), traj_len=None)
-        #kernel = mMALA(model=Model, stepsize=STEPSIZE, use_autograd=False, use_autohess=False)
-        #kernel = mMALA(model=Model, stepsize=STEPSIZE, use_autograd=True, use_autohess=True)
-        #kernel = mHMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=False, use_autohess=False, traj_len=None, fp_iterations=50)
+        #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=USE_AUTOGRAD)
+        #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=USE_AUTOGRAD, precondition_matrix=-torch.linalg.inv(hessian))
+        # kernel = HMC_pyro(model=Model, stepsize=STEPSIZE, full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB, num_steps=NUM_STEPS)
+        kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=USE_AUTOGRAD)
+        # kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=USE_AUTOGRAD, precondition_matrix=-torch.linalg.inv(hessian), traj_len=None)
+        # kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=USE_AUTOGRAD, precondition_matrix=-torch.linalg.inv(hessian), traj_len=None)
+        #kernel = mMALA(model=Model, stepsize=STEPSIZE, use_autograd=USE_AUTOGRAD, use_autohess=False)
+        #kernel = mMALA(model=Model, stepsize=STEPSIZE, use_autograd=USE_AUTOGRAD, use_autohess=True)
+        #kernel = mHMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=USE_AUTOGRAD, use_autohess=False, traj_len=None, fp_iterations=50)
     accept_probs = None
     STEPSIZE *= DECREASING_FACTOR
 
@@ -303,7 +303,7 @@ def MCMC_update(obs, posterior_samples, model, env):
         posterior_samples = mcmc.run().reshape((-1, ) + env.n_cell + (env.action_space.n, ))
         return posterior_samples, accept_probs
     
-def display_results(posterior_samples, model, accept_probs):
+def display_results(posterior_samples, model, accept_probs, logdensities, proposed_logdensities):
     model.plot_policy(paras=posterior_samples.numpy(), title=f'policy_T{training_steps}_{time}', additional_info = env.R, save=save, show=show)
     # model.plot_value(paras=posterior_samples.numpy(), title=f'value_T{training_steps}_{time}')
     plt.imshow(torch.round(torch.max(torch.mean(posterior_samples, 0), -1).values, decimals=2))
@@ -326,18 +326,20 @@ def display_results(posterior_samples, model, accept_probs):
         plt.show()
 
     # if accept_probs is not None:
-    #     fig, ax = plt.subplots(1,1,sharex=True)
+        
+    #     fig, ax = plt.subplots(len(logdensities.keys()), 2, sharex=True)
+    #     for i, var in enumerate(logdensities.keys()):
 
-    #     ax.plot(proposed_logdensities.numpy(), label="proposed samples")
-    #     ax.plot(logdensities.numpy(), label="accepted samples")
-    #     ax.set_xlabel("samples")
-    #     ax.set_ylabel("log density")
+    #         ax[i, 0].plot(proposed_logdensities[var].numpy(), label="proposed samples")
+    #         ax[i, 0].plot(logdensities[var].numpy(), label="accepted samples")
+    #         ax[i, 0].set_xlabel(f"{var} samples")
+    #         ax[i, 0].set_ylabel(f"log density of {var}")
 
-    #     ax2 = ax.twinx()
-    #     ax2.plot(accept_probs.numpy(), label="log acceptance probability", c="tab:green")
-    #     ax2.set_ylabel("log acceptance probability")
-
-    #     fig.legend()
+    #         ax[i, 1].plot(accept_probs[var].numpy(), label="log acceptance probability", c="tab:green")
+    #         ax[i, 1].set_ylabel("log acceptance probability")
+    #     for i in range(len(logdensities.keys())):
+    #         handles, labels = ax[-1, i].get_legend_handles_labels()
+    #         ax[0, i].legend(handles, labels, bbox_to_anchor=(0.5, 1.5), loc='upper right')
     #     fig.tight_layout()
 
     #     if show:
@@ -371,6 +373,7 @@ if __name__ == '__main__':
     parser.add_argument('--Env', default=ENV_NAME)
     parser.add_argument('--sto', default=False)
     parser.add_argument('--online', default=False)
+    parser.add_argument('--auto', default=False)
     args = parser.parse_args()
     print(args)
     time = args.time
@@ -387,6 +390,7 @@ if __name__ == '__main__':
     env_name = args.Env
     STOCHASTIC = args.sto
     ONLINE_LEARNING = args.online
+    USE_AUTOGRAD = args.auto
     
 
     N_PARTICLE = 10
@@ -401,7 +405,7 @@ if __name__ == '__main__':
     if env_name == 'Maze':
         env = Maze()
     dim = env.observation_space.n * env.action_space.n
-    model = Tabular(env=env, n_particle=N_PARTICLE, prior='normal')
+    model = Tabular(env=env, n_particle=N_PARTICLE, prior='normal', gamma=GAMMA)
     
     S = []
     if len(env.n_cell) == 1:
@@ -420,7 +424,7 @@ if __name__ == '__main__':
         r_all_iter = []
         for repeat in range(REPEAT_EXPERIMENT):
             STEPSIZE = INITIAL_STEPSIZE
-            model = Tabular(env=env, n_particle=N_PARTICLE, prior='normal')
+            model = Tabular(env=env, n_particle=N_PARTICLE, prior='normal', gamma=GAMMA)
             r_all_epi = []
             obs = Buffer(['state0', 'state1', 'action', 'rewards', 'done'])
             s0, _ = env.reset()
@@ -446,9 +450,10 @@ if __name__ == '__main__':
                     s0 = s1
                     if done or ( h + 1)  % FROZEN_T == 0:
                         #MCMC
-                        posterior_samples, accept_probs = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env)[:2]
+                        # posterior_samples, accept_probs = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env)[:2]
+                        posterior_samples, accept_probs, logdensities, proposed_logdensities = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env)
                         model.set_parameter(posterior_samples)
-                        display_results(posterior_samples=posterior_samples, model=model, accept_probs=accept_probs)
+                        display_results(posterior_samples=posterior_samples, model=model, accept_probs=accept_probs, logdensities=logdensities, proposed_logdensities=proposed_logdensities)
 
                     if done:
                         print("done with", h + 1, 'steps')
@@ -476,9 +481,10 @@ if __name__ == '__main__':
                 env.uniform_policy(data_percentage=data_percentage)
                 obs = env.uniform_obs
                 posterior_samples = model.get_parameter()
-                posterior_samples, accept_probs = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env)[:2]
+                # posterior_samples, accept_probs = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env)[:2]
+                posterior_samples, accept_probs, logdensities, proposed_logdensities = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env)
                 model.set_parameter(posterior_samples)
-                display_results(posterior_samples=posterior_samples, model=model, accept_probs=accept_probs)
+                display_results(posterior_samples=posterior_samples, model=model, accept_probs=accept_probs, logdensities=logdensities, proposed_logdensities=proposed_logdensities)
                 error_all_percentage.append(mean_squared_error(Q_star.flatten(), posterior_samples[-1].flatten()))
                 print(error_all_percentage)
             error_all.append(error_all_percentage)
