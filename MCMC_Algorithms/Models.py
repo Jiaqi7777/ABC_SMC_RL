@@ -355,10 +355,10 @@ class StochasticSModel(DeterministicSRModel):
         samples = self.samples.copy()
         if self.var is not None:
             samples[self.var] = parameter
-        if self.var == 'z':
-            logprior_grad = 0 
-        else:
-            logprior_grad = self.prior.logprior_gradient(parameter=parameter)
+        # if self.var == 'z':
+        #     logprior_grad = 0 
+        # else:
+        logprior_grad = self.prior.logprior_gradient(parameter=parameter)
         llh_grad, llh_grad_info = self.abclikelihood.llh_gradient(data=self.data, parameter=samples, llh_info_dict=llh_info_dict, llh_transform_fn=self.llh_transform_fn, llh_transform_grad_fn=self.llh_transform_grad_fn)
         return logprior_grad + llh_grad, llh_grad_info
     
