@@ -729,37 +729,62 @@ class Z(Kernel):
 
         return accept_prob, proposed_para, proposed_para_info_dict
 
-# class AM(Kernel):
-#     def __init__(self, model=None, stepsize=0.1, prior=Prior(sigma=PRIOR_SIGMA), likelihood=ABCLikelihood(epsilon=EPSILON), tractability=False, sd=1, am_epsilon=1e-5):
-#         super().__init__(model, stepsize, prior, likelihood, tractability)
-#         self.sd = sd
-#         self.am_epsilon=am_epsilon
+class AM(Kernel):
+    def __init__(self, model, epsilon=0.1, traj_len=2*np.pi, num_steps=None, stepsize=0.5, use_autograd=True, use_autohess=True, *args, **kwargs):
+        super(AM, self).__init__(model=model, traj_len=traj_len, num_steps=num_steps, stepsize=stepsize, use_autograd=use_autograd, use_autohess=use_autohess, *args, **kwargs)
+        self.stepsize = stepsize
+        self.kwargs = kwargs
+        self.original = True         
+        self.stepsize = stepsize
+        self.am_epsilon = epsilon
+        self.para_history = []
         
-#     def move(self, current_para, para_history):
-#         shape = current_para.shape
-#         # print(current_para)
-#         current_para = current_para.reshape(-1)
-#         if para_history == []:
-#             paras = [current_para]
-#         else:
-#             paras = np.array(para_history).reshape(len(para_history), -1)
-#         current_cov = self.cov(paras)
-#         proposed_para = current_para + np.random.multivariate_normal(current_para, cov=current_cov)
-#         paras[-1] = proposed_para
-#         proposed_cov = self.cov(paras)
-#         move_ratio = stats.multivariate_normal.logpdf(proposed_para, mean=current_para, cov=current_cov) - \
-#                                         stats.multivariate_normal.logpdf(current_para, mean=proposed_para, cov=proposed_cov)
-#         return proposed_para.reshape(shape), move_ratio                                
+    def move(self, current_para):
+        self.para_history.append(current_para)
+        self.covariance_matrix =  self.cov(self.para_history)
+        proposed_para = torch.distributions.multivariate_normal.MultivariateNormal(loc=current_para, covariance_matrix=self.covariance_matrix).sample()
+        return proposed_para
+    
+    def cov(self, para_history):
+        if len(para_history) == 1:
+            return self.stepsize ** 2 * torch.eye(len(para_history[0]))
+        return self.stepsize * torch.cov(torch.vstack(para_history).T) + self.stepsize * self.am_epsilon * torch.eye(len(para_history[0]))
+    
+    def move_ratio(self, current_para, proposed_para):
+        proposed_para_history = self.para_history.copy()
+        proposed_para_history[-1] = proposed_para
+        proposed_cov = self.cov(proposed_para_history)
+        move_ratio = stats.multivariate_normal.logpdf(proposed_para, mean=current_para, cov=self.covariance_matrix) - \
+                                        stats.multivariate_normal.logpdf(current_para, mean=proposed_para, cov=proposed_cov)
+        return move_ratio
         
-#     def cov(self, para_history):
-#         if len(para_history) == 1:
-#             return self.stepsize ** 2 * np.eye(len(para_history[0]))
-#         return self.sd * np.cov(para_history, rowvar=False) + self.sd * self.am_epsilon * np.eye(len(para_history[0]))
+    def propose_accept(self, current_para, current_para_info_dict=dict()):
+        current_para_llh_info_dict = current_para_info_dict["llh_info_dict"] if current_para_info_dict.get("llh_info_dict") is not None else dict()
+        proposed_para = self.move(current_para)
+        if current_para_info_dict.get("logdensities") is not None:
+            current_logtarget_density = current_para_info_dict["logdensities"]
+        else:
+            current_logtarget_density, _ = self.model.logtarget_density(parameter=current_para, llh_info_dict=current_para_llh_info_dict)
         
-#     def accept(self, current_para, obs, samples, batch_indices, para_history):
-#         proposed_para, move_ratio = self.move(current_para, para_history)
-#         proposed_samples = generate_samples(proposed_para, self.model, obs, batch_indices)
-#         current_log_posterior = self.posterior(current_para, obs, samples)
-#         proposed_log_posterior = self.posterior(proposed_para, obs, proposed_samples)
-#         return proposed_log_posterior - current_log_posterior - move_ratio, proposed_para, proposed_samples
-        
+        proposed_logtarget_density, proposed_para_llh_info_dict = self.model.logtarget_density(parameter=proposed_para, llh_info_dict=dict())
+        accept_prob = np.exp(torch_max_0(proposed_logtarget_density - current_logtarget_density - self.move_ratio(current_para=current_para, proposed_para=proposed_para)))
+
+        proposed_para_info_dict = {"llh_info_dict": proposed_para_llh_info_dict, "logdensities": proposed_logtarget_density}
+        return accept_prob, proposed_para, proposed_para_info_dict
+    
+    def warmup(self, init_para, init_para_info_dict=dict(), iterations=10, set_stepsize=True, target_prob=0.7, auto_init_stepsize=True):
+        """perform adapt_stepsize with the optional of using find_reasonable_stepsize
+        init_para: torch.tensor
+            - the initial parameter of the MCMC chain
+        init_para_info_dict: torch.tensor
+            - the info_dict of init_para, see Kernel().gradient and RandomWalk().propose_accept
+        iterations: int
+            - the number of iterations to perform adapt_stepsize
+        set_stepsize: bool
+            - if True, the stepsize of the class is overwritten by the final stepsize found after warmup is completed
+        target_prob: float
+            - the target acceptance probability of the stepsize found in adapt_stepsize
+        auto_init_stepsize: bool
+            - if True, use find_reasonable_stepsize as the initial stepsize for adapt_stepsize, otherwise, use the initial stepsize defined when initialising the class
+        """
+        return self.adapt_stepsize(init_para=init_para, init_para_info_dict=init_para_info_dict, target_prob=target_prob, auto_init_stepsize=auto_init_stepsize, iterations=iterations, set_stepsize=set_stepsize)

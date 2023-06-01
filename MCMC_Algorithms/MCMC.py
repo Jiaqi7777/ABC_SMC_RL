@@ -153,7 +153,7 @@ class MCMC_pyro(MCMC):
     
 class MCMC_Gibbs(MCMC):
     """the class to run Gibbs sampler for z"""
-    def __init__(self, variables, kernel_functions, block_size={'para': 10000, 'z': 5}, num_samples=MCMC_SAMPLE, initial_params=None, params_dim=None, warmup_steps=MCMC_T//5, disable_progbar=MCMC_SHOW_DISABLE, warmup_settings=dict(target_prob=0.7, auto_init_stepsize=True), **kwargs):
+    def __init__(self, variables, kernel_functions, block_size={'para': 10000, 'z': 8}, num_samples=MCMC_SAMPLE, initial_params=None, params_dim=None, warmup_steps=MCMC_T//5, disable_progbar=MCMC_SHOW_DISABLE, warmup_settings=dict(target_prob=0.7, auto_init_stepsize=True), **kwargs):
         """
         kernel_functions: dictionary {'para': para_kernel, 'z': z_kernel}
             - dictionary of a parameter kernel which conditioned on u, z, r, and a z kernel which could generate a block of z given u, and return the likelihood function
@@ -185,9 +185,6 @@ class MCMC_Gibbs(MCMC):
         pbar = tqdm(range(self.num_samples), position=0, leave=True)
         current_para = self.initial_params
         current_para_info_dict = dict()
-        data_length = dict()
-        
-
         
         for var in self.variables:
             self.kernel[var].model.set_var(var)
@@ -197,7 +194,7 @@ class MCMC_Gibbs(MCMC):
             self.samples[var][0] = torch.tensor(current_para[var])
             self.logdensities[var][0] = current_logtarget_density
             self.proposed_logdensities[var][0] = current_logtarget_density
-            data_length[var] = len(self.kernel[var].model.data)
+            
             if self.warmup_steps > 0:
                 try: 
                     current_para[var], current_para_info_dict[var], _ = self.warmup(var=var, init_para=current_para[var], init_para_info_dict=current_para_info_dict)
@@ -207,9 +204,9 @@ class MCMC_Gibbs(MCMC):
         for i in pbar:
             for var in self.variables:
                 self.kernel[var].model.set_var(var)
-                for j in range(math.ceil(data_length[var] / self.block_size[var])):
+                for j in range(math.ceil(self.data_length[var] / self.block_size[var])):
                     '''proposed_block_z: block_size x M_Z x 2'''
-                    indices = [j * self.block_size[var], min((j + 1) * self.block_size[var], data_length[var])]
+                    indices = [j * self.block_size[var], min((j + 1) * self.block_size[var], self.data_length[var])]
                     accept_prob, proposed_para, proposed_para_info_dict = self.kernel[var].propose_accept(current_para=current_para[var], 
                                                                 indices=range(indices[0], indices[1]), current_para_info_dict=current_para_info_dict[var])
                         
@@ -218,14 +215,13 @@ class MCMC_Gibbs(MCMC):
                         current_para_info_dict[var] = proposed_para_info_dict
                         self.accepted[var] += 1
                         
+                    self.accept_prob[var][i+1][j] = accept_prob
                 self.samples[var][i+1] = torch.tensor(current_para[var])
                 self.logdensities[var][i+1] = current_para_info_dict[var]["logdensities"]
                 self.proposed_logdensities['z'][i+1] = proposed_para_info_dict["logdensities"]
-                self.accept_prob[var][i+1] = accept_prob
                 self.kernel[var].model.set_samples(current_para)
             
             pbar.set_description("Acceptance probability {}".format(np.round(self.accepted['para']/(i+1), 2)))
-            
         return self.samples['para']
     
     def warmup(self, var, init_para, init_para_info_dict=dict()):
@@ -238,11 +234,12 @@ class MCMC_Gibbs(MCMC):
         return current_para, current_para_info_dict, info
     
     def reset_stat(self):
+        self.data_length = {var: len(self.kernel[var].model.data) for var in self.variables}
         self.samples = {var: torch.zeros(((self.num_samples+1, ) + tuple(dim))) for var, dim in self.params_dim.items()}
         self.logdensities = {var: torch.zeros(self.num_samples+1) for var in self.params_dim.keys()}
         self.proposed_logdensities = {var: torch.zeros(self.num_samples+1) for var in self.params_dim.keys()}
         self.accepted = {var: 0 for var in self.params_dim.keys()}
-        self.accept_prob = {var: torch.zeros(self.num_samples+1) for var in self.params_dim.keys()}   
+        self.accept_prob = {var: torch.zeros(self.num_samples+1, math.ceil(self.data_length[var] / self.block_size[var])) for var in self.params_dim.keys()}   
 
     
 #MCMC
@@ -286,7 +283,8 @@ def MCMC_update(obs, posterior_samples, model, env):
         #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=USE_AUTOGRAD)
         #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=USE_AUTOGRAD, precondition_matrix=-torch.linalg.inv(hessian))
         # kernel = HMC_pyro(model=Model, stepsize=STEPSIZE, full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB, num_steps=NUM_STEPS)
-        kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=USE_AUTOGRAD)
+        # kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=USE_AUTOGRAD)
+        kernel = AM(model=Model,  stepsize=STEPSIZE)
         # kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=USE_AUTOGRAD, precondition_matrix=-torch.linalg.inv(hessian), traj_len=None)
         # kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=USE_AUTOGRAD, precondition_matrix=-torch.linalg.inv(hessian), traj_len=None)
         #kernel = mMALA(model=Model, stepsize=STEPSIZE, use_autograd=USE_AUTOGRAD, use_autohess=False)
@@ -304,7 +302,7 @@ def MCMC_update(obs, posterior_samples, model, env):
         logdensities = mcmc.get_logdensities()
         proposed_logdensities = mcmc.get_proposed_logdensities()
         accept_probs = mcmc.get_accept_prob()
-        return posterior_samples, accept_probs, logdensities, proposed_logdensities
+        return posterior_samples, accept_probs, logdensities, proposed_logdensities, mcmc
 
     else:
         if STOCHASTIC:
@@ -312,12 +310,13 @@ def MCMC_update(obs, posterior_samples, model, env):
         else:
             mcmc = MCMC_pyro(num_samples=training_steps, kernel=kernel, initial_params=posterior_samples[-1].reshape(-1), warmup_steps=np.int64(np.floor(training_steps*WARMUP_RATIO)), disable_progbar=MCMC_SHOW_DISABLE)
         posterior_samples = mcmc.run().reshape((-1, ) + env.n_cell + (env.action_space.n, ))
-        return posterior_samples, accept_probs
+        return posterior_samples, accept_probs, mcmc
     
 def display_results(posterior_samples, model, accept_probs, logdensities, proposed_logdensities):
-    model.plot_policy(paras=posterior_samples.numpy(), title=f'policy_T{training_steps}_{time}', additional_info = env.R, save=save, show=show)
+    display_indices = 1000
+    model.plot_policy(paras=posterior_samples[-display_indices:].numpy(), title=f'policy_T{training_steps}_{time}', additional_info = env.R, save=save, show=show)
     # model.plot_value(paras=posterior_samples.numpy(), title=f'value_T{training_steps}_{time}')
-    plt.imshow(torch.round(torch.max(torch.mean(posterior_samples, 0), -1).values, decimals=2))
+    plt.imshow(torch.round(torch.max(torch.mean(posterior_samples[-display_indices:], 0), -1).values, decimals=2))
     if show:
         plt.show()
     data_plot = posterior_samples.numpy().reshape(posterior_samples.shape[0], -1)[:, OBSERVE_DATA_START:OBSERVE_DATA_END]#Change the indices of names and Q_star below as well
@@ -497,10 +496,11 @@ if __name__ == '__main__':
                     obs = env.uniform_obs
                     posterior_samples = model.get_parameter()
                     # posterior_samples, accept_probs = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env)[:2]
-                    posterior_samples, accept_probs, logdensities, proposed_logdensities = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env)
+                    posterior_samples, accept_probs, logdensities, proposed_logdensities, mcmc = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env)
                     model.set_parameter(posterior_samples)
                     display_results(posterior_samples=posterior_samples, model=model, accept_probs=accept_probs, logdensities=logdensities, proposed_logdensities=proposed_logdensities)
-                    error_all_percentage.append(mean_squared_error(Q_star.flatten(), posterior_samples[-1].flatten()))
+                    average_over = min(100, len(posterior_samples))
+                    error_all_percentage.append(mean_squared_error(Q_star.flatten(), torch.mean(posterior_samples[-average_over:].reshape(average_over, -1), axis=0)))
                     print(error_all_percentage)
                 error_all_epsilon.append(error_all_percentage)
             error_all.append(error_all_epsilon)
