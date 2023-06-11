@@ -153,7 +153,7 @@ class MCMC_pyro(MCMC):
     
 class MCMC_Gibbs(MCMC):
     """the class to run Gibbs sampler for z"""
-    def __init__(self, variables, kernel_functions, block_size={'para': 10000, 'z': 8}, num_samples=MCMC_SAMPLE, initial_params=None, params_dim=None, warmup_steps=MCMC_T//5, disable_progbar=MCMC_SHOW_DISABLE, warmup_settings=dict(target_prob=0.7, auto_init_stepsize=True), **kwargs):
+    def __init__(self, variables, kernel_functions, block_size={'para': 10000, 'z':1}, num_samples=MCMC_SAMPLE, initial_params=None, params_dim=None, warmup_steps=MCMC_T//5, disable_progbar=MCMC_SHOW_DISABLE, warmup_settings=dict(target_prob=0.7, auto_init_stepsize=True), **kwargs):
         """
         kernel_functions: dictionary {'para': para_kernel, 'z': z_kernel}
             - dictionary of a parameter kernel which conditioned on u, z, r, and a z kernel which could generate a block of z given u, and return the likelihood function
@@ -209,16 +209,20 @@ class MCMC_Gibbs(MCMC):
                     indices = [j * self.block_size[var], min((j + 1) * self.block_size[var], self.data_length[var])]
                     accept_prob, proposed_para, proposed_para_info_dict = self.kernel[var].propose_accept(current_para=current_para[var], 
                                                                 indices=range(indices[0], indices[1]), current_para_info_dict=current_para_info_dict[var])
-                        
+                    # if j==4 and var=='z':
+                    #     print(current_para[var], proposed_para)
+                        # print('accept prob', j, accept_prob)
                     if np.random.uniform(0, 1) < accept_prob:
                         current_para[var] = proposed_para
                         current_para_info_dict[var] = proposed_para_info_dict
                         self.accepted[var] += 1
                         
-                    self.accept_prob[var][i+1][j] = accept_prob
-                self.samples[var][i+1] = torch.tensor(current_para[var])
-                self.logdensities[var][i+1] = current_para_info_dict[var]["logdensities"]
-                self.proposed_logdensities['z'][i+1] = proposed_para_info_dict["logdensities"]
+                    self.accept_prob[var][i][j] = accept_prob
+                    # self.proposed_samples[var][i][j] = torch.tensor(proposed_para)
+                    # self.samples[var][i + 1][j] = torch.tensor(current_para[var])
+                self.samples[var][i + 1] = torch.tensor(current_para[var])
+                self.logdensities[var][i + 1] = current_para_info_dict[var]["logdensities"]
+                self.proposed_logdensities['z'][i + 1] = proposed_para_info_dict["logdensities"]
                 self.kernel[var].model.set_samples(current_para)
             
             pbar.set_description("Acceptance probability {}".format(np.round(self.accepted['para']/(i+1), 2)))
@@ -235,11 +239,13 @@ class MCMC_Gibbs(MCMC):
     
     def reset_stat(self):
         self.data_length = {var: len(self.kernel[var].model.data) for var in self.variables}
-        self.samples = {var: torch.zeros(((self.num_samples+1, ) + tuple(dim))) for var, dim in self.params_dim.items()}
+        self.samples = {var: torch.zeros(((self.num_samples + 1, ) + tuple(dim))) for var, dim in self.params_dim.items()}
+        # self.samples = {var: torch.zeros((self.num_samples + 1, math.ceil(self.data_length[var] / self.block_size[var]), ) + tuple(dim)) for var, dim in self.params_dim.items()}  
         self.logdensities = {var: torch.zeros(self.num_samples+1) for var in self.params_dim.keys()}
         self.proposed_logdensities = {var: torch.zeros(self.num_samples+1) for var in self.params_dim.keys()}
         self.accepted = {var: 0 for var in self.params_dim.keys()}
-        self.accept_prob = {var: torch.zeros(self.num_samples+1, math.ceil(self.data_length[var] / self.block_size[var])) for var in self.params_dim.keys()}   
+        self.accept_prob = {var: torch.zeros(self.num_samples, math.ceil(self.data_length[var] / self.block_size[var])) for var in self.params_dim.keys()}   
+        # self.proposed_samples = {var: torch.zeros((self.num_samples, math.ceil(self.data_length[var] / self.block_size[var]), ) + tuple(dim)) for var, dim in self.params_dim.items()}   
 
     
 #MCMC
@@ -283,8 +289,8 @@ def MCMC_update(obs, posterior_samples, model, env):
         #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=USE_AUTOGRAD)
         #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=USE_AUTOGRAD, precondition_matrix=-torch.linalg.inv(hessian))
         # kernel = HMC_pyro(model=Model, stepsize=STEPSIZE, full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB, num_steps=NUM_STEPS)
-        # kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=USE_AUTOGRAD)
-        kernel = AM(model=Model,  stepsize=STEPSIZE)
+        kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=USE_AUTOGRAD)
+        # kernel = AM(model=Model,  stepsize=STEPSIZE)
         # kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=USE_AUTOGRAD, precondition_matrix=-torch.linalg.inv(hessian), traj_len=None)
         # kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=USE_AUTOGRAD, precondition_matrix=-torch.linalg.inv(hessian), traj_len=None)
         #kernel = mMALA(model=Model, stepsize=STEPSIZE, use_autograd=USE_AUTOGRAD, use_autohess=False)
@@ -484,7 +490,7 @@ if __name__ == '__main__':
         experiment_code = 1
         file_path = f"../Results/E{experiment_code}/T{training_steps}_Sto{STOCHASTIC}_{time}.json"
         error_all = []
-        epsilon_lst = [10, 1, 1e-1, 1e-2, 1e-3, 1e-4][2:3]
+        epsilon_lst = [10, 1, 1e-1, 1e-2, 1e-3, 1e-4][1:2]
         data_percentage_lst = np.linspace(0.1, 1, 10)[-1:]
         for repeat in range(REPEAT_EXPERIMENT):
             error_all_epsilon = []
@@ -515,4 +521,5 @@ if __name__ == '__main__':
                 with open(file_path, "w") as file:
                     file.write(json_data)
                 print(f"Dictionary saved to {file_path}")
-        plot_repeat(error_all, labels=epsilon_lst, label='Epsilon', x=data_percentage_lst, smooth=1, xlabel='data percentage', ylabel='MSE', title='MSE for offline learning vs DP')
+        # plot_repeat(error_all, labels=epsilon_lst, label='Epsilon', x=data_percentage_lst, smooth=1, xlabel='data percentage', ylabel='MSE', title='MSE for offline learning vs DP')
+        plot_block_accpt_prob(mcmc=mcmc, save=True)

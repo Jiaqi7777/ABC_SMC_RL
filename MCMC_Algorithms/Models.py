@@ -41,7 +41,7 @@ def generate_samples_with_z(para, model, obs, batch_indices=None, buffer_size=BU
     dones = torch.tensor(np.array(obs['done'])[-buffer_size:][batch_indices].astype(int))
     s1_value = 0
     for s1 in s1_lst:
-        s1_value += model.v_value(para_, s1.T).values
+        s1_value += model.v_value(para_, s1.T)
     return model.q_value(para_, s0.T, a) - torch.where(dones == 1, torch.zeros(len(s0)), model.gamma * s1_value / M_Z)
 
 def tabular_indicator_deterministic(para, model, obs):
@@ -147,7 +147,7 @@ class GaussianABCLikelihood():
         """see self.llh, where mean_fn is the llh_transform_fn of self.llh"""
         mean = self.compute_mean(parameter=parameter, mean_fn=mean_fn, llh_info_dict=llh_info_dict)
         llh = torch.distributions.normal.Normal(loc=mean, scale=self.epsilon).log_prob(data).sum(axis=-1)
-        return llh, {"mean":mean.detach()}
+        return llh, {"mean": mean.detach()}
     
     def compute_mean(self, parameter=None, mean_fn=None, llh_info_dict=dict()):
         """function to compute the mean of the Gaussian ABC likelihood, see self.llh and self.llh_"""
@@ -205,6 +205,43 @@ class GaussianABCLikelihood():
             - the dimension of the data
         """
         return (self.epsilon ** 2) * torch.eye(data_len)
+    
+class ABCPartialGaussianLikelihood(GaussianABCLikelihood):
+    def __init__(self, *args):
+        super(*args)
+        
+    def llh(self, data, indices=None, parameter=None, llh_info_dict=dict(), llh_transform_fn=None): #standard form
+        """return the log likelihood for the parameter and data given
+        data: torch.tensor
+            - the target of the ABC likelihood
+        parameter: torch.tensor, optional
+            - the parameter for the model, see llh_info_dict
+        llh_info_dict: dict, of the form {"mean":torch.tensor}, optional
+            - an optional dictionary that supplies to the function with the mean of the Gaussian ABC likelihood. If not provided, llh_transform_fn will be used to compute the mean
+        llh_transform_fn: function torch.tensor -> torch.tensor, optional 
+            - a function that transforms the parameter into the mean of the Gaussian ABC likelihood. If the mean is supplied by llh_info_dict, this function is not used.
+        return:
+            - llh: torch.tensor
+                - log likelihood for the parameter and data given
+            - llh_info_dict: dict of the form {"mean": torch.tensor}
+                - mean of the Gaussian ABC likelihood function in a dictionary
+        """
+        return self.llh_(data=data, parameter=parameter, indices=indices, mean_fn=llh_transform_fn, llh_info_dict=llh_info_dict,)
+    
+    def llh_(self, data, parameter=None, mean_fn=None, llh_info_dict=dict()):
+        """see self.llh, where mean_fn is the llh_transform_fn of self.llh"""
+        mean = self.compute_mean(parameter=parameter, mean_fn=mean_fn, llh_info_dict=llh_info_dict)
+        llh = torch.distributions.normal.Normal(loc=mean, scale=self.epsilon).log_prob(data).sum(axis=-1)
+        return llh, {"mean": mean.detach()}
+    
+    def compute_mean(self, parameter=None, mean_fn=None, llh_info_dict=dict()):
+        """function to compute the mean of the Gaussian ABC likelihood, see self.llh and self.llh_"""
+        assert llh_info_dict.get("mean") is not None or mean_fn is not None, "either mean or mean_fn of the form mean_fn(parameter) -> mean should be provided"
+        if llh_info_dict.get("mean") is None:
+            mean = mean_fn(parameter)
+        else:
+            mean = llh_info_dict["mean"]
+        return mean
 
 
 class DeterministicSRModel():
@@ -327,7 +364,7 @@ class StochasticSModel(DeterministicSRModel):
         '''samples: dict'''
         self.samples = samples
         
-    def llh(self, parameter, llh_info_dict=dict()):
+    def llh(self, parameter, llh_info_dict=dict(), indices=None):
         """compute the loglikelihood given the abclikelihood and return the loglikelihood with the llh_info_dict"""
         if isinstance(parameter, dict):
             samples = parameter

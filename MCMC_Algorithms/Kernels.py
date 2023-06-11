@@ -3,10 +3,12 @@ import scipy.stats as stats
 import torch
 from copy import deepcopy
 import pyro
+from collections import Counter
 from tqdm.notebook import tqdm
 '''module import'''
 from parameter import *
 from utils import *
+
 
 class Kernel:
     """the class of all MCMC kernels"""
@@ -646,62 +648,6 @@ class HMC_pyro(Kernel):
         pyro_model = lambda data: self.model.pyro_model(data=data, parameter_len=parameter_len)
         self.pyro_kernel =  pyro.infer.mcmc.HMC(model=pyro_model, step_size=self.stepsize, **self.kwargs)
         return self.pyro_kernel
-
-class HMC_Z(HMC):
-    def __init__(self, model, traj_len=2*np.pi, num_steps=None, stepsize=0.5, use_autograd=True, use_autohess=True, *args, **kwargs):
-        super(HMC_Z, self).__init__(model=model, traj_len=traj_len, num_steps=num_steps, stepsize=stepsize, use_autograd=use_autograd, use_autohess=use_autohess, *args, **kwargs)
-        self.stepsize = stepsize
-        self.kwargs = kwargs
-        self.original = True         
-    
-    def move_(self, current_para, current_gradient, L=1, stepsize=0.01, additional_para=None):
-        """
-        L: int
-            - number of Leapfrog steps
-        return:
-            - q: torch.tensor
-                - the final proposed position
-            - p0: torch.tensor
-                - the initial proposed momentum
-            - p: torch.tensor
-                - the final proposed momentum
-            - q_info_dict: dict
-                - the info dict returned by the log likelihood function at q, see Kernel().gradient
-        """
-        if self.precondition is not None:
-            p0 = torch.distributions.multivariate_normal.MultivariateNormal(loc=torch.zeros(current_para.size()), precision_matrix=self.precondition).sample()
-        else:
-            p0 = torch.normal(mean=torch.zeros(current_para.size()), std=1.)
-
-        p = p0 + stepsize * current_gradient * 0.5
-        q = current_para
-
-        for i in range(L):
-            q_move = torch.mv(self.precondition, p) if self.precondition is not None else p
-            q = q + stepsize * q_move
-            if i != (L-1):
-                gradient, _ = self.gradient(parameter=[q, additional_para], info_dict=dict(), return_logtarget_density=False)
-                p = p + stepsize * gradient
-        proposed_gradient, proposed_logtarget_density, proposed_para_llh_info_dict, proposed_para_llh_grad_info_dict = self.gradient(parameter=[q, additional_para], info_dict=dict(), return_logtarget_density=True)
-        
-        p = p + stepsize * proposed_gradient * 0.5
-        p = -p
-        
-        q_info_dict = {"logdensities":proposed_logtarget_density, "gradient":proposed_gradient, "llh_info_dict":proposed_para_llh_info_dict, "llh_grad_info_dict":proposed_para_llh_grad_info_dict}
-        return q, p0, p, q_info_dict
-    
-    def propose_accept(self, current_para, indices=None, stepsize=0.01, L=1, current_para_info_dict=None):
-        current_gradient, current_logtarget_density, *_ = self.gradient(parameter=current_para, info_dict=current_para_info_dict, return_logtarget_density=True)
-
-        proposed_para, p0, p, q_info_dict = self.move_(current_para=current_para[0], current_gradient=current_gradient, stepsize=self.stepsize, L=self.L, additional_para=current_para[-1])
-        proposed_logtarget_density = q_info_dict["logdensities"]
-        proposed_para_info_dict = q_info_dict
-
-        H_old = self.hamiltonian(q=current_para, p=p0, q_logtarget_density=current_logtarget_density)
-        H_new =  self.hamiltonian(q=proposed_para, p=p, q_logtarget_density=proposed_logtarget_density)
-        accept_prob = np.exp(torch_max_0(H_old - H_new))
-
-        return accept_prob, proposed_para, proposed_para_info_dict
     
 
 class Z(Kernel):
@@ -717,20 +663,41 @@ class Z(Kernel):
         proposed_blocked_para = self.move_(indices=indices)
         proposed_para = current_para.copy()
         proposed_para[slice(None), indices] = proposed_blocked_para
+
         if current_para_info_dict.get("logdensities") is not None:
             current_llh = current_para_info_dict["logdensities"]
         else:
-            current_llh, _ = self.model.llh(parameter=current_para, llh_info_dict=current_para_llh_info_dict)
+            current_llh, _ = self.model.llh(parameter=current_para, llh_info_dict=current_para_llh_info_dict, indices=indices)
 
         proposed_llh, proposed_para_llh_info_dict = self.model.llh(parameter=proposed_para, llh_info_dict=dict())
+        # print('z shape', current_para[:, indices].shape)
+        # for i in indices:
+        #     print(i)
+        #     tuples1 = tuple(map(tuple, current_para[:, i]))
+        #     tuples2 = tuple(map(tuple, proposed_para[:, i]))
+
+        #     # Count the occurrences of each tuple
+        #     counter1 = Counter(tuples1)
+        #     counter2 = Counter(tuples2)
+        #     # Find the intersection of the counters
+        #     common_pairs = counter1 & counter2
+
+        #     # Sum the counts of common pairs
+        #     count = sum(common_pairs.values())
+        #     print(count)
+        #     print('common value', common_pairs.items())
+        #     print(counter1.items())
+        #     print(counter2.items())
+        # print(proposed_llh, current_llh)
         accept_prob = np.exp(torch_max_0(proposed_llh - current_llh))
+        # print('accept prob', accept_prob)
 
         proposed_para_info_dict = {"llh_info_dict": proposed_para_llh_info_dict, "logdensities": proposed_llh}
 
         return accept_prob, proposed_para, proposed_para_info_dict
 
 class AM(Kernel):
-    def __init__(self, model, epsilon=0.1, traj_len=2*np.pi, num_steps=None, stepsize=0.5, use_autograd=True, use_autohess=True, *args, **kwargs):
+    def __init__(self, model, epsilon=1e-1, traj_len=2*np.pi, num_steps=None, stepsize=0.5, use_autograd=True, use_autohess=True, *args, **kwargs):
         super(AM, self).__init__(model=model, traj_len=traj_len, num_steps=num_steps, stepsize=stepsize, use_autograd=use_autograd, use_autohess=use_autohess, *args, **kwargs)
         self.stepsize = stepsize
         self.kwargs = kwargs
@@ -738,6 +705,11 @@ class AM(Kernel):
         self.stepsize = stepsize
         self.am_epsilon = epsilon
         self.para_history = []
+        self.t0 = 2
+        self.t = 0
+        
+    def reset(self):
+        self.t = 0
         
     def move(self, current_para):
         self.para_history.append(current_para)
@@ -746,8 +718,8 @@ class AM(Kernel):
         return proposed_para
     
     def cov(self, para_history):
-        if len(para_history) == 1:
-            return self.stepsize ** 2 * torch.eye(len(para_history[0]))
+        if len(para_history) < self.t0:
+            return self.stepsize * torch.eye(len(para_history[0]))
         return self.stepsize * torch.cov(torch.vstack(para_history).T) + self.stepsize * self.am_epsilon * torch.eye(len(para_history[0]))
     
     def move_ratio(self, current_para, proposed_para):
@@ -767,24 +739,9 @@ class AM(Kernel):
             current_logtarget_density, _ = self.model.logtarget_density(parameter=current_para, llh_info_dict=current_para_llh_info_dict)
         
         proposed_logtarget_density, proposed_para_llh_info_dict = self.model.logtarget_density(parameter=proposed_para, llh_info_dict=dict())
-        accept_prob = np.exp(torch_max_0(proposed_logtarget_density - current_logtarget_density - self.move_ratio(current_para=current_para, proposed_para=proposed_para)))
+        accept_prob = np.exp(torch_max_0(proposed_logtarget_density - current_logtarget_density))# - self.move_ratio(current_para=current_para, proposed_para=proposed_para)))
 
         proposed_para_info_dict = {"llh_info_dict": proposed_para_llh_info_dict, "logdensities": proposed_logtarget_density}
+        self.t +=1
         return accept_prob, proposed_para, proposed_para_info_dict
     
-    def warmup(self, init_para, init_para_info_dict=dict(), iterations=10, set_stepsize=True, target_prob=0.7, auto_init_stepsize=True):
-        """perform adapt_stepsize with the optional of using find_reasonable_stepsize
-        init_para: torch.tensor
-            - the initial parameter of the MCMC chain
-        init_para_info_dict: torch.tensor
-            - the info_dict of init_para, see Kernel().gradient and RandomWalk().propose_accept
-        iterations: int
-            - the number of iterations to perform adapt_stepsize
-        set_stepsize: bool
-            - if True, the stepsize of the class is overwritten by the final stepsize found after warmup is completed
-        target_prob: float
-            - the target acceptance probability of the stepsize found in adapt_stepsize
-        auto_init_stepsize: bool
-            - if True, use find_reasonable_stepsize as the initial stepsize for adapt_stepsize, otherwise, use the initial stepsize defined when initialising the class
-        """
-        return self.adapt_stepsize(init_para=init_para, init_para_info_dict=init_para_info_dict, target_prob=target_prob, auto_init_stepsize=auto_init_stepsize, iterations=iterations, set_stepsize=set_stepsize)

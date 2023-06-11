@@ -2,6 +2,7 @@ import random
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
+from parameter import *
 
 def argmaxs(arr):
     mask = arr == arr.max()
@@ -188,3 +189,29 @@ def plot_repeat(data, x, smooth=5, figure_path='../Figures/', labels=[], label='
     if show:
         plt.show()
     plt.clf()
+    
+def plot_block_accpt_prob(mcmc, smooth=None, save=False, show=True, figure_path='../Figures/'):
+    var = 'z'
+    if smooth is None:
+        smooth = len(mcmc.accept_prob[var]) // 10
+    title = f'mean of the accept prob with blocksize {mcmc.block_size[var]} and M={M_Z}'
+    print(np.mean(np.array(mcmc.accept_prob[var]).T[:-1], axis=-1))
+    plt.plot(np.mean(np.array(mcmc.accept_prob[var]).T[:], axis=-1))
+    plt.title(title)
+    plt.xlabel('block no.')
+    if show:
+        plt.show()
+    if save:
+        plt.savefig(f'{figure_path+title}.png', bbox_inches='tight')
+        print('figure saved at ', f'{figure_path+title}.png')
+    title = f'M={M_Z}, smoothed over {smooth} steps'
+    for i, acc in enumerate(np.array(mcmc.accept_prob[var]).T[:]):
+        acc = np.apply_along_axis(lambda m: np.convolve(m, np.ones(smooth) / smooth, mode='valid'), axis=-1, arr=acc)
+        plt.plot(acc, label=f'block {i}')
+    plt.legend(loc='upper right', bbox_to_anchor=(1.3,1))
+    plt.title(title)
+    if show:
+        plt.show()
+    if save:
+        plt.savefig(f'{figure_path+title}.png', bbox_inches='tight')
+        print('figure saved at ', f'{figure_path+title}.png')

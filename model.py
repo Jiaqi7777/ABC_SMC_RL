@@ -147,9 +147,9 @@ class Tabular:
 
     def v_value(self, table, s):
         if len(table.shape) > len(s) + 1:
-            return torch.max(table[(slice(None), *s)], 1)
+            return torch.max(table[(slice(None), *s)], 1).values
         if hasattr(s[0], "__len__"):
-            return torch.max(table[tuple(s)], -1)
+            return torch.max(table[tuple(s)], -1).values
         return torch.max(table[s])
 
     def r_hat(self, s0, s1, a):
