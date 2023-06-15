@@ -24,14 +24,16 @@ def generate_z(indices=slice(None), obs=None, env=None):
     propsoed_z = np.swapaxes(np.array(env.step(action=a, state=s0, multiple=M_Z)[0]), 0, 1)
     return propsoed_z
 
-def generate_samples_with_z(para, model, obs, batch_indices=None, buffer_size=BUFFER_SIZE, batch_training=BATCH_TRAINING):
+def generate_samples_with_z(para, model, obs, batch_indices=None, buffer_size=BUFFER_SIZE, batch_training=BATCH_TRAINING, gibbs_indices=None):
     '''
     para is {'para': para, 'z': z]'''
-    if not batch_training:
-        batch_indices = range(min(len(obs['state0']), buffer_size))
+    if gibbs_indices is None:
+        gibbs_indices = slice(None)
+    # if not batch_training:
+    #     batch_indices = range(min(len(obs['state0']), buffer_size))
     
-    s0 = np.array(obs['state0'])[-buffer_size:][batch_indices]
-    a = np.array(obs['action'])[-buffer_size:][batch_indices]
+    s0 = np.array(obs['state0'])[-buffer_size:][batch_indices][gibbs_indices]
+    a = np.array(obs['action'])[-buffer_size:][batch_indices][gibbs_indices]
 
     para_ = para['para']
     s1_lst = para['z']
@@ -54,7 +56,7 @@ def tabular_indicator_deterministic(para, model, obs):
     a_prime = np.argmax(para[s11, s12], axis=-1)
     Indicator = np.zeros(shape=(len(a), ) + para.shape) #TxTheta
     Indicator[range(len(a)), s01, s02, a] = 1.
-    Indicator[range(len(a_prime)), s11, s12, a_prime] -= model.gamma
+    Indicator[range(len(a_prime))[done == False], s11, s12, a_prime] -= model.gamma
     return torch.tensor(Indicator, dtype=torch.float32).reshape((len(a), -1))
 
 def tabular_indicator_stochastic(para, model, obs):
@@ -206,11 +208,11 @@ class GaussianABCLikelihood():
         """
         return (self.epsilon ** 2) * torch.eye(data_len)
     
-class ABCPartialGaussianLikelihood(GaussianABCLikelihood):
-    def __init__(self, *args):
-        super(*args)
+class PartialGaussianABCLikelihood(GaussianABCLikelihood):
+    def __init__(self, epsilon):
+        super().__init__(epsilon)
         
-    def llh(self, data, indices=None, parameter=None, llh_info_dict=dict(), llh_transform_fn=None): #standard form
+    def llh(self, data, gibbs_indices=None, parameter=None, llh_info_dict=dict(), llh_transform_fn=None): #standard form
         """return the log likelihood for the parameter and data given
         data: torch.tensor
             - the target of the ABC likelihood
@@ -226,19 +228,20 @@ class ABCPartialGaussianLikelihood(GaussianABCLikelihood):
             - llh_info_dict: dict of the form {"mean": torch.tensor}
                 - mean of the Gaussian ABC likelihood function in a dictionary
         """
-        return self.llh_(data=data, parameter=parameter, indices=indices, mean_fn=llh_transform_fn, llh_info_dict=llh_info_dict,)
+        return self.llh_(data=data, parameter=parameter, gibbs_indices=gibbs_indices, mean_fn=llh_transform_fn, llh_info_dict=llh_info_dict,)
     
-    def llh_(self, data, parameter=None, mean_fn=None, llh_info_dict=dict()):
+    def llh_(self, data, parameter=None, gibbs_indices=None, mean_fn=None, llh_info_dict=dict()):
         """see self.llh, where mean_fn is the llh_transform_fn of self.llh"""
-        mean = self.compute_mean(parameter=parameter, mean_fn=mean_fn, llh_info_dict=llh_info_dict)
+        mean = self.compute_mean(parameter=parameter, mean_fn=mean_fn, llh_info_dict=llh_info_dict, gibbs_indices=gibbs_indices)
+        data = data if gibbs_indices is None else data[gibbs_indices]
         llh = torch.distributions.normal.Normal(loc=mean, scale=self.epsilon).log_prob(data).sum(axis=-1)
         return llh, {"mean": mean.detach()}
     
-    def compute_mean(self, parameter=None, mean_fn=None, llh_info_dict=dict()):
+    def compute_mean(self, parameter=None, mean_fn=None, llh_info_dict=dict(), gibbs_indices=None):
         """function to compute the mean of the Gaussian ABC likelihood, see self.llh and self.llh_"""
         assert llh_info_dict.get("mean") is not None or mean_fn is not None, "either mean or mean_fn of the form mean_fn(parameter) -> mean should be provided"
         if llh_info_dict.get("mean") is None:
-            mean = mean_fn(parameter)
+            mean = mean_fn(parameter, gibbs_indices=gibbs_indices)
         else:
             mean = llh_info_dict["mean"]
         return mean
@@ -364,7 +367,7 @@ class StochasticSModel(DeterministicSRModel):
         '''samples: dict'''
         self.samples = samples
         
-    def llh(self, parameter, llh_info_dict=dict(), indices=None):
+    def llh(self, parameter, llh_info_dict=dict(), gibbs_indices=None):
         """compute the loglikelihood given the abclikelihood and return the loglikelihood with the llh_info_dict"""
         if isinstance(parameter, dict):
             samples = parameter
@@ -372,7 +375,7 @@ class StochasticSModel(DeterministicSRModel):
             samples = self.samples.copy()
             if self.var is not None:
                 samples[self.var] = parameter
-        llh, llh_info_dict = self.abclikelihood.llh(data=self.data, parameter=samples, llh_info_dict=llh_info_dict, llh_transform_fn=self.llh_transform_fn)
+        llh, llh_info_dict = self.abclikelihood.llh(data=self.data, parameter=samples, gibbs_indices=gibbs_indices, llh_info_dict=llh_info_dict, llh_transform_fn=self.llh_transform_fn)
         return llh, llh_info_dict
     
     def logtarget_density(self, parameter, llh_info_dict=dict()):

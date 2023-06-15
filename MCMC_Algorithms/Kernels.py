@@ -664,12 +664,13 @@ class Z(Kernel):
         proposed_para = current_para.copy()
         proposed_para[slice(None), indices] = proposed_blocked_para
 
-        if current_para_info_dict.get("logdensities") is not None:
-            current_llh = current_para_info_dict["logdensities"]
-        else:
-            current_llh, _ = self.model.llh(parameter=current_para, llh_info_dict=current_para_llh_info_dict, indices=indices)
+        # if current_para_info_dict.get("logdensities") is not None:
+        #     current_llh = current_para_info_dict["logdensities"]
+        # else:
+        #     
+        current_llh, _ = self.model.llh(parameter=current_para[slice(None), indices], gibbs_indices=indices)
 
-        proposed_llh, proposed_para_llh_info_dict = self.model.llh(parameter=proposed_para, llh_info_dict=dict())
+        proposed_llh, proposed_para_llh_info_dict = self.model.llh(parameter=proposed_blocked_para, llh_info_dict=dict(), gibbs_indices=indices)
         # print('z shape', current_para[:, indices].shape)
         # for i in indices:
         #     print(i)

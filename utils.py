@@ -170,7 +170,6 @@ def plot_repeat(data, x, smooth=5, figure_path='../Figures/', labels=[], label='
     if len(labels) != len(data):
         labels=[''] * len(data)
     for d, l in zip(data, labels):
-        print(data.shape)
         smoothed_d = np.apply_along_axis(lambda m: np.convolve(m, np.ones(smooth) / smooth, mode='valid'), axis=-1, arr=np.array(d))
         N = len(smoothed_d)
         d_mean = np.mean(smoothed_d, axis=0)
@@ -193,9 +192,9 @@ def plot_repeat(data, x, smooth=5, figure_path='../Figures/', labels=[], label='
 def plot_block_accpt_prob(mcmc, smooth=None, save=False, show=True, figure_path='../Figures/'):
     var = 'z'
     if smooth is None:
-        smooth = len(mcmc.accept_prob[var]) // 10
+        smooth = len(mcmc.accept_prob[var]) // 10 + 1
     title = f'mean of the accept prob with blocksize {mcmc.block_size[var]} and M={M_Z}'
-    print(np.mean(np.array(mcmc.accept_prob[var]).T[:-1], axis=-1))
+    print('Mean of each blocks', np.mean(np.array(mcmc.accept_prob[var]).T[:-1], axis=-1))
     plt.plot(np.mean(np.array(mcmc.accept_prob[var]).T[:], axis=-1))
     plt.title(title)
     plt.xlabel('block no.')

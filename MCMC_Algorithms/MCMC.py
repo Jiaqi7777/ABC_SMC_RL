@@ -255,12 +255,13 @@ def MCMC_update(obs, posterior_samples, model, env):
         batch_indices = random.sample(range(min(len(obs._buffers['state0']), BUFFER_SIZE)), k=min(BATCH_SIZE, len(obs._buffers['state0']))) #TODO: what is this?
     else:
         batch_indices = slice(None)
-    
+        
     prior = IsotropicGaussianPrior(sd=PRIOR_SIGMA)
-    abclikelihood = GaussianABCLikelihood(epsilon=EPSILON)
     data = torch.tensor(obs._buffers["rewards"], dtype=torch.float32)[-BUFFER_SIZE:][batch_indices]
+    
     if STOCHASTIC:
         '''Stochastic'''
+        abclikelihood = PartialGaussianABCLikelihood(epsilon=EPSILON)
         z_sample = generate_z(env=env, obs=obs._buffers)
         r_hat = partial(generate_samples_with_z, model=model, obs=obs._buffers, batch_indices=batch_indices)
         z_transform_func = partial(generate_z, env=env, obs=obs._buffers)
@@ -269,6 +270,7 @@ def MCMC_update(obs, posterior_samples, model, env):
 
     else:
         '''Determinisitc'''
+        abclikelihood = GaussianABCLikelihood(epsilon=EPSILON)
         r_hat = partial(generate_samples, model=model, obs=obs._buffers,  batch_indices=batch_indices)
         llh_transform_grad_fn = lambda parameter:  tabular_indicator_deterministic(para=parameter.reshape(env.n_cell + (env.action_space.n, )), model=model, obs=obs._buffers)#standard form
         Model = DeterministicSRModel(prior=prior, abclikelihood=abclikelihood, data=data, llh_transform_fn=r_hat, llh_transform_grad_fn=llh_transform_grad_fn)
@@ -490,7 +492,7 @@ if __name__ == '__main__':
         experiment_code = 1
         file_path = f"../Results/E{experiment_code}/T{training_steps}_Sto{STOCHASTIC}_{time}.json"
         error_all = []
-        epsilon_lst = [10, 1, 1e-1, 1e-2, 1e-3, 1e-4][1:2]
+        epsilon_lst = [10, 1, 1e-1, 1e-2, 1e-3, 1e-4][1:3]
         data_percentage_lst = np.linspace(0.1, 1, 10)[-1:]
         for repeat in range(REPEAT_EXPERIMENT):
             error_all_epsilon = []
@@ -507,7 +509,7 @@ if __name__ == '__main__':
                     display_results(posterior_samples=posterior_samples, model=model, accept_probs=accept_probs, logdensities=logdensities, proposed_logdensities=proposed_logdensities)
                     average_over = min(100, len(posterior_samples))
                     error_all_percentage.append(mean_squared_error(Q_star.flatten(), torch.mean(posterior_samples[-average_over:].reshape(average_over, -1), axis=0)))
-                    print(error_all_percentage)
+                    print('error_all_percentage', error_all_percentage)
                 error_all_epsilon.append(error_all_percentage)
             error_all.append(error_all_epsilon)
             experiment_info = {
@@ -522,4 +524,4 @@ if __name__ == '__main__':
                     file.write(json_data)
                 print(f"Dictionary saved to {file_path}")
         # plot_repeat(error_all, labels=epsilon_lst, label='Epsilon', x=data_percentage_lst, smooth=1, xlabel='data percentage', ylabel='MSE', title='MSE for offline learning vs DP')
-        plot_block_accpt_prob(mcmc=mcmc, save=True)
+        plot_block_accpt_prob(mcmc=mcmc)
