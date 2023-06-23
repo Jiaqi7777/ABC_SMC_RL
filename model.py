@@ -73,7 +73,7 @@ class Buffer:
         return len(list(self._buffers.values())[0])
 
 class Tabular:
-    def __init__(self, env, n_particle, prior='normal', discrete=False, gamma=0.95, std=0.1, verbose=True, bins=(10,)):
+    def __init__(self, env, n_particle, prior='normal', discrete=False, gamma=0.95, std=0.1, verbose=True, bins=(10,), initial_tables=None, idx=None):
         self.env = env
         self.discrete = discrete
         self.obs_size = env.observation_space.shape
@@ -94,7 +94,9 @@ class Tabular:
         self.n_particle = n_particle
         self._weights = np.ones(n_particle) / n_particle
         if prior == 'normal':
-            self.tables = torch.normal(mean=0, std=1, size=((n_particle,) + self.bins + (self.action_size,)))
+            self.tables = torch.tensor(np.repeat(initial_tables[np.newaxis, ...], n_particle, axis=0)) if initial_tables is not None else torch.normal(mean=0, std=1, size=((n_particle,) + self.bins + (self.action_size,)))
+            if idx is not None:
+                self.tables[(slice(None), *idx)] = torch.normal(mean=0, std=1, size=(n_particle,))
             if verbose:
                 print("Q table size:", self.tables[-1].shape)        
         else:
@@ -172,8 +174,11 @@ class Tabular:
     def get_parameter(self):
         return self.tables
 
-    def set_parameter(self, new_para):
-        self.tables = new_para
+    def set_parameter(self, new_para, idx=None):
+        if idx is None:
+            self.tables = new_para
+        else:
+            self.tables[(slice(None), *idx)] = new_para[(slice(None), *idx)]
 
     def set_weights(self, new_weights):
         self._weights = new_weights
@@ -194,7 +199,7 @@ class Tabular:
         thp_matrix = thp_matrix.toarray().reshape(thp_matrix.shape[0],-1, n).swapaxes(0,1).reshape(-1, n)
         thp_vec = thp_matrix @ weights
         thp_weights = np.moveaxis(thp_vec.reshape(self.state_size[::-1]+ (self.action_size,)),range(len(self.state_size)),range(len(self.state_size))[::-1])
-        return np.argmax(thp_weights, axis=-1)
+        return thp_weights#np.argmax(thp_weights, axis=-1)
         
 
     def plot_value(self, title='Value for each state', xlabel=None, ylabel=None, zlabel='Value', show=False, paras=[]):

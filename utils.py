@@ -16,15 +16,15 @@ def torch_max_0(tensor):
 def is_diagonal(matrix):
     return torch.all(torch.eq(matrix, torch.diag(torch.diagonal(matrix))))
 
-def expand_dims(arr):
+def expand_dims(arr, dim=2):
     arr = np.array(arr)
-    if len(arr.shape) >= 2:
+    if len(arr.shape) >= dim:
         return arr
-    return arr.reshape(1, -1)
+    return np.expand_dims(arr, axis=0)
 
 def plot_2d(X, Y, Z, env_name='GridWorld', action_dim=4, title=None, xlabel='s0', ylabel='s1', zlabel='Value', show=False, additional_info=[], save=False, figure_path = '../Figures/MCMC/'):
-    Z = expand_dims(Z)
-    arrows = {2:(1,0), 0:(-1,0),1:(0,1),3:(0,-1)} if action_dim == 4 else {0:(0, -1), 1:(0,1)}
+    Z = expand_dims(Z, dim=3)
+    arrows = {2: (1, 0), 0: (-1, 0), 1: (0,1), 3: (0, -1)} if action_dim == 4 else {0: (0, -1), 1: (0, 1)}
     scale = 0.25
     fig, ax = plt.subplots()
     if additional_info != []:
@@ -40,8 +40,10 @@ def plot_2d(X, Y, Z, env_name='GridWorld', action_dim=4, title=None, xlabel='s0'
     if action_dim == 4:
         for i in range(len(X)):
             for j in range(len(Y)):
+                for k in range(action_dim):
+                    scale = Z[i, j, k] / 3 + 1e-4
                 # text = ax.text(j, i, Z[i, j], ha="center", va="center", color="w")
-                ax.arrow(j, i, scale*arrows[Z[i, j]][1], scale*arrows[Z[i, j]][0], head_width=0.1)
+                    ax.arrow(j, i, scale*arrows[k][1], scale*arrows[k][0], head_width=0.05)
     ax.set_title(title)
     fig.tight_layout()
     if show:
@@ -189,13 +191,15 @@ def plot_repeat(data, x, smooth=5, figure_path='../Figures/', labels=[], label='
         plt.show()
     plt.clf()
     
-def plot_block_accpt_prob(mcmc, smooth=None, save=False, show=True, figure_path='../Figures/'):
+def plot_block_accpt_prob(mcmc, block_accept, smooth=None, save=False, show=True, figure_path='../Figures/'):
+    cmap = plt.get_cmap("coolwarm")
+    block_accept = np.array(block_accept)
     var = 'z'
     if smooth is None:
-        smooth = len(mcmc.accept_prob[var]) // 10 + 1
+        smooth = len(block_accept[0]) // 10 + 1
     title = f'mean of the accept prob with blocksize {mcmc.block_size[var]} and M={M_Z}'
-    print('Mean of each blocks', np.mean(np.array(mcmc.accept_prob[var]).T[:-1], axis=-1))
-    plt.plot(np.mean(np.array(mcmc.accept_prob[var]).T[:], axis=-1))
+    print('Mean of each blocks', np.mean(block_accept.T[:-1], axis=(1, 2)))
+    plt.plot(np.mean(block_accept.T[:-1], axis=(1, 2)))
     plt.title(title)
     plt.xlabel('block no.')
     if show:
@@ -203,10 +207,15 @@ def plot_block_accpt_prob(mcmc, smooth=None, save=False, show=True, figure_path=
     if save:
         plt.savefig(f'{figure_path+title}.png', bbox_inches='tight')
         print('figure saved at ', f'{figure_path+title}.png')
-    title = f'M={M_Z}, smoothed over {smooth} steps'
-    for i, acc in enumerate(np.array(mcmc.accept_prob[var]).T[:]):
-        acc = np.apply_along_axis(lambda m: np.convolve(m, np.ones(smooth) / smooth, mode='valid'), axis=-1, arr=acc)
-        plt.plot(acc, label=f'block {i}')
+    title = f'M={M_Z}, smoothed over {smooth} steps with std over {len(block_accept)} repeatition'
+    for i, acc in enumerate(np.array(block_accept).T[:]):
+        acc = np.apply_along_axis(lambda m: np.convolve(m, np.ones(smooth) / smooth, mode='valid'), axis=0, arr=acc)
+        acc_mean = np.mean(acc, axis=-1)
+        acc_std = np.std(acc, axis=-1)
+        plt.plot(acc_mean, label=f'block {i}', color=cmap(i / block_accept.shape[-1]))
+        plt.fill_between(range(len(acc_mean)), acc_mean-acc_std/np.sqrt(len(acc)), acc_mean+acc_std/np.sqrt(len(acc)), alpha=0.2)
+        
+        
     plt.legend(loc='upper right', bbox_to_anchor=(1.3,1))
     plt.title(title)
     if show:

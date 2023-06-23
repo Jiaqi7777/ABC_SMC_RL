@@ -15,8 +15,8 @@ def generate_samples(para, model, obs, batch_indices=None, buffer_size=BUFFER_SI
     s1 = np.array(obs['state1'])[-buffer_size:][batch_indices]
     a = np.array(obs['action'])[-buffer_size:][batch_indices]
     dones = torch.tensor(np.array(obs['done'])[-buffer_size:][batch_indices].astype(int))
-
-    return model.q_value(para, s0.T, a) - torch.where(dones == 1, torch.zeros(len(s0)), model.gamma * model.v_value(para, s1.T).values) #time 
+    # print(model.tables[:,0,0, 0])
+    return model.q_value(para, s0.T, a) - torch.where(dones == 1, torch.zeros(len(s0)), model.gamma * model.v_value(para, s1.T)) #time 
 
 def generate_z(indices=slice(None), obs=None, env=None):
     s0 = np.array(obs['state0'])[indices]
@@ -56,7 +56,7 @@ def tabular_indicator_deterministic(para, model, obs):
     a_prime = np.argmax(para[s11, s12], axis=-1)
     Indicator = np.zeros(shape=(len(a), ) + para.shape) #TxTheta
     Indicator[range(len(a)), s01, s02, a] = 1.
-    Indicator[range(len(a_prime))[done == False], s11, s12, a_prime] -= model.gamma
+    Indicator[np.arange(len(a))[done == False], s11, s12, a_prime] -= model.gamma
     return torch.tensor(Indicator, dtype=torch.float32).reshape((len(a), -1))
 
 def tabular_indicator_stochastic(para, model, obs):
@@ -72,7 +72,7 @@ def tabular_indicator_stochastic(para, model, obs):
     for s1 in s1_lst:
         s11, s12 = np.array(s1)[done == False].T
         a_prime = np.argmax(para_[s11, s12], axis=-1)
-        Indicator[range(len(a_prime)), s11, s12, a_prime] -= model.gamma / M_Z
+        Indicator[np.arange(len(a))[done == False], s11, s12, a_prime] -= model.gamma / M_Z
     # for i in range(len(s0)):
     #     for s1 in s1_lst:
     #         a_prime = np.argmax(s1[i][0], s1[i][1])
@@ -155,7 +155,7 @@ class GaussianABCLikelihood():
         """function to compute the mean of the Gaussian ABC likelihood, see self.llh and self.llh_"""
         assert llh_info_dict.get("mean") is not None or mean_fn is not None, "either mean or mean_fn of the form mean_fn(parameter) -> mean should be provided"
         if llh_info_dict.get("mean") is None:
-            mean = mean_fn(parameter)
+            mean = mean_fn(parameter).float()
         else:
             mean = llh_info_dict["mean"]
         return mean

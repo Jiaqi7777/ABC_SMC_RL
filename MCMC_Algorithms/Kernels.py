@@ -119,7 +119,7 @@ class RandomWalk(Kernel):
         else:
             return torch.normal(mean=current_para, std=self.stepsize)
 
-    def propose_accept(self, current_para, current_para_info_dict=dict()):
+    def propose_accept(self, current_para, current_para_info_dict=dict(), indices=None):
         """propose a proposal from the current parameter and accept according to the acceptance probability
         current_para: torch.tensor
             - the parameter to be moved
@@ -134,7 +134,11 @@ class RandomWalk(Kernel):
         """
 
         current_para_llh_info_dict = current_para_info_dict["llh_info_dict"] if current_para_info_dict.get("llh_info_dict") is not None else dict()
-        proposed_para = self.move(current_para)
+        if indices is None:
+            proposed_para = self.move(current_para)
+        else:
+            proposed_para = deepcopy(current_para)
+            proposed_para[indices] = self.move(current_para[indices])
 
         if current_para_info_dict.get("logdensities") is not None:
             current_logtarget_density = current_para_info_dict["logdensities"]
