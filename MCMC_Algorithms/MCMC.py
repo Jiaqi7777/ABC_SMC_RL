@@ -67,8 +67,8 @@ class MCMC:
                 print("Warmup is not implemented for the current kernel. Skip to sampling...")
 
         self.samples[0] = current_para
-        self.logdensities[0] = current_logtarget_density
-        self.proposed_logdensities[0] = current_logtarget_density
+        # self.logdensities[0] = current_logtarget_density
+        # self.proposed_logdensities[0] = current_logtarget_density
 
         pbar = tqdm(range(self.num_samples))
         for i in pbar:
@@ -83,9 +83,9 @@ class MCMC:
             pbar.set_description("Acceptance probability {}".format(np.round(self.accepted/(i+1), 2)))
 
             self.samples[i+1] = current_para
-            self.logdensities[i+1] = current_para_info_dict["logdensities"]
-            self.proposed_logdensities[i+1] = proposed_para_info_dict["logdensities"]
-            self.accept_prob[i+1] = accept_prob
+            # self.logdensities[i+1] = current_para_info_dict["logdensities"]
+            # self.proposed_logdensities[i+1] = proposed_para_info_dict["logdensities"]
+            # self.accept_prob[i+1] = accept_prob
 
         return self.samples
     
@@ -115,10 +115,10 @@ class MCMC:
     
     def reset_stat(self):
         self.samples = torch.zeros((self.num_samples+1, self.params_dim))
-        self.logdensities = torch.zeros(self.num_samples+1)
-        self.proposed_logdensities = torch.zeros(self.num_samples+1)
+        # self.logdensities = torch.zeros(self.num_samples+1)
+        # self.proposed_logdensities = torch.zeros(self.num_samples+1)
         self.accepted = 0
-        self.accept_prob = torch.zeros(self.num_samples+1)
+        # self.accept_prob = torch.zeros(self.num_samples+1)
 
 
 class MCMC_pyro(MCMC):
@@ -311,10 +311,10 @@ def MCMC_update(obs, posterior_samples, model, env):
         else:
             mcmc = MCMC(num_samples=training_steps, kernel=kernel, initial_params=posterior_samples[-1].reshape(-1), warmup_steps=np.int64(np.floor(training_steps*WARMUP_RATIO)), warup_settings=dict(target_prob=0.7, auto_init_stepsize=True))
             posterior_samples = mcmc.run(idx=FROZEN_NO).reshape((-1, ) + env.n_cell + (env.action_space.n, ))
-        logdensities = mcmc.get_logdensities()
-        proposed_logdensities = mcmc.get_proposed_logdensities()
-        accept_probs = mcmc.get_accept_prob()
-        return posterior_samples, accept_probs, logdensities, proposed_logdensities, mcmc
+        # logdensities = mcmc.get_logdensities()
+        # proposed_logdensities = mcmc.get_proposed_logdensities()
+        # accept_probs = mcmc.get_accept_prob()
+        return posterior_samples, accept_probs#, logdensities, proposed_logdensities, mcmc
 
     else:
         if STOCHASTIC:
