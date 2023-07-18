@@ -353,7 +353,7 @@ class HMC(Kernel):
         """see self.move_, with L=self.L, stepsize=self.stepsize"""
         return self.move_(current_para=current_para, current_gradient=current_gradient, L=self.L, stepsize=self.stepsize)
 
-    def move_(self, current_para, current_gradient, L=1, stepsize=0.01):
+    def move_(self, current_para, current_gradient, L=1, stepsize=0.01, full_para=None, indices=None):
         """
         L: int
             - number of Leapfrog steps
@@ -374,16 +374,25 @@ class HMC(Kernel):
 
         p = p0 + stepsize * current_gradient * 0.5
         q = current_para
-
-        for i in range(L):
-            q_move = torch.mv(self.precondition, p) if self.precondition is not None else p
-            q = q + stepsize * q_move
-            if i != (L-1):
-                gradient, _ = self.gradient(parameter=q, info_dict=dict(), return_logtarget_density=False)
-                p = p + stepsize * gradient
-        proposed_gradient, proposed_logtarget_density, proposed_para_llh_info_dict, proposed_para_llh_grad_info_dict = self.gradient(parameter=q, info_dict=dict(), return_logtarget_density=True)
-        
-        p = p + stepsize * proposed_gradient * 0.5
+        if full_para is None:
+            for i in range(L):
+                q_move = torch.mv(self.precondition, p) if self.precondition is not None else p
+                q = q + stepsize * q_move
+                if i != (L-1):
+                    gradient, _ = self.gradient(parameter=q, info_dict=dict(), return_logtarget_density=False)
+                    p = p + stepsize * gradient
+            proposed_gradient, proposed_logtarget_density, proposed_para_llh_info_dict, proposed_para_llh_grad_info_dict = self.gradient(parameter=q, info_dict=dict(), return_logtarget_density=True)
+            p = p + stepsize * proposed_gradient * 0.5
+        else:
+            for i in range(L):
+                q_move = torch.mv(self.precondition, p) if self.precondition is not None else p
+                q = q + stepsize * q_move
+                full_para[indices] = q
+                if i != (L-1):
+                    gradient, _ = self.gradient(parameter=full_para, info_dict=dict(), return_logtarget_density=False)
+                    p = p + stepsize * gradient[indices]
+            proposed_gradient, proposed_logtarget_density, proposed_para_llh_info_dict, proposed_para_llh_grad_info_dict = self.gradient(parameter=full_para, info_dict=dict(), return_logtarget_density=True)
+            p = p + stepsize * proposed_gradient[indices] * 0.5
         p = -p
         
         q_info_dict = {"logdensities":proposed_logtarget_density, "gradient":proposed_gradient, "llh_info_dict":proposed_para_llh_info_dict, "llh_grad_info_dict":proposed_para_llh_grad_info_dict}
@@ -396,8 +405,13 @@ class HMC(Kernel):
     def propose_accept_(self, current_para, L=1, stepsize=0.01, current_para_info_dict=dict(), indices=None):
         """see RandomWalk"""
         current_gradient, current_logtarget_density, *_ = self.gradient(parameter=current_para, info_dict=current_para_info_dict, return_logtarget_density=True)
+        if indices is None:
+            proposed_para, p0, p, q_info_dict = self.move_(current_para=current_para, current_gradient=current_gradient, L=L, stepsize=stepsize)
+        else:
+            proposed_para = deepcopy(current_para)
+            proposed_para[indices], p0, p, q_info_dict = self.move_(current_para=current_para[indices], current_gradient=current_gradient[indices], L=L, stepsize=stepsize, full_para=current_para, indices=indices)
 
-        proposed_para, p0, p, q_info_dict = self.move_(current_para=current_para, current_gradient=current_gradient, L=L, stepsize=stepsize)
+
         proposed_logtarget_density = q_info_dict["logdensities"]
         proposed_para_info_dict = q_info_dict
 

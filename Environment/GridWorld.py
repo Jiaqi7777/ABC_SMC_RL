@@ -23,7 +23,7 @@ class GridWorld:
         self.observation_space = spaces.Discrete(n_cell[0] * n_cell[1])
         self.observation_space_high = (n_cell[0], n_cell[1])
         self.observation_space_low = (0, 0)
-        self.action_space = spaces.Discrete(4)
+        self.action_space = spaces.Discrete(4) if n_cell[0] > 1 else spaces.Discrete(2)
         self.stochastic = stochastic
         if self.stochastic:
             self.move_prob = [CORRECT_MOVE_PROB] + [(1 - CORRECT_MOVE_PROB)/5] * 5
@@ -38,14 +38,14 @@ class GridWorld:
             row, col = np.argwhere(gridworld == s)[0]
             for a, d in zip(
                     range(self.action_space.n),
-                    [(-1, 0), (0, 1), (1, 0), (0, -1)]
+                    [(-1, 0), (0, 1), (1, 0), (0, -1)][4 // self.action_space.n -1 :: 4 // self.action_space.n]
                     ):
-                next_row = max(0, min(row + d[0], n_cell[0]-1))
-                next_col = max(0, min(col + d[1], n_cell[1]-1))
+                next_row = max(0, min(row + d[0], n_cell[0] - 1))
+                next_col = max(0, min(col + d[1], n_cell[1] - 1))
                 s_prime = [next_row, next_col] #gridworld[next_row, next_col]
                 self.P[row, col, a] = s_prime
                 self.P[goal_position + (a, )] = goal_position
-                    
+
         if self.stochastic:
             random_move = np.array([0, -1, 1, 2]) #moving forwards, left, right, back when facing the correct direction
             self.stochasticP = np.zeros((n_cell[0], n_cell[1], self.action_space.n, len(self.move_prob), 2), dtype='int32')

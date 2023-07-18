@@ -77,6 +77,7 @@ class Tabular:
         self.env = env
         self.discrete = discrete
         self.obs_size = env.observation_space.shape
+        self.idx = idx
         if discrete:
             self.bins = bins*self.obs_size[0]
             self.state_grid = uniform_grid(high=self.env.observation_space.high, low=self.env.observation_space.low, bins=self.bins, verbose=verbose)
@@ -94,9 +95,10 @@ class Tabular:
         self.n_particle = n_particle
         self._weights = np.ones(n_particle) / n_particle
         if prior == 'normal':
-            self.tables = torch.tensor(np.repeat(initial_tables[np.newaxis, ...], n_particle, axis=0)) if initial_tables is not None else torch.normal(mean=0, std=1, size=((n_particle,) + self.bins + (self.action_size,)))
+            self.tables = torch.tensor(np.repeat(initial_tables[np.newaxis, ...], n_particle, axis=0)) if ((initial_tables is not None) and FROZEN) else torch.normal(mean=0, std=1, size=((n_particle,) + self.bins + (self.action_size,)))
             if idx is not None:
-                self.tables[(slice(None), *idx)] = torch.normal(mean=0, std=1, size=(n_particle,))
+                for i in idx:
+                    self.tables[(slice(None), *i)] = torch.normal(mean=-5, std=1, size=(n_particle, ))
             if verbose:
                 print("Q table size:", self.tables[-1].shape)        
         else:
@@ -178,7 +180,8 @@ class Tabular:
         if idx is None:
             self.tables = new_para
         else:
-            self.tables[(slice(None), *idx)] = new_para[(slice(None), *idx)]
+            for i in idx:
+                self.tables[(slice(None), *i)] = new_para[(slice(None), *i)]
 
     def set_weights(self, new_weights):
         self._weights = new_weights

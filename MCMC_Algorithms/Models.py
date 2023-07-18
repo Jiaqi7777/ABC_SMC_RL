@@ -246,6 +246,72 @@ class PartialGaussianABCLikelihood(GaussianABCLikelihood):
             mean = llh_info_dict["mean"]
         return mean
 
+class TruncatedGaussianABCLikelihood(GaussianABCLikelihood):
+    def __init__(self, epsilon):
+        super().__init__(epsilon)
+
+    def llh_(self, data, parameter=None, mean_fn=None, llh_info_dict=dict()):
+        """see self.llh, where mean_fn is the llh_transform_fn of self.llh"""
+        mean = self.compute_mean(parameter=parameter, mean_fn=mean_fn, llh_info_dict=llh_info_dict)
+        llh = torch.distributions.normal.Normal(loc=mean, scale=self.epsilon).log_prob(data).sum(axis=-1)
+        return llh, {"mean": mean.detach()}
+    
+    def compute_mean(self, parameter=None, mean_fn=None, llh_info_dict=dict()):
+        """function to compute the mean of the Gaussian ABC likelihood, see self.llh and self.llh_"""
+        assert llh_info_dict.get("mean") is not None or mean_fn is not None, "either mean or mean_fn of the form mean_fn(parameter) -> mean should be provided"
+        if llh_info_dict.get("mean") is None:
+            mean = mean_fn(parameter).float()
+        else:
+            mean = llh_info_dict["mean"]
+        return mean
+
+    def llh_gradient(self, data, parameter, llh_transform_grad_fn, llh_info_dict=dict(), llh_transform_fn=None): #standard form
+        """compute the gradient of the log likelihood function with respect to the parameter
+        data: see self.llh
+        parameter: see self.llh
+        llh_info_dict: see self.llh
+        llh_transform_fn: see self.llh
+        llh_transform_grad_fn: function torch.tensor -> torch.tensor
+            - a function that takes the parameter and output the gradient (Jacobian) of the mean of the Gaussian ABC likelihood function with respect to the parameter
+        """
+        return self.llh_gradient_(data=data, parameter=parameter, mean_jacobian_fn=llh_transform_grad_fn, mean_fn=llh_transform_fn, llh_info_dict=llh_info_dict)
+
+    def llh_gradient_(self, data, parameter, mean_jacobian_fn=None, mean_fn=None, llh_info_dict=dict()):
+        """see self.llh_gradient, in which mean_jacobian_fn is the llh_transform_grad_fn"""
+        mean = self.compute_mean(parameter=parameter, mean_fn=mean_fn, llh_info_dict=llh_info_dict)
+        mean_jacobian = mean_jacobian_fn(parameter=parameter)
+        
+        gradient = 1. / (self.epsilon**2) *  torch.mv(torch.t(mean_jacobian), (data - mean))
+        return gradient, {"mean_jacobian":mean_jacobian}
+    
+    def llh_hessian(self, parameter, llh_transform_grad_fn=None, llh_transform_hessian_fn=None, llh_grad_info_dict=dict(), **kwargs):
+        """compute the hessian of the log likelihood with respect to the parameter at the parameter
+        parameter: see self.llh
+        llh_transform_grad_fn: see self.llh_gradient
+        llh_transform_hessian_fn: None
+            - a function that takes the parameter and output the hessian of the mean of the Gaussian ABC likelihood function with respect to the parameter. Currently not implemented, hence only accept None
+        llh_grad_info_dict: dict, of the form {"mean_jacobian": torch.tensor}
+            - the dictionary output by self.llh_gradient that contains the jacobian of the mean of the Gaussian ABC likelihood function with respect to the parameter    
+        """
+        return self.llh_hessian_(parameter=parameter, mean_jacobian_fn=llh_transform_grad_fn, mean_hessian_fn=llh_transform_hessian_fn, llh_grad_info_dict=llh_grad_info_dict, **kwargs)
+    
+    def llh_hessian_(self, parameter, mean_jacobian_fn=None, mean_hessian_fn=None, llh_grad_info_dict=dict(), **kwargs):
+        """see self.llh_hessian, in which mean_jacobian_fn is the llh_transform_grad_fn, and mean_hessian_fn is the llh_transform_hessian_fn"""
+        if mean_hessian_fn is None:
+            if llh_grad_info_dict.get("mean_jacobian") is None:
+                mean_jacobian = mean_jacobian_fn(parameter=parameter)
+            else:
+                mean_jacobian = llh_grad_info_dict.get("mean_jacobian")
+            return - 1. / (self.epsilon**2) * torch.matmul(mean_jacobian.T, mean_jacobian)
+        else:
+            raise NotImplementedError
+    
+    def covariance_matrix(self, data_len):
+        """return the overall covariance matrix of the ABC Gaussian likelihood given the dimension of the data
+        data_len: int
+            - the dimension of the data
+        """
+        return (self.epsilon ** 2) * torch.eye(data_len)
 
 class DeterministicSRModel():
     """the overall model of the ABC likelihood model with prior and likelihood (with deterministic reward and state transition)"""

@@ -24,7 +24,7 @@ def expand_dims(arr, dim=2):
 
 def plot_2d(X, Y, Z, env_name='GridWorld', action_dim=4, title=None, xlabel='s0', ylabel='s1', zlabel='Value', show=False, additional_info=[], save=False, figure_path = '../Figures/MCMC/'):
     Z = expand_dims(Z, dim=3)
-    arrows = {2: (1, 0), 0: (-1, 0), 1: (0,1), 3: (0, -1)} if action_dim == 4 else {0: (0, -1), 1: (0, 1)}
+    arrows = {2: (1, 0), 0: (-1, 0), 1: (0,1), 3: (0, -1)} if action_dim == 4 else {0: (0, 1), 1: (0, -1)}
     scale = 0.25
     fig, ax = plt.subplots()
     if additional_info != []:
@@ -37,13 +37,14 @@ def plot_2d(X, Y, Z, env_name='GridWorld', action_dim=4, title=None, xlabel='s0'
         ax.set_yticks(np.arange(len(X[0])), labels=X[0]) 
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
-    if action_dim == 4:
-        for i in range(len(X)):
-            for j in range(len(Y)):
-                for k in range(action_dim):
-                    scale = Z[i, j, k] / 3 + 1e-4
-                # text = ax.text(j, i, Z[i, j], ha="center", va="center", color="w")
-                    ax.arrow(j, i, scale*arrows[k][1], scale*arrows[k][0], head_width=0.05)
+    for i in range(len(X)):
+        for j in range(len(Y)):
+            for k in range(action_dim):
+                scale = Z[i, j, k] / 3 + 1e-4
+            # text = ax.text(j, i, Z[i, j], ha="center", va="center", color="w")
+                ax.plot(j, i, marker='o', markersize=8, color='red')
+                ax.arrow(j, i, scale*arrows[k][1], scale*arrows[k][0], head_width=0.05)
+
     ax.set_title(title)
     fig.tight_layout()
     if show:
