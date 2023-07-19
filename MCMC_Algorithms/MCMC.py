@@ -314,7 +314,7 @@ def MCMC_update(obs, posterior_samples, model, env):
         # logdensities = mcmc.get_logdensities()
         # proposed_logdensities = mcmc.get_proposed_logdensities()
         # accept_probs = mcmc.get_accept_prob()
-        return posterior_samples, accept_probs#, logdensities, proposed_logdensities, mcmc
+        return posterior_samples, accept_probs, None, None, None#, logdensities, proposed_logdensities, mcmc
 
     else:
         if STOCHASTIC:
