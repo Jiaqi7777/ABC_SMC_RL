@@ -18,6 +18,7 @@ def generate_samples(para, model, obs, batch_indices=None, buffer_size=BUFFER_SI
     s1 = np.array(obs['state1'])[-buffer_size:][batch_indices]
     a = np.array(obs['action'])[-buffer_size:][batch_indices]
     dones = torch.tensor(np.array(obs['done'])[-buffer_size:][batch_indices].astype(int))
+    #print("here",dones.numpy(),s0.squeeze(),s1.squeeze(),torch.argmax(para[tuple(s1.T)], -1))
 
     return model.q_value(para, s0.T, a) - torch.where(dones == 1, torch.zeros(len(s0)), model.gamma * model.v_value(para, s1.T).values) #time 
 
@@ -124,6 +125,7 @@ class GaussianABCLikelihood():
         """see self.llh_gradient, in which mean_jacobian_fn is the llh_transform_grad_fn"""
         mean = self.compute_mean(parameter=parameter, mean_fn=mean_fn, llh_info_dict=llh_info_dict)
         mean_jacobian = mean_jacobian_fn(parameter=parameter)
+        #print("gradient mean tensor", mean_jacobian)
         
         gradient = 1. / (self.epsilon**2) *  torch.mv(torch.t(mean_jacobian),(data - mean))
         return gradient, {"mean_jacobian":mean_jacobian}
@@ -227,6 +229,19 @@ class DeterministicSRModel():
         parameter.grad.zero_()
         parameter.requires_grad = False
         logtarget_density = logtarget_density.detach()
+
+        # llh_mean = self.abclikelihood.compute_mean(parameter=parameter, mean_fn=self.llh_transform_fn)
+
+        # for i in range(len(llh_mean)):
+        #     parameter = parameter.clone()
+        #     parameter.requires_grad = True
+        #     llh_mean = self.abclikelihood.compute_mean(parameter=parameter, mean_fn=self.llh_transform_fn)
+        #     llh_mean[i].backward()
+        #     gradient2 = parameter.grad.clone()
+        #     parameter.grad.zero_()
+        #     parameter.requires_grad = False
+        #     llh_mean = llh_mean.detach()
+        #     print("gradient mean", gradient2)
         return logtarget_density, gradient, llh_info_dict
     
     def logtarget_hessian(self, parameter, llh_info_dict=dict(), llh_grad_info_dict=dict()):
@@ -530,6 +545,7 @@ class MALA(Kernel):
     def propose_accept(self, current_para, current_para_info_dict=dict()):
         """see RandomWalk"""
         current_gradient, current_logtarget_density, *_ = self.gradient(parameter=current_para, info_dict=current_para_info_dict, return_logtarget_density=True)
+        #print("current_gradient", current_gradient.numpy().sum(), current_logtarget_density)
 
         proposed_para = self.move(current_para=current_para, current_gradient=current_gradient)
         proposed_gradient, proposed_logtarget_density, proposed_para_llh_info_dict, proposed_para_llh_grad_info_dict = self.gradient(parameter=proposed_para, info_dict=dict(), return_logtarget_density=True)
@@ -1182,7 +1198,8 @@ if __name__ == '__main__':
                             a_prime = np.argmax(para[s11, s12], axis=-1)
                             Indicator = np.zeros(shape=(len(a), ) + para.shape) #TxTheta
                             Indicator[range(len(a)), s01, s02, a] = 1.
-                            Indicator[range(len(a_prime)), s11, s12, a_prime] -= model.gamma
+                            Indicator[np.arange(len(a))[done == False], s11, s12, a_prime] -= model.gamma
+                            #print("aprime",a_prime,done,s0,s1)
                             return torch.tensor(Indicator, dtype=torch.float32).reshape((len(a),-1))
                         
                         llh_transform_grad_fn = lambda parameter:  tabular_indicator(para=parameter.reshape(env.n_cell + (env.action_space.n, )), model=model, obs=obs._buffers)#standard form
@@ -1190,6 +1207,7 @@ if __name__ == '__main__':
                         prior = IsotropicGaussianPrior(sd=PRIOR_SIGMA)
                         abclikelihood = GaussianABCLikelihood(epsilon=EPSILON)
                         data = torch.tensor(obs._buffers["rewards"])[-BUFFER_SIZE:][batch_indices]
+                        #print("here", model.gamma, GAMMA)
                         Model = DeterministicSRModel(prior=prior, abclikelihood=abclikelihood, data=data, llh_transform_fn=r_hat, llh_transform_grad_fn=llh_transform_grad_fn)
 
                         def fn(parameter):
@@ -1201,7 +1219,7 @@ if __name__ == '__main__':
                         #kernel = pCN(model=Model, stepsize=STEPSIZE)
                         #kernel = MALA(model=Model, stepsize=STEPSIZE, precondition_matrix=None)
                         #kernel = MALA(model=Model, stepsize=STEPSIZE, precondition_matrix=-torch.linalg.inv(hessian))
-                        #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=False)
+                        kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=False)
                         #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=False, precondition_matrix=-torch.linalg.inv(hessian))
                         #kernel = HMC_pyro(model=Model, stepsize=STEPSIZE, full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB, num_steps=NUM_STEPS)
                         #kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=False, traj_len=None)
@@ -1209,7 +1227,7 @@ if __name__ == '__main__':
                         #kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=True, precondition_matrix=-torch.linalg.inv(hessian), traj_len=None)
                         #kernel = mMALA(model=Model, stepsize=STEPSIZE, use_autograd=False, use_autohess=False)
                         #kernel = mMALA(model=Model, stepsize=STEPSIZE, use_autograd=True, use_autohess=True)
-                        kernel = mHMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=False, use_autohess=False, traj_len=None, fp_iterations=5)
+                        #kernel = mHMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=False, use_autohess=False, traj_len=None, fp_iterations=5)
                         #kernel = mHMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=True, use_autohess=True, traj_len=None, fp_iterations=5)
                         accept_probs = None
 
