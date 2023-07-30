@@ -97,8 +97,9 @@ class Tabular:
         if prior == 'normal':
             self.tables = torch.tensor(np.repeat(initial_tables[np.newaxis, ...], n_particle, axis=0)) if ((initial_tables is not None) and FROZEN) else torch.normal(mean=0, std=1, size=((n_particle,) + self.bins + (self.action_size,)))
             if idx is not None:
+                last_samples = torch.load('2DT1050000HMC.pt')[-1]
                 for i in idx:
-                    self.tables[(slice(None), *i)] = torch.normal(mean=-5, std=1, size=(n_particle, ))
+                    self.tables[(slice(None), *i)] = last_samples[i]#torch.normal(mean=-5, std=1, size=(n_particle, ))
             if verbose:
                 print("Q table size:", self.tables[-1].shape)        
         else:

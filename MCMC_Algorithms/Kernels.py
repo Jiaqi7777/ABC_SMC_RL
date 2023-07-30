@@ -345,6 +345,7 @@ class HMC(Kernel):
         self.stepsize = stepsize
         self.precondition = precondition_matrix
         self.use_autograd = use_autograd
+        self.momentum = []
     
         self.set_L(num_steps=num_steps, traj_len=traj_len, stepsize=stepsize, set_L=True)
 
@@ -394,7 +395,7 @@ class HMC(Kernel):
             proposed_gradient, proposed_logtarget_density, proposed_para_llh_info_dict, proposed_para_llh_grad_info_dict = self.gradient(parameter=full_para, info_dict=dict(), return_logtarget_density=True)
             p = p + stepsize * proposed_gradient[indices] * 0.5
         p = -p
-        
+        self.momentum.append(p)
         q_info_dict = {"logdensities":proposed_logtarget_density, "gradient":proposed_gradient, "llh_info_dict":proposed_para_llh_info_dict, "llh_grad_info_dict":proposed_para_llh_grad_info_dict}
         return q, p0, p, q_info_dict
 
