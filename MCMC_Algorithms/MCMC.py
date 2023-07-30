@@ -75,17 +75,18 @@ class MCMC:
             accept_prob, proposed_para, proposed_para_info_dict  = self.kernel.propose_accept(current_para=current_para,
                                                                          current_para_info_dict=current_para_info_dict, indices=idx)
 
-            if np.random.uniform(0,1) < accept_prob:
+            if np.random.uniform(0, 1) < accept_prob:
                 current_para = proposed_para
                 current_para_info_dict = proposed_para_info_dict
                 self.accepted += 1
+                self.ifaccept[i + 1] = 1
 
             pbar.set_description("Acceptance probability {}".format(np.round(self.accepted/(i+1), 2)))
 
-            self.samples[i+1] = current_para
-            self.logdensities[i+1] = current_para_info_dict["logdensities"]
-            self.proposed_logdensities[i+1] = proposed_para_info_dict["logdensities"]
-            self.accept_prob[i+1] = accept_prob
+            self.samples[i + 1] = current_para
+            self.logdensities[i + 1] = current_para_info_dict["logdensities"]
+            self.proposed_logdensities[i + 1] = proposed_para_info_dict["logdensities"]
+            self.accept_prob[i + 1] = accept_prob
 
         return self.samples
     

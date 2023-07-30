@@ -346,6 +346,7 @@ class HMC(Kernel):
         self.precondition = precondition_matrix
         self.use_autograd = use_autograd
         self.momentum = []
+        self.H_change = []
     
         self.set_L(num_steps=num_steps, traj_len=traj_len, stepsize=stepsize, set_L=True)
 
@@ -374,7 +375,7 @@ class HMC(Kernel):
             p0 = torch.normal(mean=torch.zeros(current_para.size()), std=1.)
 
         p = p0 + stepsize * current_gradient * 0.5
-        q = current_para
+        q = deepcopy(current_para)
         if full_para is None:
             for i in range(L):
                 q_move = torch.mv(self.precondition, p) if self.precondition is not None else p
@@ -410,14 +411,13 @@ class HMC(Kernel):
             proposed_para, p0, p, q_info_dict = self.move_(current_para=current_para, current_gradient=current_gradient, L=L, stepsize=stepsize)
         else:
             proposed_para = deepcopy(current_para)
-            proposed_para[indices], p0, p, q_info_dict = self.move_(current_para=current_para[indices], current_gradient=current_gradient[indices], L=L, stepsize=stepsize, full_para=current_para, indices=indices)
-
-
+            proposed_para[indices], p0, p, q_info_dict = self.move_(current_para=current_para[indices], current_gradient=current_gradient[indices], L=L, stepsize=stepsize, full_para=deepcopy(current_para), indices=indices)
         proposed_logtarget_density = q_info_dict["logdensities"]
         proposed_para_info_dict = q_info_dict
 
         H_old = self.hamiltonian(q=current_para, p=p0, q_logtarget_density=current_logtarget_density)
         H_new =  self.hamiltonian(q=proposed_para, p=p, q_logtarget_density=proposed_logtarget_density)
+        self.H_change.append(H_old - H_new)
         accept_prob = np.exp(torch_max_0(H_old - H_new))
 
         return accept_prob, proposed_para, proposed_para_info_dict
@@ -680,7 +680,7 @@ class Z(Kernel):
     def propose_accept(self, current_para, indices=None, current_para_info_dict=None):
         current_para_llh_info_dict = current_para_info_dict["llh_info_dict"] if current_para_info_dict.get("llh_info_dict") is not None else dict()
         proposed_blocked_para = self.move_(indices=indices)
-        proposed_para = current_para.copy()
+        proposed_para = current_para.deepcopy()
         proposed_para[slice(None), indices] = proposed_blocked_para
 
         # if current_para_info_dict.get("logdensities") is not None:
@@ -743,7 +743,7 @@ class AM(Kernel):
         return self.stepsize * torch.cov(torch.vstack(para_history).T) + self.stepsize * self.am_epsilon * torch.eye(len(para_history[0]))
     
     def move_ratio(self, current_para, proposed_para):
-        proposed_para_history = self.para_history.copy()
+        proposed_para_history = self.para_history.deepcopy()
         proposed_para_history[-1] = proposed_para
         proposed_cov = self.cov(proposed_para_history)
         move_ratio = stats.multivariate_normal.logpdf(proposed_para, mean=current_para, cov=self.covariance_matrix) - \
