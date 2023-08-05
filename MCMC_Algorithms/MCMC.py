@@ -260,7 +260,10 @@ def MCMC_update(obs, posterior_samples, model, env):
     else:
         batch_indices = slice(None)
         
-    prior = IsotropicGaussianPrior(sd=PRIOR_SIGMA)
+    if TRANSFORM:
+        prior = TruncatedGaussianPrior(sd=PRIOR_SIGMA)
+    else:
+        prior = IsotropicGaussianPrior(sd=PRIOR_SIGMA)
     data = torch.tensor(obs._buffers["rewards"], dtype=torch.float32)[-BUFFER_SIZE:][batch_indices]
     
     if STOCHASTIC:
@@ -274,7 +277,10 @@ def MCMC_update(obs, posterior_samples, model, env):
 
     else:
         '''Determinisitc'''
-        abclikelihood = GaussianABCLikelihood(epsilon=EPSILON)
+        if TRANSFORM:
+            abclikelihood = TruncatedGaussianABCLikelihood(epsilon=EPSILON)
+        else:
+            abclikelihood = GaussianABCLikelihood(epsilon=EPSILON)
         r_hat = partial(generate_samples, model=model, obs=obs._buffers,  batch_indices=batch_indices)
         llh_transform_grad_fn = lambda parameter:  tabular_indicator_deterministic(para=parameter.reshape(env.n_cell + (env.action_space.n, )), model=model, obs=obs._buffers)#standard form
         Model = DeterministicSRModel(prior=prior, abclikelihood=abclikelihood, data=data, llh_transform_fn=r_hat, llh_transform_grad_fn=llh_transform_grad_fn)
@@ -399,6 +405,8 @@ if __name__ == '__main__':
     parser.add_argument('--sto', default=False)
     parser.add_argument('--online', default=False)
     parser.add_argument('--auto', default=False)
+    parser.add_argument('--warmup', default=WARMUP_RATIO, type=float)
+    parser.add_argument('--transform', default=TRANSFORM)
     args = parser.parse_args()
     print(args)
     time = args.time
@@ -416,7 +424,10 @@ if __name__ == '__main__':
     STOCHASTIC = args.sto
     ONLINE_LEARNING = args.online
     USE_AUTOGRAD = args.auto
+    WARMUP_RATIO = args.warmup
     
+    ADAPT_STEP_SIZE = True if WARMUP_RATIO > 0 else False
+    ADAPT_MASS_MATRIX = False #True if WARMUP_RATIO > 0 else False
 
     N_PARTICLE = training_steps + 1
     random.seed(seed)
@@ -477,8 +488,8 @@ if __name__ == '__main__':
                     if done or ( h + 1)  % FROZEN_T == 0:
                         #MCMC
                         # posterior_samples, accept_probs = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env)[:2]
-                        posterior_samples, accept_probs, logdensities, proposed_logdensities = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env)
-                        model.set_parameter(posterior_samples, idx=idx)
+                        posterior_samples, accept_probs, logdensities, proposed_logdensities = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env)[:4]
+                        model.set_parameter(posterior_samples, idx=FROZEN_IDX)
                         display_results(posterior_samples=posterior_samples, model=model, accept_probs=accept_probs, logdensities=logdensities, proposed_logdensities=proposed_logdensities)
 
                     if done:
@@ -503,10 +514,15 @@ if __name__ == '__main__':
         block_accept = []
         epsilon_lst = [10, 1, 1e-1, 1e-2, 1e-3, 1e-4][2:3]
         data_percentage_lst = np.linspace(0.1, 1, 10)[-1:]
+        s_l = [1e-4, 1e-3, 1e-2, 1e-1]
         for repeat in range(REPEAT_EXPERIMENT):
             print('Repeat no. ', repeat)
             error_all_epsilon = []
+            samples_all_stepsize = []
+            H_change_all_stepsize = []
             for EPSILON in epsilon_lst:
+            # for STEPSIZE in s_l:
+                print(STEPSIZE)
                 error_all_percentage = []
                 for data_percentage in data_percentage_lst:
                     print(f'Experiment with epsilon={EPSILON}, %={data_percentage}')
@@ -514,14 +530,22 @@ if __name__ == '__main__':
                     obs = env.uniform_obs
                     posterior_samples = model.get_parameter()
                     # posterior_samples, accept_probs = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env)[:2]
+                    # print(posterior_samples)
+                    if TRANSFORM:
+                        posterior_samples = TruncatedGaussianABCLikelihood.log_neg_transform(posterior_samples)
+                    # print(posterior_samples)
                     posterior_samples, accept_probs, logdensities, proposed_logdensities, mcmc, kernel = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env)
+                    if TRANSFORM:
+                        posterior_samples = TruncatedGaussianABCLikelihood.neg_exp_transform(posterior_samples)
                     model.set_parameter(posterior_samples, idx=FROZEN_IDX)
                     display_results(posterior_samples=posterior_samples, model=model, accept_probs=accept_probs, logdensities=logdensities, proposed_logdensities=proposed_logdensities)
                     average_over = min(100, len(posterior_samples))
                     error_all_percentage.append(mean_squared_error(Q_star.flatten(), torch.mean(posterior_samples[-average_over:].reshape(average_over, -1), axis=0)))
                     print('error_all_percentage', error_all_percentage)
-                error_all_epsilon.append(error_all_percentage)
-            error_all.append(error_all_epsilon)
+                samples_all_stepsize.append(posterior_samples)
+                H_change_all_stepsize.append(kernel.H_change)
+                # error_all_epsilon.append(error_all_percentage)
+            # error_all.append(error_all_epsilon)
             experiment_info = {
                 'args': vars(args), 
                 'epsilon_list': epsilon_lst, 
