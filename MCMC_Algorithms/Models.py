@@ -293,11 +293,11 @@ class TruncatedGaussianABCLikelihood(GaussianABCLikelihood):
 
     @staticmethod
     def neg_exp_transform(parameter):
-        return - torch.exp(parameter)
+        return - torch.exp(torch.tensor(parameter))
     
     @staticmethod
     def log_neg_transform(parameter):
-        return torch.log(-parameter)
+        return torch.log(- torch.tensor(parameter))
     
     def llh_(self, data, parameter=None, mean_fn=None, llh_info_dict=dict()):
         """see self.llh, where mean_fn is the llh_transform_fn of self.llh"""

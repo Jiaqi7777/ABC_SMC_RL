@@ -52,7 +52,7 @@ class Kernel:
             - llh_info_dict: dict
                 - The llh_info_dict returned by the the logtarget_density as a by-product
         """
-
+        parameter = torch.tensor(parameter, dtype=torch.float32)
         llh_info_dict = info_dict["llh_info_dict"] if info_dict.get("llh_info_dict") is not None else dict()
         logtarget_density = info_dict.get("logdensities")
         llh_grad_info_dict = dict()
@@ -64,6 +64,7 @@ class Kernel:
                 logtarget_density, gradient, llh_info_dict = self.model.logtarget_auto_gradient(parameter=parameter) #llh_info_dict must be none to compute the gradient correctly
             else:
                 gradient, llh_grad_info_dict = self.model.logtarget_gradient(parameter=parameter, llh_info_dict=llh_info_dict)
+            # print(gradient, parameter)
         # print(gradient)
         if return_logtarget_density is True:
             if logtarget_density is None or llh_info_dict is None:
@@ -325,7 +326,7 @@ class mMALA(MALA):
 
 
 class HMC(Kernel):
-    def __init__(self, model, traj_len=2*np.pi, num_steps=None, stepsize=0.5, precondition_matrix=None, use_autograd=True, *args, **kwargs):
+    def __init__(self, model, traj_len=2*np.pi, num_steps=None, stepsize=0.5, mass=1., precondition_matrix=None, use_autograd=True, *args, **kwargs):
         """HMC kernel with precondition matrix
         model: see Kernel()
         traj_len:
@@ -343,6 +344,7 @@ class HMC(Kernel):
         super(HMC, self).__init__(model=model, *args, **kwargs)  
         self.traj_len = traj_len 
         self.stepsize = stepsize
+        self.mass = mass
         self.precondition = precondition_matrix
         self.use_autograd = use_autograd
         self.momentum = []
@@ -370,9 +372,11 @@ class HMC(Kernel):
                 - the info dict returned by the log likelihood function at q, see Kernel().gradient
         """
         if self.precondition is not None:
-            p0 = torch.distributions.multivariate_normal.MultivariateNormal(loc=torch.zeros(current_para.size()), precision_matrix=self.precondition).sample()
+            if full_para is not None:
+                self.precondition = self.precondition[indices][:, indices]
+            p0 = torch.distributions.multivariate_normal.MultivariateNormal(loc=torch.zeros(current_para.size()), precision_matrix=self.precondition/self.mass).sample()
         else:
-            p0 = torch.normal(mean=torch.zeros(current_para.size()), std=1.)
+            p0 = torch.normal(mean=torch.zeros(current_para.size()), std=self.mass)
 
         p = p0 + stepsize * current_gradient * 0.5
         q = deepcopy(current_para)

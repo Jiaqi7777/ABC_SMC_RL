@@ -294,6 +294,10 @@ def MCMC_update(obs, posterior_samples, model, env):
         z_kernel = Z(model=Model)
     else:
         # hessian = torch.autograd.functional.hessian(fn, posterior_samples[0].reshape(-1)) + 1e-6 * torch.eye(len(posterior_samples[0]).reshape(-1))
+        if TRANSFORM:
+            hessian = torch.autograd.functional.hessian(fn, abclikelihood.log_neg_transform(Q_star.reshape(-1))) + 1e-6 * torch.eye(len(posterior_samples[0].reshape(-1)))
+        else:
+            hessian = torch.autograd.functional.hessian(fn, torch.tensor(Q_star.reshape(-1), dtype=torch.float32)) #+ 1e-6 * torch.eye(len(posterior_samples[0].reshape(-1)))
         # kernel = RandomWalk(model=Model, stepsize=STEPSIZE)
         #kernel = RandomWalk(model=Model, stepsize=STEPSIZE, covariance_matrix=-torch.linalg.inv(hessian))
         #kernel = pCN(model=Model, stepsize=STEPSIZE)
@@ -302,10 +306,9 @@ def MCMC_update(obs, posterior_samples, model, env):
         #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=USE_AUTOGRAD)
         #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=USE_AUTOGRAD, precondition_matrix=-torch.linalg.inv(hessian))
         # kernel = HMC_pyro(model=Model, stepsize=STEPSIZE, full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB, num_steps=NUM_STEPS)
-        kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=USE_AUTOGRAD)
+        # kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=USE_AUTOGRAD)
         # kernel = AM(model=Model,  stepsize=STEPSIZE)
-        # kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=USE_AUTOGRAD, precondition_matrix=-torch.linalg.inv(hessian), traj_len=None)
-        # kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=USE_AUTOGRAD, precondition_matrix=-torch.linalg.inv(hessian), traj_len=None)
+        kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=USE_AUTOGRAD, mass=MASS, precondition_matrix=-torch.linalg.inv(hessian), traj_len=None)
         #kernel = mMALA(model=Model, stepsize=STEPSIZE, use_autograd=USE_AUTOGRAD, use_autohess=False)
         #kernel = mMALA(model=Model, stepsize=STEPSIZE, use_autograd=USE_AUTOGRAD, use_autohess=True)
         #kernel = mHMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=USE_AUTOGRAD, use_autohess=False, traj_len=None, fp_iterations=50)
@@ -398,6 +401,7 @@ if __name__ == '__main__':
     parser.add_argument('-p', '--show', default=SHOW)
     parser.add_argument('-e', '--epsilon', default=EPSILON, type=float)
     parser.add_argument('-n', '--stepsize', default=STEPSIZE, type=float)
+    parser.add_argument('--mass', default=MASS, type=float)
     parser.add_argument('--seed', default=SEED, type=int)
     parser.add_argument('--MCMC', default=True, action='store_false', help='Bool type')
     parser.add_argument('-g', '--Greedy', default=GREEDY, action='store_true', help='Bool type')
@@ -418,6 +422,7 @@ if __name__ == '__main__':
     seed = args.seed
     MCMC_SHOW_DISABLE=args.MCMC
     STEPSIZE = args.stepsize
+    MASS = args.mass
     warmup_steps = int(training_steps * WARMUP_RATIO)
     GREEDY = args.Greedy
     env_name = args.Env
@@ -425,6 +430,7 @@ if __name__ == '__main__':
     ONLINE_LEARNING = args.online
     USE_AUTOGRAD = args.auto
     WARMUP_RATIO = args.warmup
+    TRANSFORM = args.transform
     
     ADAPT_STEP_SIZE = True if WARMUP_RATIO > 0 else False
     ADAPT_MASS_MATRIX = False #True if WARMUP_RATIO > 0 else False
@@ -522,7 +528,7 @@ if __name__ == '__main__':
             H_change_all_stepsize = []
             for EPSILON in epsilon_lst:
             # for STEPSIZE in s_l:
-                print(STEPSIZE)
+                print('MCMC Stepsize', STEPSIZE)
                 error_all_percentage = []
                 for data_percentage in data_percentage_lst:
                     print(f'Experiment with epsilon={EPSILON}, %={data_percentage}')
