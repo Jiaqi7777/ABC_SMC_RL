@@ -345,7 +345,7 @@ class HMC(Kernel):
         self.traj_len = traj_len 
         self.stepsize = stepsize
         self.mass = mass
-        self.precondition = precondition_matrix
+        self.precondition = precondition_matrix / mass if precondition_matrix is not None else None
         self.use_autograd = use_autograd
         self.momentum = []
         self.H_change = []
@@ -374,7 +374,7 @@ class HMC(Kernel):
         if self.precondition is not None:
             if full_para is not None:
                 self.precondition = self.precondition[indices][:, indices]
-            p0 = torch.distributions.multivariate_normal.MultivariateNormal(loc=torch.zeros(current_para.size()), precision_matrix=self.precondition/self.mass).sample()
+            p0 = torch.distributions.multivariate_normal.MultivariateNormal(loc=torch.zeros(current_para.size()), precision_matrix=self.precondition).sample()
         else:
             p0 = torch.normal(mean=torch.zeros(current_para.size()), std=self.mass)
 
@@ -391,7 +391,7 @@ class HMC(Kernel):
             p = p + stepsize * proposed_gradient * 0.5
         else:
             for i in range(L):
-                q_move = torch.mv(self.precondition, p) if self.precondition is not None else p
+                q_move = torch.mv(self.precondition, p) if self.precondition is not None else p / self.mass
                 q = q + stepsize * q_move
                 full_para[indices] = q
                 if i != (L-1):
