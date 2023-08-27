@@ -141,14 +141,14 @@ class TruncatedGaussianPrior:
         parameter: torch.tensor
             - the parameter for which the log prior gradient is computed
         """
-        return torch.where(parameter <= 0, - 4 * parameter / (self.sigma ** 2), torch.full_like(parameter, - float('inf')))
+        return torch.where(parameter <= 0, - 4 * parameter / (self.sigma ** 2), torch.full_like(parameter, - float('inf'))) * parameter + torch.ones_like(parameter)
     
     def logprior_hessian(self, parameter):
         """return the hessian of the log prior with respect to the parameter
         parameter: torch.tensor
             - the parameter for which the log prior hessian is computed
         """
-        return torch.where(parameter <= 0, - 4 / (self.sigma ** 2) * torch.eye(parameter.size()[-1]), torch.full_like(parameter, - float('inf')))
+        return torch.where(parameter <= 0, - 4 / (self.sigma ** 2) * torch.eye(parameter.size()[-1]), torch.full_like(parameter, - float('inf'))) * parameter + torch.ones_like(parameter)
     
     
     def covariance_matrix(self, parameter_len):
@@ -293,11 +293,11 @@ class TruncatedGaussianABCLikelihood(GaussianABCLikelihood):
 
     @staticmethod
     def neg_exp_transform(parameter):
-        return - torch.exp(torch.tensor(parameter))
+        return - torch.exp(parameter)
     
     @staticmethod
     def log_neg_transform(parameter):
-        return torch.log(- torch.tensor(parameter))
+        return torch.log(- parameter)
     
     def llh_(self, data, parameter=None, mean_fn=None, llh_info_dict=dict()):
         """see self.llh, where mean_fn is the llh_transform_fn of self.llh"""

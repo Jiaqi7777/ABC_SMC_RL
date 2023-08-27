@@ -52,7 +52,7 @@ class Kernel:
             - llh_info_dict: dict
                 - The llh_info_dict returned by the the logtarget_density as a by-product
         """
-        parameter = torch.tensor(parameter, dtype=torch.float32)
+        parameter = parameter.to(torch.float32)#torch.tensor(parameter, dtype=torch.float32)
         llh_info_dict = info_dict["llh_info_dict"] if info_dict.get("llh_info_dict") is not None else dict()
         logtarget_density = info_dict.get("logdensities")
         llh_grad_info_dict = dict()
@@ -507,10 +507,10 @@ class HMC(Kernel):
         gamma = 0.05
         t0 = 10
         kappa = 0.75
-
+        traj_len = 2 * np.pi if self.traj_len is None else self.traj_len
         pbar = tqdm(range(iterations))
         for i in pbar:
-            L = self.set_L(num_steps=None, traj_len=self.traj_len, stepsize=eps, set_L=False)
+            L = self.set_L(num_steps=None, traj_len=traj_len, stepsize=eps, set_L=False)
             try:
                 accept_prob, proposed_para, proposed_para_info_dict  = self.propose_accept_(current_para=current_para, 
                                                                             current_para_info_dict=current_para_info_dict,
@@ -534,7 +534,7 @@ class HMC(Kernel):
         stepsize = np.exp(logeps_bar)
         if set_stepsize is True:   
             self.set_stepsize(stepsize=stepsize)
-            self.set_L(num_steps=None, traj_len=self.traj_len, stepsize=stepsize, set_L=True)
+            self.set_L(num_steps=None, traj_len=traj_len, stepsize=stepsize, set_L=True)
             print("HMC stepsize set up {}".format(self.stepsize))
 
         return current_para, current_para_info_dict, stepsize
@@ -559,13 +559,14 @@ class HMC(Kernel):
         return:
             - num_steps: int
         """
-
         if traj_len is not None:
             num_steps = np.int64(np.ceil(traj_len / stepsize))
             if set_L is True:
                 self.L = num_steps
             return num_steps
         else:
+            if num_steps is None:
+                raise ValueError('Num_step cannot be None while traj_len is None in warmup')
             if set_L is True:
                 self.L = num_steps
             return num_steps
