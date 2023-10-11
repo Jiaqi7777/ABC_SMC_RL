@@ -1,6 +1,7 @@
 import numpy as np
 import scipy.stats as stats
 import torch
+from functools import partial
 from copy import deepcopy
 import pyro
 from collections import Counter
@@ -673,7 +674,29 @@ class HMC_pyro(Kernel):
         self.pyro_kernel =  pyro.infer.mcmc.HMC(model=pyro_model, step_size=self.stepsize, **self.kwargs)
         return self.pyro_kernel
     
+class NUTS_pyro(Kernel):
+    """The NUTS kernel for use in pyro"""
+    def __init__(self, model, stepsize=0.5, precondition_matrix=None, *args, **kwargs):
+        print('NUTS stepsize', stepsize)
+        super(NUTS_pyro, self).__init__(model=model, *args, **kwargs)
+        self.stepsize = stepsize
+        self.precondition_matrix = precondition_matrix
+        self.kwargs = kwargs
+        self.original = False  #flag to identify whether the kernel subclass is origin
+        
+    def get_pyro_kernel(self, parameter_len, full_para=None):
+        """return the HMC pyro kernel with input parameters specified during initialisation of the class
+        parameter_len: len
+            - the dimension of the sampling (parameter) space
+        """
+        pyro.clear_param_store()
+        pyro_model = lambda data: self.model.pyro_model(data=data, parameter_len=parameter_len, full_para=full_para)
+        self.pyro_kernel =  pyro.infer.mcmc.NUTS(model=pyro_model, step_size=self.stepsize, **self.kwargs)
+        return self.pyro_kernel
 
+def kinetic_fn(parameter, precondition_matrix):
+    return parameter @ torch.mv(precondition_matrix, parameter)
+    
 class Z(Kernel):
     def __init__(self, model, use_autograd=True, use_autohess=True, *args, **kwargs):
         super(Z, self).__init__(model, use_autograd, use_autohess, *args, **kwargs)

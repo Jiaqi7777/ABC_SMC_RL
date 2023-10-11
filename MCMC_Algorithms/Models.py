@@ -15,7 +15,7 @@ def generate_samples(para, model, obs, batch_indices=None, buffer_size=BUFFER_SI
     s1 = np.array(obs['state1'])[-buffer_size:][batch_indices]
     a = np.array(obs['action'])[-buffer_size:][batch_indices]
     dones = torch.tensor(np.array(obs['done'])[-buffer_size:][batch_indices].astype(int))
-    # print(model.tables[:,0,0, 0])
+
     return model.q_value(para, s0.T, a) - torch.where(dones == 1, torch.zeros(len(s0)), model.gamma * model.v_value(para, s1.T)) #time 
 
 def generate_z(indices=slice(None), obs=None, env=None):
@@ -141,7 +141,7 @@ class TruncatedGaussianPrior:
         parameter: torch.tensor
             - the parameter for which the log prior gradient is computed
         """
-        return torch.where(parameter <= 0, - 4 * parameter / (self.sigma ** 2), torch.full_like(parameter, - float('inf'))) * parameter + torch.ones_like(parameter)
+        return torch.where(parameter <= 0, - 4 * parameter / (self.sigma ** 2), torch.full_like(parameter, - float('inf'))) * parameter
     
     def logprior_hessian(self, parameter):
         """return the hessian of the log prior with respect to the parameter
@@ -431,7 +431,7 @@ class DeterministicSRModel():
             return logtarget_density
         return torch.autograd.functional.hessian(fn, parameter)
 
-    def pyro_model(self, data, parameter_len):
+    def pyro_model(self, data, parameter_len, full_para=None):
         """the equivalent pyro model, for use in pyro MCMC functions
         data: torch.tensor
             - this input is required as a standard format of a pyro model
@@ -439,6 +439,9 @@ class DeterministicSRModel():
             - the dimension of the parameter
         """
         prior_parameter = pyro.sample("prior_parameter", dist.MultivariateNormal(torch.zeros(parameter_len), self.prior.covariance_matrix(parameter_len=parameter_len)))
+        if full_para is not None:
+            full_para[FROZEN_NO] = prior_parameter
+            prior_parameter = full_para
         mean = self.abclikelihood.compute_mean(parameter=prior_parameter, mean_fn=self.llh_transform_fn, llh_info_dict=dict())
         with pyro.plate("data_plate"):
             pyro.sample("obs", dist.MultivariateNormal(mean, self.abclikelihood.covariance_matrix(data_len=len(self.data))), obs=data)

@@ -19,6 +19,38 @@ from MCMC_Algorithms.Models import *
 from parameter import *
 from utils import *
 
+def autocorrelation(chain):
+    """
+    Calculate the autocorrelation of a chain.
+
+    Parameters:
+        chain (torch.Tensor): The MCMC chain.
+
+    Returns:
+        torch.Tensor: Autocorrelation values.
+    """
+    chain = chain.cpu().numpy()  
+    n = len(chain)
+    mean = np.mean(chain)
+    centered_chain = chain - mean
+    autocorr = np.correlate(centered_chain, centered_chain, mode='full')
+    autocorr /= autocorr[0]  # Normalize
+    return torch.tensor(autocorr[n - 1:], dtype=torch.float32)
+
+def effective_sample_size(chain):
+    """
+    Calculate the Effective Sample Size (ESS) of a chain.
+
+    Parameters:
+        chain (torch.Tensor): The MCMC chain.
+
+    Returns:
+        float: The estimated ESS.
+    """
+    autocorr_values = np.corrcoef(chain)
+    ESS = chain.size(0) / (1 + 2 * torch.sum(autocorr_values))
+    return ESS
+
 class MCMC:
     """the class to run MCMC"""
     def __init__(self, kernel, warmup_steps=0, num_samples=MCMC_SAMPLE, initial_params=None, params_dim=None, warmup_settings=dict(target_prob=0.7, auto_init_stepsize=True), **kwargs):
@@ -133,7 +165,7 @@ class MCMC_pyro(MCMC):
         """
         super(MCMC_pyro, self).__init__(kernel=kernel, warmup_steps=warmup_steps, num_samples=num_samples, initial_params=initial_params, params_dim=params_dim, **kwargs)
         self.kernel_ = kernel
-        self.pyro_kernel = kernel.get_pyro_kernel(parameter_len=self.params_dim)
+        self.pyro_kernel = kernel.get_pyro_kernel(parameter_len=self.params_dim, full_para=torch.tensor(Q_star, dtype=torch.float32).reshape(-1))
         self.pyro_mcmc = pyro.infer.mcmc.MCMC(kernel=self.pyro_kernel, num_samples=num_samples, initial_params={'prior_parameter': initial_params}, warmup_steps=warmup_steps, disable_progbar=disable_progbar, **kwargs)
         self.data = self.kernel.model.data
 
@@ -294,7 +326,7 @@ def MCMC_update(obs, posterior_samples, model, env):
         z_kernel = Z(model=Model)
     else:
         # hessian = torch.autograd.functional.hessian(fn, posterior_samples[0].reshape(-1)) + 1e-6 * torch.eye(len(posterior_samples[0]).reshape(-1))
-        hessian = torch.autograd.functional.hessian(fn, torch.tensor(Q_star, dtype=torch.float32).reshape(-1)) - 1e-6 * torch.eye(len(posterior_samples[0].reshape(-1)))
+        hessian = torch.autograd.functional.hessian(fn, TruncatedGaussianABCLikelihood.log_neg_transform(torch.tensor(Q_star, dtype=torch.float32)).reshape(-1)) - 1e-6 * torch.eye(len(posterior_samples[0].reshape(-1)))
         # kernel = RandomWalk(model=Model, stepsize=STEPSIZE)
         #kernel = RandomWalk(model=Model, stepsize=STEPSIZE, covariance_matrix=-torch.linalg.inv(hessian))
         #kernel = pCN(model=Model, stepsize=STEPSIZE)
@@ -303,10 +335,14 @@ def MCMC_update(obs, posterior_samples, model, env):
         #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=USE_AUTOGRAD)
         #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=USE_AUTOGRAD, precondition_matrix=-torch.linalg.inv(hessian))
         # kernel = HMC_pyro(model=Model, stepsize=STEPSIZE, full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB, num_steps=NUM_STEPS)
-        # kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=USE_AUTOGRAD)
+        if use_precondition:
+            print("Precondition Used", use_precondition)
+            # kernel = HMC(model=Model, stepsize=STEPSIZE, use_autograd=USE_AUTOGRAD, mass=MASS, precondition_matrix=-torch.linalg.inv(hessian))
+            # kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=USE_AUTOGRAD, mass=MASS, precondition_matrix=-torch.linalg.inv(hessian), traj_len=TRAJECTORY_LENGTH)
+            kernel = NUTS_pyro(model=Model, stepsize=STEPSIZE, full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB, precondition_matrix=-torch.linalg.inv(hessian))
+        else:
+            kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=USE_AUTOGRAD, traj_len=TRAJECTORY_LENGTH)
         # kernel = AM(model=Model,  stepsize=STEPSIZE)
-        # kernel = HMC(model=Model, stepsize=STEPSIZE, use_autograd=USE_AUTOGRAD, mass=MASS, precondition_matrix=-torch.linalg.inv(hessian))
-        kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=USE_AUTOGRAD, mass=MASS, precondition_matrix=-torch.linalg.inv(hessian), traj_len=None)
         #kernel = mMALA(model=Model, stepsize=STEPSIZE, use_autograd=USE_AUTOGRAD, use_autohess=False)
         #kernel = mMALA(model=Model, stepsize=STEPSIZE, use_autograd=USE_AUTOGRAD, use_autohess=True)
         #kernel = mHMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=USE_AUTOGRAD, use_autohess=False, traj_len=None, fp_iterations=50)
@@ -399,6 +435,7 @@ if __name__ == '__main__':
     parser.add_argument('-p', '--show', default=SHOW)
     parser.add_argument('-e', '--epsilon', default=EPSILON, type=float)
     parser.add_argument('-n', '--stepsize', default=STEPSIZE, type=float)
+    parser.add_argument('--traj_len', default=TRAJECTORY_LENGTH, type=float)
     parser.add_argument('--mass', default=MASS, type=float)
     parser.add_argument('--seed', default=SEED, type=int)
     parser.add_argument('--MCMC', default=True, action='store_false', help='Bool type')
@@ -406,9 +443,10 @@ if __name__ == '__main__':
     parser.add_argument('--Env', default=ENV_NAME)
     parser.add_argument('--sto', default=False)
     parser.add_argument('--online', default=False)
-    parser.add_argument('--auto', default=False)
+    parser.add_argument('--auto', default=False, action='store_true', help='Bool type')
     parser.add_argument('--warmup', default=WARMUP_RATIO, type=float)
     parser.add_argument('--transform', default=TRANSFORM)
+    parser.add_argument('--precondition', default=False)
     args = parser.parse_args()
     print(args)
     time = args.time
@@ -420,6 +458,7 @@ if __name__ == '__main__':
     seed = args.seed
     MCMC_SHOW_DISABLE=args.MCMC
     STEPSIZE = args.stepsize
+    TRAJECTORY_LENGTH = args.traj_len
     MASS = args.mass
     warmup_steps = int(training_steps * WARMUP_RATIO)
     GREEDY = args.Greedy
@@ -429,9 +468,11 @@ if __name__ == '__main__':
     USE_AUTOGRAD = args.auto
     WARMUP_RATIO = args.warmup
     TRANSFORM = args.transform
+    use_precondition = args.precondition
     
     ADAPT_STEP_SIZE = True if WARMUP_RATIO > 0 else False
     ADAPT_MASS_MATRIX = False #True if WARMUP_RATIO > 0 else False
+    KERNEL_NAME = 'NUTS'
 
     N_PARTICLE = training_steps + 1
     random.seed(seed)
@@ -518,14 +559,15 @@ if __name__ == '__main__':
         block_accept = []
         epsilon_lst = [10, 1, 1e-1, 1e-2, 1e-3, 1e-4][2:3]
         data_percentage_lst = np.linspace(0.1, 1, 10)[-1:]
+        traj_len_L = [0.5, 1, 2, 2.1, 2.2, 2.8]
         s_l = [1e-4, 1e-3, 1e-2, 1e-1]
         for repeat in range(REPEAT_EXPERIMENT):
             print('Repeat no. ', repeat)
             error_all_epsilon = []
             samples_all_stepsize = []
             H_change_all_stepsize = []
-            for EPSILON in epsilon_lst:
-            # for STEPSIZE in s_l:
+            # for EPSILON in epsilon_lst:
+            for TRAJECTORY_LENGTH in traj_len_L:
                 print('MCMC Stepsize', STEPSIZE)
                 error_all_percentage = []
                 for data_percentage in data_percentage_lst:
@@ -548,6 +590,7 @@ if __name__ == '__main__':
                     print('error_all_percentage', error_all_percentage)
                 samples_all_stepsize.append(posterior_samples)
                 H_change_all_stepsize.append(kernel.H_change)
+                torch.save(posterior_samples, f'Untitled Folder/2DTransform{use_precondition}T{training_steps}Kernel{KERNEL_NAME}traj_len{kernel.traj_len}.pt')
                 # error_all_epsilon.append(error_all_percentage)
             # error_all.append(error_all_epsilon)
             experiment_info = {

@@ -1,3 +1,4 @@
+import numpy as np
 #RL
 #Env 
 ENV_NAME = 'GridWorld'
@@ -58,6 +59,7 @@ TARGET_ACCEPT_PROB = 0.7
 WARMUP_RATIO = 0
 
 NUM_STEPS = 1000
+TRAJECTORY_LENGTH = 2 * np.pi
 MASS = 1
 FULL_MASS = False
 FROZEN = True
