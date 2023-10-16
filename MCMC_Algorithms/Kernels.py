@@ -66,7 +66,7 @@ class Kernel:
             else:
                 gradient, llh_grad_info_dict = self.model.logtarget_gradient(parameter=parameter, llh_info_dict=llh_info_dict)
             # print(gradient, parameter)
-        # print(gradient)
+        # print(gradient, 'gradient')
         if return_logtarget_density is True:
             if logtarget_density is None or llh_info_dict is None:
                 logtarget_density, llh_info_dict = self.model.logtarget_density(parameter=parameter, llh_info_dict=llh_info_dict)
@@ -664,13 +664,13 @@ class HMC_pyro(Kernel):
         self.kwargs = kwargs
         self.original = False  #flag to identify whether the kernel subclass is origin
         
-    def get_pyro_kernel(self, parameter_len):
+    def get_pyro_kernel(self, parameter_len, full_para=None):
         """return the HMC pyro kernel with input parameters specified during initialisation of the class
         parameter_len: len
             - the dimension of the sampling (parameter) space
         """
         pyro.clear_param_store()
-        pyro_model = lambda data: self.model.pyro_model(data=data, parameter_len=parameter_len)
+        pyro_model = lambda data: self.model.pyro_model(data=data, parameter_len=parameter_len, full_para=full_para)
         self.pyro_kernel =  pyro.infer.mcmc.HMC(model=pyro_model, step_size=self.stepsize, **self.kwargs)
         return self.pyro_kernel
     

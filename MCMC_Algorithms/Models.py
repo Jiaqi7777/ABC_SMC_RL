@@ -1,5 +1,6 @@
 import numpy as np
 from scipy.stats import truncnorm
+from copy import deepcopy
 import torch
 import pyro
 import pyro.distributions as dist
@@ -293,11 +294,11 @@ class TruncatedGaussianABCLikelihood(GaussianABCLikelihood):
 
     @staticmethod
     def neg_exp_transform(parameter):
-        return - torch.exp(parameter)
+        return - torch.exp(parameter).to(torch.float32)
     
     @staticmethod
     def log_neg_transform(parameter):
-        return torch.log(- parameter)
+        return torch.log(- parameter).to(torch.float32)
     
     def llh_(self, data, parameter=None, mean_fn=None, llh_info_dict=dict()):
         """see self.llh, where mean_fn is the llh_transform_fn of self.llh"""
@@ -439,9 +440,15 @@ class DeterministicSRModel():
             - the dimension of the parameter
         """
         prior_parameter = pyro.sample("prior_parameter", dist.MultivariateNormal(torch.zeros(parameter_len), self.prior.covariance_matrix(parameter_len=parameter_len)))
-        if full_para is not None:
-            full_para[FROZEN_NO] = prior_parameter
-            prior_parameter = full_para
+        print(prior_parameter, parameter_len)#, pyro.sample("test_para", dist.MultivariateNormal(torch.zeros(parameter_len), self.prior.covariance_matrix(parameter_len=parameter_len))))
+        # if full_para is not None:
+            # print('Full para')
+            # prior_parameter = prior_parameter.clone()
+            # prior_parameter[FROZEN_NO].detach()
+            # print(prior_parameter)
+            # prior_parameter[FROZEN_NO] = deepcopy(full_para[FROZEN_NO])
+            # print(prior_parameter)
+            # prior_parameter = full_para
         mean = self.abclikelihood.compute_mean(parameter=prior_parameter, mean_fn=self.llh_transform_fn, llh_info_dict=dict())
         with pyro.plate("data_plate"):
             pyro.sample("obs", dist.MultivariateNormal(mean, self.abclikelihood.covariance_matrix(data_len=len(self.data))), obs=data)
