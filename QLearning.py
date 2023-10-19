@@ -51,7 +51,6 @@ def QLearning(Q, env, n_episodes=10, horizon=50, gamma=0.95, epsilon=0.4, alpha=
     for e in range(n_episodes):
         alpha = initial_alpha / (e+1)
         R = 0
-        Regret = 0
         s0, _ = env.reset()
         for t in range(horizon):
             a = np.argmax(Q[s0]) if np.random.uniform(0, 1) > epsilon else random.choice(range(env.action_space.n))

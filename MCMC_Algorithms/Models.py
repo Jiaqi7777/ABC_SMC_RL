@@ -8,7 +8,7 @@ from parameter import *
 from parameter import *
 
 def generate_samples(para, model, obs, batch_indices=None, buffer_size=BUFFER_SIZE, batch_training=BATCH_TRAINING):
-    para = para.reshape(model.state_size + (model.action_size, ))
+    # print(para, 'generate samples')
     if not batch_training:
         batch_indices = range(min(len(obs['state0']), buffer_size))
     
@@ -16,8 +16,12 @@ def generate_samples(para, model, obs, batch_indices=None, buffer_size=BUFFER_SI
     s1 = np.array(obs['state1'])[-buffer_size:][batch_indices]
     a = np.array(obs['action'])[-buffer_size:][batch_indices]
     dones = torch.tensor(np.array(obs['done'])[-buffer_size:][batch_indices].astype(int))
-
-    return model.q_value(para, s0.T, a) - torch.where(dones == 1, torch.zeros(len(s0)), model.gamma * model.v_value(para, s1.T)) #time 
+    try:
+        para = para.reshape(model.state_size + (model.action_size, ))
+        return model.q_value(para, s0.T, a) - torch.where(dones == 1, torch.zeros(len(s0)), model.gamma * model.v_value(para, s1.T)) #time 
+    except:
+        para = para.reshape((model.state_size[0], model.state_size[1] - 1) + (model.action_size, ))
+        return model.q_value(para, s0.T, a, full=False) - torch.where(dones == 1, torch.zeros(len(s0)), model.gamma * model.v_value(para, s1.T, full=False)) #time 
 
 def generate_z(indices=slice(None), obs=None, env=None):
     s0 = np.array(obs['state0'])[indices]
@@ -439,18 +443,21 @@ class DeterministicSRModel():
         parameter_len: int
             - the dimension of the parameter
         """
-        prior_parameter = pyro.sample("prior_parameter", dist.MultivariateNormal(torch.zeros(parameter_len), self.prior.covariance_matrix(parameter_len=parameter_len)))
-        print(prior_parameter, parameter_len)#, pyro.sample("test_para", dist.MultivariateNormal(torch.zeros(parameter_len), self.prior.covariance_matrix(parameter_len=parameter_len))))
+        prior_parameter = pyro.sample("prior_parameter", dist.MultivariateNormal(torch.zeros(parameter_len), torch.eye(parameter_len)*PRIOR_SIGMA))
+        # print(prior_parameter, parameter_len)#, pyro.sample("test_para", dist.MultivariateNormal(torch.zeros(parameter_len), self.prior.covariance_matrix(parameter_len=parameter_len))))
         # if full_para is not None:
-            # print('Full para')
-            # prior_parameter = prior_parameter.clone()
-            # prior_parameter[FROZEN_NO].detach()
-            # print(prior_parameter)
-            # prior_parameter[FROZEN_NO] = deepcopy(full_para[FROZEN_NO])
-            # print(prior_parameter)
-            # prior_parameter = full_para
+        #     print('Full para')
+            # FREEZE = [2,3]
+            # prior_parameter[FREEZE] = prior_parameter[FREEZE].detach()
+            # prior_parameter_copy = prior_parameter.clone()
+            # print(prior_parameter_copy)
+            # prior_parameter_copy[FREEZE] = deepcopy(full_para[FREEZE])
+            # print(prior_parameter_copy)
+            # full_para[FROZEN_NO] = prior_parameter
+            # prior_parameter = full_para.clone()
         mean = self.abclikelihood.compute_mean(parameter=prior_parameter, mean_fn=self.llh_transform_fn, llh_info_dict=dict())
         with pyro.plate("data_plate"):
+            # print(mean, 'mean')
             pyro.sample("obs", dist.MultivariateNormal(mean, self.abclikelihood.covariance_matrix(data_len=len(self.data))), obs=data)
             
 class StochasticSModel(DeterministicSRModel):

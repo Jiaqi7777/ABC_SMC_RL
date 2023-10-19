@@ -676,11 +676,12 @@ class HMC_pyro(Kernel):
     
 class NUTS_pyro(Kernel):
     """The NUTS kernel for use in pyro"""
-    def __init__(self, model, stepsize=0.5, precondition_matrix=None, *args, **kwargs):
+    def __init__(self, model, stepsize=0.5, precondition_matrix=None, adapt_step_size=False, *args, **kwargs):
         print('NUTS stepsize', stepsize)
         super(NUTS_pyro, self).__init__(model=model, *args, **kwargs)
         self.stepsize = stepsize
         self.precondition_matrix = precondition_matrix
+        self.adapt_step_size = adapt_step_size
         self.kwargs = kwargs
         self.original = False  #flag to identify whether the kernel subclass is origin
         
@@ -690,8 +691,10 @@ class NUTS_pyro(Kernel):
             - the dimension of the sampling (parameter) space
         """
         pyro.clear_param_store()
+        self.full_para = full_para
         pyro_model = lambda data: self.model.pyro_model(data=data, parameter_len=parameter_len, full_para=full_para)
-        self.pyro_kernel =  pyro.infer.mcmc.NUTS(model=pyro_model, step_size=self.stepsize, **self.kwargs)
+        print('pyro nuts', self.adapt_step_size, self.kwargs)
+        self.pyro_kernel =  pyro.infer.mcmc.NUTS(model=pyro_model)#, step_size=self.stepsize, adapt_step_size=self.adapt_step_size, **self.kwargs)
         return self.pyro_kernel
 
 def kinetic_fn(parameter, precondition_matrix):

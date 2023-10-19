@@ -78,6 +78,7 @@ class Tabular:
         self.discrete = discrete
         self.obs_size = env.observation_space.shape
         self.idx = idx
+        self.initial_tables = initial_tables
         if discrete:
             self.bins = bins*self.obs_size[0]
             self.state_grid = uniform_grid(high=self.env.observation_space.high, low=self.env.observation_space.low, bins=self.bins, verbose=verbose)
@@ -96,7 +97,7 @@ class Tabular:
         self._weights = np.ones(n_particle) / n_particle
         if prior == 'normal':
             random_tables = torch.normal(mean=0, std=1, size=((n_particle,) + self.bins + (self.action_size,)))
-            self.tables = torch.tensor(np.repeat(initial_tables[np.newaxis, ...], n_particle, axis=0)) if ((initial_tables is not None) and FROZEN) else random_tables
+            self.tables = torch.tensor(np.repeat(initial_tables[np.newaxis, ...], n_particle, axis=0), dtype=torch.float32) if ((initial_tables is not None) and FROZEN) else random_tables
             if idx is not None:
                 # last_samples = torch.load('2DT1050000HMC.pt')[-1]
                 for i in idx:
@@ -140,8 +141,16 @@ class Tabular:
         if weights is None:
             return random.choice(self.tables)
         return random.choices(self.tables, weights)
+    
+    # def q_value_with_linear_index(self, para, s, a):
+        
 
-    def q_value(self, table, s, a): 
+    def q_value(self, table, s, a, full=True): 
+        if not full:
+            assert self.initial_tables is not None
+            extend_table = torch.tensor(self.initial_tables, dtype=torch.float32).clone()
+            extend_table[FROZEN_IDX] = table
+            table = extend_table
         if hasattr(a, "__len__"):# multiple s, mutiple a 
             if len(table.shape) > len(s) + len(a):
                 return table[(slice(None), *s, a)]
@@ -151,7 +160,12 @@ class Tabular:
             return table[tuple(s) + (a, )]
         return table[s][a]
 
-    def v_value(self, table, s):
+    def v_value(self, table, s, full=True):
+        if not full:
+            assert self.initial_tables is not None
+            extend_table = torch.tensor(self.initial_tables, dtype=torch.float32).clone()
+            extend_table[FROZEN_IDX] = table
+            table = extend_table
         if len(table.shape) > len(s) + 1:
             return torch.max(table[(slice(None), *s)], 1).values
         if hasattr(s[0], "__len__"):

@@ -22,6 +22,24 @@ def expand_dims(arr, dim=2):
         return arr
     return np.expand_dims(arr, axis=0)
 
+def submatrix_shape(table, indices):
+    # Determine the number of rows and columns
+    num_rows = len(table)
+    num_columns = len(table[0]) if num_rows > 0 else 0
+
+    if not indices:
+        # If the indices list is empty, return the shape of the original table
+        return (num_rows, num_columns)
+
+    # Extract the sub-matrix using the indices
+    submatrix = [table[i][j] for i, j, k in indices]
+
+    # Determine the number of rows and columns in the sub-matrix
+    sub_num_rows = len(set(i for i, _, _ in indices))
+    sub_num_columns = len(set(j for _, j, _ in indices))
+
+    return (sub_num_rows, sub_num_columns)
+
 def plot_2d(X, Y, Z, env_name='GridWorld', action_dim=4, title=None, xlabel='s0', ylabel='s1', zlabel='Value', show=False, additional_info=[], save=False, figure_path = '../Figures/MCMC/'):
     Z = expand_dims(Z, dim=3)
     arrows = {2: (1, 0), 0: (-1, 0), 1: (0,1), 3: (0, -1)} if action_dim == 4 else {0: (0, 1), 1: (0, -1)}
