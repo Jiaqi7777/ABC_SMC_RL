@@ -37,22 +37,25 @@ def uniform_grid(low, high, bins=(10,10), include_low=1, verbose=False):
     return grid
 
 class Buffer:
-    def __init__(self, entry_keys, seed=555):
+    def __init__(self, entry_keys, seed=SEED):
         self._buffers = {key: [] for key in entry_keys}
         self.unique_set = []
 
-    def insert(self, items, unique=False):
+    def insert(self, items, unique=False, unique_verbose=True):
         if set(items.keys()) != set(self._buffers.keys()):
             raise IndexError
-        
-        if unique and str(list(items.values())) in self.unique_set:
+        unique_check = list(items.values())
+        unique_check.remove(items['state1'])
+        unique_check = str(unique_check)
+        if unique and unique_check in self.unique_set:
             return 
-        print('New items added', items)
+        if unique_verbose:
+            print('New items added', unique_check)
         for k, v in items.items():
             self._buffers[k].append(v)
             # if len(self._buffers[k]) > BUFFER_SIZE:
             #     self._buffers[k].pop(0)
-        self.unique_set.append(str(list(items.values())))
+        self.unique_set.append(unique_check)
         
     def get_minibatch(self, batch_size):
         if batch_size == 1:
@@ -70,10 +73,12 @@ class Buffer:
         return len(list(self._buffers.values())[0])
 
 class Tabular:
-    def __init__(self, env, n_particle, prior='normal', discrete=False, gamma=0.95, std=0.1, verbose=True, bins=(10,)):
+    def __init__(self, env, n_particle, prior='normal', discrete=False, gamma=0.95, std=0.1, verbose=True, bins=(10,), initial_tables=None, idx=None):
         self.env = env
         self.discrete = discrete
         self.obs_size = env.observation_space.shape
+        self.idx = idx
+        self.initial_tables = initial_tables
         if discrete:
             self.bins = bins*self.obs_size[0]
             self.state_grid = uniform_grid(high=self.env.observation_space.high, low=self.env.observation_space.low, bins=self.bins, verbose=verbose)
@@ -91,9 +96,14 @@ class Tabular:
         self.n_particle = n_particle
         self._weights = np.ones(n_particle) / n_particle
         if prior == 'normal':
-            self.tables = torch.normal(mean=0, std=1, size=((n_particle,) + self.bins + (self.action_size,)))
+            random_tables = torch.normal(mean=0, std=1, size=((n_particle,) + self.bins + (self.action_size,)))
+            self.tables = torch.tensor(np.repeat(initial_tables[np.newaxis, ...], n_particle, axis=0), dtype=torch.float32) if ((initial_tables is not None) and FROZEN) else random_tables
+            if idx is not None:
+                # last_samples = torch.load('2DT1050000HMC.pt')[-1]
+                for i in idx:
+                    self.tables[(slice(None), *i)] = torch.minimum(torch.normal(mean=-5, std=1, size=(n_particle, )), torch.zeros(n_particle))
             if verbose:
-                print("Q table size:", self.tables[-1].shape)        
+                print("Q table size:", self.tables[-1].shape)       
         else:
             raise NotImplementedError(f'The prior method corresponds to {prior} has not been implemented')
 
@@ -131,8 +141,16 @@ class Tabular:
         if weights is None:
             return random.choice(self.tables)
         return random.choices(self.tables, weights)
+    
+    # def q_value_with_linear_index(self, para, s, a):
+        
 
-    def q_value(self, table, s, a): 
+    def q_value(self, table, s, a, full=True): 
+        if not full:
+            assert self.initial_tables is not None
+            extend_table = torch.tensor(self.initial_tables, dtype=torch.float32).clone()
+            extend_table[FROZEN_IDX] = table
+            table = extend_table
         if hasattr(a, "__len__"):# multiple s, mutiple a 
             if len(table.shape) > len(s) + len(a):
                 return table[(slice(None), *s, a)]
@@ -142,11 +160,16 @@ class Tabular:
             return table[tuple(s) + (a, )]
         return table[s][a]
 
-    def v_value(self, table, s):
+    def v_value(self, table, s, full=True):
+        if not full:
+            assert self.initial_tables is not None
+            extend_table = torch.tensor(self.initial_tables, dtype=torch.float32).clone()
+            extend_table[FROZEN_IDX] = table
+            table = extend_table
         if len(table.shape) > len(s) + 1:
-            return torch.max(table[(slice(None), *s)], 1)
+            return torch.max(table[(slice(None), *s)], 1).values
         if hasattr(s[0], "__len__"):
-            return torch.max(table[tuple(s)], -1)
+            return torch.max(table[tuple(s)], -1).values
         return torch.max(table[s])
 
     def r_hat(self, s0, s1, a):
@@ -169,8 +192,12 @@ class Tabular:
     def get_parameter(self):
         return self.tables
 
-    def set_parameter(self, new_para):
-        self.tables = new_para
+    def set_parameter(self, new_para, idx=None):
+        if idx is None:
+            self.tables = new_para
+        else:
+            for i in idx:
+                self.tables[(slice(None), *i)] = new_para[(slice(None), *i)]
 
     def set_weights(self, new_weights):
         self._weights = new_weights
@@ -191,7 +218,7 @@ class Tabular:
         thp_matrix = thp_matrix.toarray().reshape(thp_matrix.shape[0],-1, n).swapaxes(0,1).reshape(-1, n)
         thp_vec = thp_matrix @ weights
         thp_weights = np.moveaxis(thp_vec.reshape(self.state_size[::-1]+ (self.action_size,)),range(len(self.state_size)),range(len(self.state_size))[::-1])
-        return np.argmax(thp_weights, axis=-1)
+        return thp_weights#np.argmax(thp_weights, axis=-1)
         
 
     def plot_value(self, title='Value for each state', xlabel=None, ylabel=None, zlabel='Value', show=False, paras=[]):

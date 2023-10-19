@@ -1,12 +1,15 @@
 import numpy as np
 import scipy.stats as stats
 import torch
+from functools import partial
 from copy import deepcopy
 import pyro
+from collections import Counter
 from tqdm.notebook import tqdm
 '''module import'''
 from parameter import *
 from utils import *
+
 
 class Kernel:
     """the class of all MCMC kernels"""
@@ -50,7 +53,7 @@ class Kernel:
             - llh_info_dict: dict
                 - The llh_info_dict returned by the the logtarget_density as a by-product
         """
-
+        parameter = parameter.to(torch.float32)#torch.tensor(parameter, dtype=torch.float32)
         llh_info_dict = info_dict["llh_info_dict"] if info_dict.get("llh_info_dict") is not None else dict()
         logtarget_density = info_dict.get("logdensities")
         llh_grad_info_dict = dict()
@@ -62,7 +65,8 @@ class Kernel:
                 logtarget_density, gradient, llh_info_dict = self.model.logtarget_auto_gradient(parameter=parameter) #llh_info_dict must be none to compute the gradient correctly
             else:
                 gradient, llh_grad_info_dict = self.model.logtarget_gradient(parameter=parameter, llh_info_dict=llh_info_dict)
-        
+            # print(gradient, parameter)
+        # print(gradient, 'gradient')
         if return_logtarget_density is True:
             if logtarget_density is None or llh_info_dict is None:
                 logtarget_density, llh_info_dict = self.model.logtarget_density(parameter=parameter, llh_info_dict=llh_info_dict)
@@ -117,7 +121,7 @@ class RandomWalk(Kernel):
         else:
             return torch.normal(mean=current_para, std=self.stepsize)
 
-    def propose_accept(self, current_para, current_para_info_dict=dict()):
+    def propose_accept(self, current_para, current_para_info_dict=dict(), indices=None):
         """propose a proposal from the current parameter and accept according to the acceptance probability
         current_para: torch.tensor
             - the parameter to be moved
@@ -132,7 +136,11 @@ class RandomWalk(Kernel):
         """
 
         current_para_llh_info_dict = current_para_info_dict["llh_info_dict"] if current_para_info_dict.get("llh_info_dict") is not None else dict()
-        proposed_para = self.move(current_para)
+        if indices is None:
+            proposed_para = self.move(current_para)
+        else:
+            proposed_para = deepcopy(current_para)
+            proposed_para[indices] = self.move(current_para[indices])
 
         if current_para_info_dict.get("logdensities") is not None:
             current_logtarget_density = current_para_info_dict["logdensities"]
@@ -319,7 +327,7 @@ class mMALA(MALA):
 
 
 class HMC(Kernel):
-    def __init__(self, model, traj_len=2*np.pi, num_steps=None, stepsize=0.5, precondition_matrix=None, use_autograd=True, *args, **kwargs):
+    def __init__(self, model, traj_len=2*np.pi, num_steps=None, stepsize=0.5, mass=1., precondition_matrix=None, use_autograd=True, *args, **kwargs):
         """HMC kernel with precondition matrix
         model: see Kernel()
         traj_len:
@@ -334,10 +342,14 @@ class HMC(Kernel):
             - If True, autograd is used to compute the gradient of the target density, otherwise the manually implemented gradient function is used specified in the model
         """
         print('HMC stepsize', stepsize)
-        super(HMC, self).__init__(model=model, *args, **kwargs)   
+        super(HMC, self).__init__(model=model, *args, **kwargs)  
+        self.traj_len = traj_len 
         self.stepsize = stepsize
-        self.precondition = precondition_matrix
+        self.mass = mass
+        self.precondition = precondition_matrix / mass if precondition_matrix is not None else None
         self.use_autograd = use_autograd
+        self.momentum = []
+        self.H_change = []
     
         self.set_L(num_steps=num_steps, traj_len=traj_len, stepsize=stepsize, set_L=True)
 
@@ -346,7 +358,7 @@ class HMC(Kernel):
         """see self.move_, with L=self.L, stepsize=self.stepsize"""
         return self.move_(current_para=current_para, current_gradient=current_gradient, L=self.L, stepsize=self.stepsize)
 
-    def move_(self, current_para, current_gradient, L=1, stepsize=0.01):
+    def move_(self, current_para, current_gradient, L=1, stepsize=0.01, full_para=None, indices=None):
         """
         L: int
             - number of Leapfrog steps
@@ -361,41 +373,56 @@ class HMC(Kernel):
                 - the info dict returned by the log likelihood function at q, see Kernel().gradient
         """
         if self.precondition is not None:
+            if full_para is not None:
+                self.precondition = self.precondition[indices][:, indices]
             p0 = torch.distributions.multivariate_normal.MultivariateNormal(loc=torch.zeros(current_para.size()), precision_matrix=self.precondition).sample()
         else:
-            p0 = torch.normal(mean=torch.zeros(current_para.size()), std=1.)
+            p0 = torch.normal(mean=torch.zeros(current_para.size()), std=self.mass)
 
         p = p0 + stepsize * current_gradient * 0.5
-        q = current_para
-
-        for i in range(L):
-            q_move = torch.mv(self.precondition, p) if self.precondition is not None else p
-            q = q + stepsize * q_move
-            if i != (L-1):
-                gradient, _ = self.gradient(parameter=q, info_dict=dict(), return_logtarget_density=False)
-                p = p + stepsize * gradient
-        proposed_gradient, proposed_logtarget_density, proposed_para_llh_info_dict, proposed_para_llh_grad_info_dict = self.gradient(parameter=q, info_dict=dict(), return_logtarget_density=True)
-        
-        p = p + stepsize * proposed_gradient * 0.5
+        q = deepcopy(current_para)
+        if full_para is None:
+            for i in range(L):
+                q_move = torch.mv(self.precondition, p) if self.precondition is not None else p
+                q = q + stepsize * q_move
+                if i != (L-1):
+                    gradient, _ = self.gradient(parameter=q, info_dict=dict(), return_logtarget_density=False)
+                    p = p + stepsize * gradient
+            proposed_gradient, proposed_logtarget_density, proposed_para_llh_info_dict, proposed_para_llh_grad_info_dict = self.gradient(parameter=q, info_dict=dict(), return_logtarget_density=True)
+            p = p + stepsize * proposed_gradient * 0.5
+        else:
+            for i in range(L):
+                q_move = torch.mv(self.precondition, p) if self.precondition is not None else p / self.mass
+                q = q + stepsize * q_move
+                full_para[indices] = q
+                if i != (L-1):
+                    gradient, _ = self.gradient(parameter=full_para, info_dict=dict(), return_logtarget_density=False)
+                    p = p + stepsize * gradient[indices]
+            proposed_gradient, proposed_logtarget_density, proposed_para_llh_info_dict, proposed_para_llh_grad_info_dict = self.gradient(parameter=full_para, info_dict=dict(), return_logtarget_density=True)
+            p = p + stepsize * proposed_gradient[indices] * 0.5
         p = -p
-        
+        self.momentum.append(p)
         q_info_dict = {"logdensities":proposed_logtarget_density, "gradient":proposed_gradient, "llh_info_dict":proposed_para_llh_info_dict, "llh_grad_info_dict":proposed_para_llh_grad_info_dict}
         return q, p0, p, q_info_dict
 
-    def propose_accept(self, current_para, current_para_info_dict=dict()):
+    def propose_accept(self, current_para, current_para_info_dict=dict(), indices=None):
         """see RandomWalk"""
-        return self.propose_accept_(current_para=current_para, current_para_info_dict=current_para_info_dict, L=self.L, stepsize=self.stepsize)
+        return self.propose_accept_(current_para=current_para, current_para_info_dict=current_para_info_dict, indices=indices, L=self.L, stepsize=self.stepsize)
 
-    def propose_accept_(self, current_para, L=1, stepsize=0.01, current_para_info_dict=dict()):
+    def propose_accept_(self, current_para, L=1, stepsize=0.01, current_para_info_dict=dict(), indices=None):
         """see RandomWalk"""
         current_gradient, current_logtarget_density, *_ = self.gradient(parameter=current_para, info_dict=current_para_info_dict, return_logtarget_density=True)
-
-        proposed_para, p0, p, q_info_dict = self.move_(current_para=current_para, current_gradient=current_gradient, L=L, stepsize=stepsize)
+        if indices is None:
+            proposed_para, p0, p, q_info_dict = self.move_(current_para=current_para, current_gradient=current_gradient, L=L, stepsize=stepsize)
+        else:
+            proposed_para = deepcopy(current_para)
+            proposed_para[indices], p0, p, q_info_dict = self.move_(current_para=current_para[indices], current_gradient=current_gradient[indices], L=L, stepsize=stepsize, full_para=deepcopy(current_para), indices=indices)
         proposed_logtarget_density = q_info_dict["logdensities"]
         proposed_para_info_dict = q_info_dict
 
         H_old = self.hamiltonian(q=current_para, p=p0, q_logtarget_density=current_logtarget_density)
         H_new =  self.hamiltonian(q=proposed_para, p=p, q_logtarget_density=proposed_logtarget_density)
+        self.H_change.append(H_old - H_new)
         accept_prob = np.exp(torch_max_0(H_old - H_new))
 
         return accept_prob, proposed_para, proposed_para_info_dict
@@ -481,10 +508,10 @@ class HMC(Kernel):
         gamma = 0.05
         t0 = 10
         kappa = 0.75
-
+        traj_len = 2 * np.pi if self.traj_len is None else self.traj_len
         pbar = tqdm(range(iterations))
         for i in pbar:
-            L = self.set_L(num_steps=None, traj_len=self.traj_len, stepsize=eps, set_L=False)
+            L = self.set_L(num_steps=None, traj_len=traj_len, stepsize=eps, set_L=False)
             try:
                 accept_prob, proposed_para, proposed_para_info_dict  = self.propose_accept_(current_para=current_para, 
                                                                             current_para_info_dict=current_para_info_dict,
@@ -492,7 +519,7 @@ class HMC(Kernel):
                                                                             stepsize=eps)
             except ValueError: #parameter diverge
                 accept_prob = torch.tensor(0.)
-
+                print('Value Error occured')
             if np.random.uniform(0,1) < accept_prob:
                 current_para = proposed_para
                 current_para_info_dict = proposed_para_info_dict
@@ -503,11 +530,12 @@ class HMC(Kernel):
             eps = np.exp(logeps)
             logeps_bar = m**(-kappa) * logeps + (1 - m**(-kappa)) * logeps_bar
 
-            pbar.set_description("Warmup: Most recent alpha {}, with stepsize {}".format(str(np.round(accept_prob.numpy(),2)), str(np.round(eps,2))))
+            pbar.set_description("Warmup: Most recent alpha {}, with stepsize {}".format(str(np.round(accept_prob.numpy(), 3)), str(np.round(eps, 3))))
 
         stepsize = np.exp(logeps_bar)
         if set_stepsize is True:   
             self.set_stepsize(stepsize=stepsize)
+            self.set_L(num_steps=None, traj_len=traj_len, stepsize=stepsize, set_L=True)
             print("HMC stepsize set up {}".format(self.stepsize))
 
         return current_para, current_para_info_dict, stepsize
@@ -532,13 +560,14 @@ class HMC(Kernel):
         return:
             - num_steps: int
         """
-
         if traj_len is not None:
             num_steps = np.int64(np.ceil(traj_len / stepsize))
             if set_L is True:
                 self.L = num_steps
             return num_steps
         else:
+            if num_steps is None:
+                raise ValueError('Num_step cannot be None while traj_len is None in warmup')
             if set_L is True:
                 self.L = num_steps
             return num_steps
@@ -580,7 +609,7 @@ class mHMC(HMC):
     
     def move(self, current_para, current_gradient, current_precondition):
         """see self.move_"""
-        return self.move(current_para=current_para, current_gradient=current_gradient, current_precondition=current_precondition, L=self.L, stepsize=self.stepsize)
+        return self.move_(current_para=current_para, current_gradient=current_gradient, current_precondition=current_precondition, L=self.L, stepsize=self.stepsize)
 
     def move_(self, current_para, current_gradient, current_precondition, L=1, stepsize=0.01):
         """see HMC.move_
@@ -635,48 +664,135 @@ class HMC_pyro(Kernel):
         self.kwargs = kwargs
         self.original = False  #flag to identify whether the kernel subclass is origin
         
-    def get_pyro_kernel(self, parameter_len):
+    def get_pyro_kernel(self, parameter_len, full_para=None):
         """return the HMC pyro kernel with input parameters specified during initialisation of the class
         parameter_len: len
             - the dimension of the sampling (parameter) space
         """
         pyro.clear_param_store()
-        pyro_model = lambda data: self.model.pyro_model(data=data, parameter_len=parameter_len)
+        pyro_model = lambda data: self.model.pyro_model(data=data, parameter_len=parameter_len, full_para=full_para)
         self.pyro_kernel =  pyro.infer.mcmc.HMC(model=pyro_model, step_size=self.stepsize, **self.kwargs)
         return self.pyro_kernel
+    
+class NUTS_pyro(Kernel):
+    """The NUTS kernel for use in pyro"""
+    def __init__(self, model, stepsize=0.5, precondition_matrix=None, adapt_step_size=False, *args, **kwargs):
+        print('NUTS stepsize', stepsize)
+        super(NUTS_pyro, self).__init__(model=model, *args, **kwargs)
+        self.stepsize = stepsize
+        self.precondition_matrix = precondition_matrix
+        self.adapt_step_size = adapt_step_size
+        self.kwargs = kwargs
+        self.original = False  #flag to identify whether the kernel subclass is origin
+        
+    def get_pyro_kernel(self, parameter_len, full_para=None):
+        """return the HMC pyro kernel with input parameters specified during initialisation of the class
+        parameter_len: len
+            - the dimension of the sampling (parameter) space
+        """
+        pyro.clear_param_store()
+        self.full_para = full_para
+        pyro_model = lambda data: self.model.pyro_model(data=data, parameter_len=parameter_len, full_para=full_para)
+        print('pyro nuts', self.adapt_step_size, self.kwargs)
+        self.pyro_kernel =  pyro.infer.mcmc.NUTS(model=pyro_model)#, step_size=self.stepsize, adapt_step_size=self.adapt_step_size, **self.kwargs)
+        return self.pyro_kernel
 
+def kinetic_fn(parameter, precondition_matrix):
+    return parameter @ torch.mv(precondition_matrix, parameter)
+    
+class Z(Kernel):
+    def __init__(self, model, use_autograd=True, use_autohess=True, *args, **kwargs):
+        super(Z, self).__init__(model, use_autograd, use_autohess, *args, **kwargs)
+        
+    def move_(self, indices):
+        proposed_blocked_z = self.model.z_transform_fn(indices)
+        return proposed_blocked_z
+    
+    def propose_accept(self, current_para, indices=None, current_para_info_dict=None):
+        current_para_llh_info_dict = current_para_info_dict["llh_info_dict"] if current_para_info_dict.get("llh_info_dict") is not None else dict()
+        proposed_blocked_para = self.move_(indices=indices)
+        proposed_para = current_para.deepcopy()
+        proposed_para[slice(None), indices] = proposed_blocked_para
 
-# class AM(Kernel):
-#     def __init__(self, model=None, stepsize=0.1, prior=Prior(sigma=PRIOR_SIGMA), likelihood=ABCLikelihood(epsilon=EPSILON), tractability=False, sd=1, am_epsilon=1e-5):
-#         super().__init__(model, stepsize, prior, likelihood, tractability)
-#         self.sd = sd
-#         self.am_epsilon=am_epsilon
+        # if current_para_info_dict.get("logdensities") is not None:
+        #     current_llh = current_para_info_dict["logdensities"]
+        # else:
+        #     
+        current_llh, _ = self.model.llh(parameter=current_para[slice(None), indices], gibbs_indices=indices)
+
+        proposed_llh, proposed_para_llh_info_dict = self.model.llh(parameter=proposed_blocked_para, llh_info_dict=dict(), gibbs_indices=indices)
+        # print('z shape', current_para[:, indices].shape)
+        # for i in indices:
+        #     print(i)
+        #     tuples1 = tuple(map(tuple, current_para[:, i]))
+        #     tuples2 = tuple(map(tuple, proposed_para[:, i]))
+
+        #     # Count the occurrences of each tuple
+        #     counter1 = Counter(tuples1)
+        #     counter2 = Counter(tuples2)
+        #     # Find the intersection of the counters
+        #     common_pairs = counter1 & counter2
+
+        #     # Sum the counts of common pairs
+        #     count = sum(common_pairs.values())
+        #     print(count)
+        #     print('common value', common_pairs.items())
+        #     print(counter1.items())
+        #     print(counter2.items())
+        # print(proposed_llh, current_llh)
+        accept_prob = np.exp(torch_max_0(proposed_llh - current_llh))
+        # print('accept prob', accept_prob)
+
+        proposed_para_info_dict = {"llh_info_dict": proposed_para_llh_info_dict, "logdensities": proposed_llh}
+
+        return accept_prob, proposed_para, proposed_para_info_dict
+
+class AM(Kernel):
+    def __init__(self, model, epsilon=1e-1, traj_len=2*np.pi, num_steps=None, stepsize=0.5, use_autograd=True, use_autohess=True, *args, **kwargs):
+        super(AM, self).__init__(model=model, traj_len=traj_len, num_steps=num_steps, stepsize=stepsize, use_autograd=use_autograd, use_autohess=use_autohess, *args, **kwargs)
+        self.stepsize = stepsize
+        self.kwargs = kwargs
+        self.original = True         
+        self.stepsize = stepsize
+        self.am_epsilon = epsilon
+        self.para_history = []
+        self.t0 = 2
+        self.t = 0
         
-#     def move(self, current_para, para_history):
-#         shape = current_para.shape
-#         # print(current_para)
-#         current_para = current_para.reshape(-1)
-#         if para_history == []:
-#             paras = [current_para]
-#         else:
-#             paras = np.array(para_history).reshape(len(para_history), -1)
-#         current_cov = self.cov(paras)
-#         proposed_para = current_para + np.random.multivariate_normal(current_para, cov=current_cov)
-#         paras[-1] = proposed_para
-#         proposed_cov = self.cov(paras)
-#         move_ratio = stats.multivariate_normal.logpdf(proposed_para, mean=current_para, cov=current_cov) - \
-#                                         stats.multivariate_normal.logpdf(current_para, mean=proposed_para, cov=proposed_cov)
-#         return proposed_para.reshape(shape), move_ratio                                
+    def reset(self):
+        self.t = 0
         
-#     def cov(self, para_history):
-#         if len(para_history) == 1:
-#             return self.stepsize ** 2 * np.eye(len(para_history[0]))
-#         return self.sd * np.cov(para_history, rowvar=False) + self.sd * self.am_epsilon * np.eye(len(para_history[0]))
+    def move(self, current_para):
+        self.para_history.append(current_para)
+        self.covariance_matrix =  self.cov(self.para_history)
+        proposed_para = torch.distributions.multivariate_normal.MultivariateNormal(loc=current_para, covariance_matrix=self.covariance_matrix).sample()
+        return proposed_para
+    
+    def cov(self, para_history):
+        if len(para_history) < self.t0:
+            return self.stepsize * torch.eye(len(para_history[0]))
+        return self.stepsize * torch.cov(torch.vstack(para_history).T) + self.stepsize * self.am_epsilon * torch.eye(len(para_history[0]))
+    
+    def move_ratio(self, current_para, proposed_para):
+        proposed_para_history = self.para_history.deepcopy()
+        proposed_para_history[-1] = proposed_para
+        proposed_cov = self.cov(proposed_para_history)
+        move_ratio = stats.multivariate_normal.logpdf(proposed_para, mean=current_para, cov=self.covariance_matrix) - \
+                                        stats.multivariate_normal.logpdf(current_para, mean=proposed_para, cov=proposed_cov)
+        return move_ratio
         
-#     def accept(self, current_para, obs, samples, batch_indices, para_history):
-#         proposed_para, move_ratio = self.move(current_para, para_history)
-#         proposed_samples = generate_samples(proposed_para, self.model, obs, batch_indices)
-#         current_log_posterior = self.posterior(current_para, obs, samples)
-#         proposed_log_posterior = self.posterior(proposed_para, obs, proposed_samples)
-#         return proposed_log_posterior - current_log_posterior - move_ratio, proposed_para, proposed_samples
+    def propose_accept(self, current_para, current_para_info_dict=dict()):
+        current_para_llh_info_dict = current_para_info_dict["llh_info_dict"] if current_para_info_dict.get("llh_info_dict") is not None else dict()
+        proposed_para = self.move(current_para)
+        if current_para_info_dict.get("logdensities") is not None:
+            current_logtarget_density = current_para_info_dict["logdensities"]
+        else:
+            current_logtarget_density, _ = self.model.logtarget_density(parameter=current_para, llh_info_dict=current_para_llh_info_dict)
         
+        proposed_logtarget_density, proposed_para_llh_info_dict = self.model.logtarget_density(parameter=proposed_para, llh_info_dict=dict())
+        accept_prob = np.exp(torch_max_0(proposed_logtarget_density - current_logtarget_density))# - self.move_ratio(current_para=current_para, proposed_para=proposed_para)))
+
+        proposed_para_info_dict = {"llh_info_dict": proposed_para_llh_info_dict, "logdensities": proposed_logtarget_density}
+        self.t +=1
+        return accept_prob, proposed_para, proposed_para_info_dict
+    

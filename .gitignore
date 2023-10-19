@@ -5,6 +5,7 @@ MountainCar.ipynb
 *.DS_Store
 .vscode
 *.yml
+*.out
 log*
 Notebooks
 

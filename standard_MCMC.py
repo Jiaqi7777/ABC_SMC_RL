@@ -3,7 +3,7 @@ import pyro.distributions as dist
 import torch
 import matplotlib.pyplot as plt
 from parameter import *
-from MCMC.MCMC import *
+from MCMC_Algorithms.MCMC import *
 from functools import partial
 from QLearning import *
 
@@ -40,7 +40,7 @@ if __name__ == '__main__':
     from Environment.GridWorld import *
     from Environment.Maze import *
     from model import *
-    from MCMC.MCMC import *
+    from MCMC_Algorithms.MCMC import *
     from QLearning import *
     
     parser = argparse.ArgumentParser()
@@ -153,7 +153,7 @@ if __name__ == '__main__':
                         prior = IsotropicGaussianPrior(sd=PRIOR_SIGMA)
                         abclikelihood = GaussianABCLikelihood(epsilon=EPSILON)
                         data = torch.tensor(obs._buffers["rewards"])[-BUFFER_SIZE:][batch_indices]
-                        Model = DeterministicSRModel(prior=prior, abclikelihood=abclikelihood, data=data, llh_transform_fn=r_hat, llh_transform_grad_fn=llh_transform_grad_fn)
+                        Model = DeterministicRModel(prior=prior, abclikelihood=abclikelihood, data=data, llh_transform_fn=r_hat, llh_transform_grad_fn=llh_transform_grad_fn)
 
                         def fn(parameter):
                             current_logtarget_density, _ = Model.logtarget_density(parameter=parameter, llh_info_dict=dict())
@@ -269,7 +269,7 @@ if __name__ == '__main__':
         prior = IsotropicGaussianPrior()
         abclikelihood = GaussianABCLikelihood(epsilon=EPSILON)
         data = torch.tensor(obs["rewards"])
-        Model = DeterministicSRModel(prior=prior, abclikelihood=abclikelihood, data=data, llh_transform_fn=r_hat, llh_transform_grad_fn=llh_transform_grad_fn)
+        Model = DeterministicRModel(prior=prior, abclikelihood=abclikelihood, data=data, llh_transform_fn=r_hat, llh_transform_grad_fn=llh_transform_grad_fn)
 
         def fn(parameter):
             current_logtarget_density, _ = Model.logtarget_density(parameter=parameter, llh_info_dict=dict())
