@@ -42,12 +42,16 @@ def submatrix_shape(table, indices):
 
 def plot_2d(X, Y, Z, env_name='GridWorld', action_dim=4, title=None, xlabel='s0', ylabel='s1', zlabel='Value', show=False, additional_info=[], save=False, figure_path = '../Figures/MCMC/'):
     Z = expand_dims(Z, dim=3)
-    arrows = {2: (1, 0), 0: (-1, 0), 1: (0,1), 3: (0, -1)} if action_dim == 4 else {0: (0, 1), 1: (0, -1)}
+    arrows = {2: (1, 0), 0: (-1, 0), 1: (0,1), 3: (0, -1)} if action_dim == 4 else {0: (1, 1), 1: (1, -1)}#{0: (0, 1), 1: (0, -1)}
+    if env_name == 'DeepSea':
+        arrows = {0: (1, 1), 1: (1, -1)}
     scale = 0.25
-    fig, ax = plt.subplots()
+    size = 1
+    fig, ax = plt.subplots(figsize=(Z.shape[0] * size, Z.shape[1] * size))
     if additional_info != []:
         additional_info = expand_dims(additional_info)
         im = ax.imshow(additional_info)
+        cbar = fig.colorbar(im)
     if env_name == 'GridWorld':
         ax.set_xticks(np.arange(len(Y)), labels=Y) #Y is the column number
         ax.set_yticks(np.arange(len(X)), labels=X) #X is the row number

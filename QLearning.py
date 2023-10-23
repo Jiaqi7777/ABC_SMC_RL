@@ -5,7 +5,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 '''module import'''
 from parameter import *
-def DynamicProgramming(Q, A, S, env, thresh=1e-3, gamma=0.95, show=False, alpha=1):
+def DynamicProgramming(Q, A, S, env, thresh=1e-5, gamma=0.95, show=False, alpha=1):
     initial_alpha = alpha
     delta_l=[]
     loop = 0
@@ -17,28 +17,29 @@ def DynamicProgramming(Q, A, S, env, thresh=1e-3, gamma=0.95, show=False, alpha=
         delta = thresh*0.9
         for s in S:
             for a in A:
-                for _ in range(10):
-                    pre_q = Q[s + (a,) ]
-                    s1, r, done, _ = env.step(a, s)
-                    if done:
-                        new_q = Q[s + (a,) ] = r
-                    else:
-                        new_q = Q[s + (a,) ] = alpha * (r + gamma * max(Q[s1])) + (1 - alpha) * pre_q
-                    delta = max(delta, abs(pre_q - new_q))
+                pre_q = Q[s + (a,) ]
+                s1, r, done, _ = env.step(a, s)
+                # print(s, a, s1, r, done)
+                if done:
+                    new_q = Q[s + (a,) ] = r
+                else:
+                    new_q = Q[s + (a,) ] = alpha * (r + gamma * max(Q[s1])) + (1 - alpha) * pre_q
+                delta = max(delta, abs(pre_q - new_q))
         alpha = initial_alpha / loop
         # print(alpha)
         delta_l.append(delta)
     
     V = np.max(Q, axis=-1)
-    print('Q', np.round(Q, 2), delta)
+    # print('Q', np.round(Q, 2), delta)
     print(f'Converged with loop {loop}')
-    print('Value', np.round(V, 2))
-    print('Policy:', np.argmax(Q, axis=-1))
+    # print('Value', np.round(V, 2))
+    # print('Policy:', np.argmax(Q, axis=-1))
     pi = np.argmax(Q, axis=-1)
-    plt.imshow(V)
-    plt.colorbar()
-    if show:
-        plt.show()
+    # plt.imshow(V)
+    # plt.colorbar()
+    # plt.title('Q table Values of Dynamic Programming')
+    # if show:
+    #     plt.show()
     return pi, Q, V#, delta_l
 
 def QLearning(Q, env, n_episodes=10, horizon=50, gamma=0.95, epsilon=0.4, alpha=0.2):

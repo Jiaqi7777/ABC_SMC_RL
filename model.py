@@ -102,6 +102,9 @@ class Tabular:
                 # last_samples = torch.load('2DT1050000HMC.pt')[-1]
                 for i in idx:
                     self.tables[(slice(None), *i)] = torch.minimum(torch.normal(mean=-5, std=1, size=(n_particle, )), torch.zeros(n_particle))
+            if env.goal_idx:
+                for n in range(n_particle):
+                    self.tables[n][env.goal_idx] = 0
             if verbose:
                 print("Q table size:", self.tables[-1].shape)       
         else:
@@ -147,10 +150,7 @@ class Tabular:
 
     def q_value(self, table, s, a, full=True): 
         if not full:
-            assert self.initial_tables is not None
-            extend_table = torch.tensor(self.initial_tables, dtype=torch.float32).clone()
-            extend_table[FROZEN_IDX] = table
-            table = extend_table
+            table = self.fill_learnable_table(table)
         if hasattr(a, "__len__"):# multiple s, mutiple a 
             if len(table.shape) > len(s) + len(a):
                 return table[(slice(None), *s, a)]
@@ -159,13 +159,16 @@ class Tabular:
         if hasattr(s[0], "__len__"):
             return table[tuple(s) + (a, )]
         return table[s][a]
-
+    
+    def fill_learnable_table(self, table):
+        table = table.reshape(self.env.learnable_shape + (self.action_size, ))
+        extend_table = torch.tensor(self.tables[0], dtype=torch.float32).clone()
+        extend_table[self.env.learnable_idx] = table
+        return extend_table
+    
     def v_value(self, table, s, full=True):
         if not full:
-            assert self.initial_tables is not None
-            extend_table = torch.tensor(self.initial_tables, dtype=torch.float32).clone()
-            extend_table[FROZEN_IDX] = table
-            table = extend_table
+            table = self.fill_learnable_table(table)
         if len(table.shape) > len(s) + 1:
             return torch.max(table[(slice(None), *s)], 1).values
         if hasattr(s[0], "__len__"):
@@ -191,6 +194,9 @@ class Tabular:
 
     def get_parameter(self):
         return self.tables
+    
+    def get_learnable_parameter(self):
+        return self.tables[(slice(None),  *self.env.learnable_idx)]
 
     def set_parameter(self, new_para, idx=None):
         if idx is None:
@@ -199,6 +205,11 @@ class Tabular:
             for i in idx:
                 self.tables[(slice(None), *i)] = new_para[(slice(None), *i)]
 
+    def set_learnable_parameter(self, new_para):
+        # for i in self.env.learnable_idx:
+        #     self.tables[(slice(None), *i)] = new_para[(slice(None), *i)]
+        self.tables[(slice(None),  *self.env.learnable_idx) ] = new_para
+    
     def set_weights(self, new_weights):
         self._weights = new_weights
 
@@ -234,7 +245,7 @@ class Tabular:
             s0 = np.array(s0).astype('int32')
             s1 = np.array(s1).astype('int32')
         S0, S1 = np.meshgrid(s0, s1)
-        print('Value', '\n', np.round(para, 1))
+        # print('Value', '\n', np.round(para, 1))
         # plot_3d(S0, S1, para, title=title, xlabel=xlabel, ylabel=ylabel, zlabel=zlabel)
 
     def plot_policy(self, paras=[], title='Policy for each state', xlabel=None, ylabel=None, zlabel='Policy', show=False, additional_info=[], save=False):
@@ -246,7 +257,7 @@ class Tabular:
             s0, s1 = uniform_grid(high=self.env.observation_space_high, low=self.env.observation_space_low, bins=self.bins, include_low=0)
         
         S0, S1 = np.meshgrid(s0, s1)
-        print('policy:', '\n',  para)
+        # print('policy:', '\n',  para)
         para = para
         plot_2d(s0, s1, para, env_name=self.env.env_name, action_dim=self.action_size, title=title, xlabel=xlabel, ylabel=ylabel, zlabel=zlabel, show=show, additional_info=additional_info, save=save)
         # plot_3d(S0, S1, para.T, title=title, xlabel=xlabel, ylabel=ylabel, zlabel=zlabel, show=show)

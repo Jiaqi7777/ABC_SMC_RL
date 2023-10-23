@@ -91,7 +91,6 @@ class MCMC:
         current_para = self.initial_params
         current_logtarget_density, current_para_llh_info_dict  = self.kernel.model.logtarget_density(parameter=current_para, llh_info_dict=dict())
         current_para_info_dict = {"logdensities":current_logtarget_density, "llh_info_dict":current_para_llh_info_dict}
-
         if self.warmup_steps > 0:
             try: 
                 current_para, current_para_info_dict, _ = self.warmup(init_para=current_para, init_para_info_dict=current_para_info_dict)
@@ -325,27 +324,27 @@ def MCMC_update(obs, posterior_samples, model, env):
         kernel = RandomWalk(model=Model, stepsize=STEPSIZE)
         z_kernel = Z(model=Model)
     else:
-        # hessian = torch.autograd.functional.hessian(fn, posterior_samples[0].reshape(-1)) + 1e-6 * torch.eye(len(posterior_samples[0]).reshape(-1))
-        hessian = torch.autograd.functional.hessian(fn, TruncatedGaussianABCLikelihood.log_neg_transform(torch.tensor(Q_star, dtype=torch.float32)).reshape(-1)) - 1e-6 * torch.eye(len(posterior_samples[0].reshape(-1)))
-        cov_ = torch.tensor([[0.8076, 0.1582], [0.1582, 0.9567]])
-        cov = torch.zeros_like(hessian) + torch.eye(4) * 1e-6
-        cov[:2, :2] = cov_
-        # kernel = RandomWalk(model=Model, stepsize=STEPSIZE)
-        #kernel = RandomWalk(model=Model, stepsize=STEPSIZE, covariance_matrix=-torch.linalg.inv(hessian))
-        #kernel = pCN(model=Model, stepsize=STEPSIZE)
-        #kernel = MALA(model=Model, stepsize=STEPSIZE, precondition_matrix=None)
-        #kernel = MALA(model=Model, stepsize=STEPSIZE, precondition_matrix=-torch.linalg.inv(hessian))
-        #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=USE_AUTOGRAD)
-        #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=USE_AUTOGRAD, precondition_matrix=-torch.linalg.inv(hessian))
-        # kernel = HMC_pyro(model=Model, stepsize=STEPSIZE, full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB, num_steps=NUM_STEPS)
         print("Precondition", use_precondition)
         if use_precondition:
+            hessian = torch.autograd.functional.hessian(fn, TruncatedGaussianABCLikelihood.log_neg_transform(torch.tensor(Q_star, dtype=torch.float32)).reshape(-1)) - 1e-6 * torch.eye(len(posterior_samples[0].reshape(-1)))
+            # hessian = torch.autograd.functional.hessian(fn, posterior_samples[0].reshape(-1)) + 1e-6 * torch.eye(len(posterior_samples[0]).reshape(-1))
+            cov_ = torch.tensor([[0.8076, 0.1582], [0.1582, 0.9567]])
+            cov = torch.zeros_like(hessian) + torch.eye(4) * 1e-6
+            cov[:2, :2] = cov_
+            #kernel = RandomWalk(model=Model, stepsize=STEPSIZE, covariance_matrix=-torch.linalg.inv(hessian))
+            #kernel = MALA(model=Model, stepsize=STEPSIZE, precondition_matrix=-torch.linalg.inv(hessian))
+            #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=USE_AUTOGRAD, precondition_matrix=-torch.linalg.inv(hessian))
             # kernel = HMC(model=Model, stepsize=STEPSIZE, use_autograd=USE_AUTOGRAD, mass=MASS, precondition_matrix=-torch.linalg.inv(hessian))
             # kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=USE_AUTOGRAD, mass=MASS, precondition_matrix=cov, traj_len=TRAJECTORY_LENGTH)
             kernel = NUTS_pyro(model=Model, stepsize=STEPSIZE, full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB, precondition_matrix=-torch.linalg.inv(hessian))
         else:
-            # kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=USE_AUTOGRAD, traj_len=TRAJECTORY_LENGTH)
-            kernel = NUTS_pyro(model=Model, stepsize=STEPSIZE, full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB, precondition_matrix=-torch.linalg.inv(hessian))
+            # kernel = RandomWalk(model=Model, stepsize=STEPSIZE)
+            #kernel = pCN(model=Model, stepsize=STEPSIZE)
+            #kernel = MALA(model=Model, stepsize=STEPSIZE, precondition_matrix=None)
+            #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=USE_AUTOGRAD)
+            # kernel = HMC_pyro(model=Model, stepsize=STEPSIZE, full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB, num_steps=NUM_STEPS)
+            kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=USE_AUTOGRAD, traj_len=TRAJECTORY_LENGTH)
+            # kernel = NUTS_pyro(model=Model, stepsize=STEPSIZE, full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB)
 
         # kernel = AM(model=Model,  stepsize=STEPSIZE)
         #kernel = mMALA(model=Model, stepsize=STEPSIZE, use_autograd=USE_AUTOGRAD, use_autohess=False)
@@ -353,16 +352,20 @@ def MCMC_update(obs, posterior_samples, model, env):
         #kernel = mHMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=USE_AUTOGRAD, use_autohess=False, traj_len=None, fp_iterations=50)
     accept_probs = None
     STEPSIZE *= DECREASING_FACTOR
-    submatrix_shape_ = submatrix_shape(Q_star, FROZEN_IDX)
-    print(submatrix_shape_)
+    if FROZEN:
+        submatrix_shape_ = submatrix_shape(Q_star, FROZEN_IDX)
+    else:
+        submatrix_shape_ = env.learnable_shape
+    print('submatrix_shape', submatrix_shape_)
     if kernel.original is True:
         if STOCHASTIC:
             mcmc = MCMC_Gibbs(variables=['para', 'z'], kernel_functions={'para': kernel, 'z': z_kernel}, num_samples=training_steps, initial_params={'para': posterior_samples[-1].reshape(-1), 'z': z_sample}, warmup_steps=np.int64(np.floor(training_steps*WARMUP_RATIO)), warup_settings=dict(target_prob=0.7, auto_init_stepsize=True))
             posterior_samples = mcmc.run(idx={'para':FROZEN_NO, 'z': None})
-            posterior_samples = posterior_samples.reshape((len(posterior_samples), ) + submatrix_shape_ + (env.action_space.n, )) if FROZEN else posterior_samples.reshape((len(posterior_samples), ) + env.n_cell + (env.action_space.n, ))
+            posterior_samples = posterior_samples.reshape((len(posterior_samples), ) + submatrix_shape_ + (env.action_space.n, )) #if FROZEN else posterior_samples.reshape((len(posterior_samples), ) + env.n_cell + (env.action_space.n, ))
         else:
             mcmc = MCMC(num_samples=training_steps, kernel=kernel, initial_params=posterior_samples[-1].reshape(-1), warmup_steps=np.int64(np.floor(training_steps*WARMUP_RATIO)), warup_settings=dict(target_prob=0.7, auto_init_stepsize=True))
-            posterior_samples = mcmc.run(idx=FROZEN_NO).reshape((len(posterior_samples), ) + (-1, ) + (env.action_space.n, ))
+            posterior_samples = mcmc.run()
+            posterior_samples = posterior_samples.reshape((len(posterior_samples), ) + submatrix_shape_ + (env.action_space.n, )) #if FROZEN else posterior_samples.reshape((len(posterior_samples), ) + env.n_cell + (env.action_space.n, ))
         logdensities = mcmc.get_logdensities()
         proposed_logdensities = mcmc.get_proposed_logdensities()
         accept_probs = mcmc.get_accept_prob()
@@ -370,7 +373,6 @@ def MCMC_update(obs, posterior_samples, model, env):
 
     else:
         pyro_training_steps = 1 + training_steps
-        print(pyro_training_steps)
         if STOCHASTIC:
             raise NotImplementedError('pyro model for stochastic hasn\'t been implemented' )
         else:
@@ -382,12 +384,15 @@ def MCMC_update(obs, posterior_samples, model, env):
     
 def display_results(posterior_samples, model, accept_probs, logdensities=None, proposed_logdensities=None):
     display_indices = min(len(posterior_samples) // 10 + 1, 1000)
-    model.plot_policy(paras=model.get_parameter()[-display_indices:].numpy(), title=f'policy_T{training_steps}_{time}', additional_info = env.R, save=save, show=show)
+    values = torch.round(torch.max(torch.mean(model.get_parameter()[-display_indices:], 0), -1).values, decimals=2)
+    model.plot_policy(paras=model.get_parameter()[-display_indices:].numpy(), title=f'policy_T{training_steps}_{time}', additional_info = values, save=save, show=show)
     # model.plot_value(paras=posterior_samples.numpy(), title=f'value_T{training_steps}_{time}')
-    plt.imshow(torch.round(torch.max(torch.mean(posterior_samples[-display_indices:], 0), -1).values, decimals=2))
-    plt.colorbar()
+    print(posterior_samples.shape)
+    # plt.imshow(values)
+    # plt.colorbar()
     if show:
         plt.show()
+    print('Q learnt', torch.mean(posterior_samples[-display_indices:], 0))
     data_plot = posterior_samples.numpy().reshape(posterior_samples.shape[0], -1)[:, OBSERVE_DATA_START:OBSERVE_DATA_END]#Change the indices of names and Q_star below as well
     f = mcp.plot_chain_panel(chains=data_plot, names=env.names[OBSERVE_DATA_START:OBSERVE_DATA_END],
                                                     settings=dict(add_pm2std=True, fig=dict(figsize=(10,10), dpi=250),
@@ -436,6 +441,7 @@ if __name__ == '__main__':
     '''module import'''
     from Environment.GridWorld import *
     from Environment.Maze import *
+    from Environment.DeepSea import *
     from model import *
     from QLearning import *
     
@@ -457,7 +463,7 @@ if __name__ == '__main__':
     parser.add_argument('--auto', default=False, action='store_true', help='Bool type')
     parser.add_argument('--warmup', default=WARMUP_RATIO, type=float)
     parser.add_argument('--transform', default=TRANSFORM)
-    parser.add_argument('--precondition', default=False)
+    parser.add_argument('--precondition', default=False, action='store_true', help='Bool type')
     args = parser.parse_args()
     print(args)
     time = args.time
@@ -496,19 +502,27 @@ if __name__ == '__main__':
         # env.plot_env()
     if env_name == 'Maze':
         env = Maze()
+    if env_name == 'DeepSea':
+        env = DeepSea(depth=20)
     
     S = []
     if len(env.n_cell) == 1:
         S = [(i, ) for i in range(env.n_cell[0])]
     else:
-        for i in range(env.n_cell[0]):
-            for j in range(env.n_cell[1]):
-                S.append((i,j)) 
-    Q = np.ones(shape=(env.n_cell + (env.action_space.n, ))) / env.observation_space.n / env.action_space.n
+        if env_name == 'DeepSea':
+            for i in range(env.n_cell[0] - 1):
+                for j in range(env.n_cell[1]):
+                    S.append((i,j)) 
+        else:
+            for i in range(env.n_cell[0]):
+                for j in range(env.n_cell[1]):
+                    S.append((i,j)) 
+    Q = np.zeros(shape=(env.n_cell + (env.action_space.n, ))) / env.observation_space.n / env.action_space.n
     A = range(env.action_space.n)
     pi_star, Q_star, V_star = DynamicProgramming(Q, A, S, env, gamma=GAMMA, show=show)
     dim = env.observation_space.n * env.action_space.n
     model = Tabular(env=env, n_particle=N_PARTICLE, prior='normal', gamma=GAMMA, initial_tables=Q_star, idx=FROZEN_IDX)
+    model.plot_policy(paras=np.array([Q_star]), title=f'True Values/Policy by Dynamic Programming', additional_info = V_star, show=show)
     
     env.reset()
     results = []
@@ -521,7 +535,7 @@ if __name__ == '__main__':
             r_all_epi = []
             obs = Buffer(['state0', 'state1', 'action', 'rewards', 'done'])
             s0, _ = env.reset()
-            posterior_samples = torch.tensor(model.get_parameter())
+            posterior_samples = torch.tensor(model.get_learnable_parameter())
             for e in range(EPISODES):
                 s0, _ = env.reset()
                 para = model.sample_para()
@@ -585,19 +599,24 @@ if __name__ == '__main__':
                     print(f'Experiment with epsilon={EPSILON}, %={data_percentage}')
                     env.uniform_policy(data_percentage=data_percentage)
                     obs = env.uniform_obs
-                    posterior_samples = model.get_parameter()
+                    posterior_samples = model.get_learnable_parameter()
                     # posterior_samples, accept_probs = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env)[:2]
                     # print(posterior_samples)
                     if TRANSFORM:
                         posterior_samples = TruncatedGaussianABCLikelihood.log_neg_transform(posterior_samples)
                     posterior_samples, accept_probs, mcmc, kernel, logdensities, proposed_logdensities, = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env)
+                    print(posterior_samples.shape)
                     # posterior_samples, accept_probs, mcmc, kernel, = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env)[:4]
                     if TRANSFORM:
                         posterior_samples = TruncatedGaussianABCLikelihood.neg_exp_transform(posterior_samples)
-                    model.set_parameter(posterior_samples, idx=FROZEN_IDX)
+                    # model.set_parameter(posterior_samples, idx=FROZEN_IDX)
+                    model.set_learnable_parameter(posterior_samples)
                     display_results(posterior_samples=posterior_samples, model=model, accept_probs=accept_probs, logdensities=logdensities, proposed_logdensities=proposed_logdensities)
                     average_over = min(100, len(posterior_samples))
-                    error_all_percentage.append(mean_squared_error(Q_star.flatten()[FROZEN_NO], torch.mean(posterior_samples[-average_over:].reshape(average_over, -1), axis=0)))
+                    if FROZEN:
+                        error_all_percentage.append(mean_squared_error(Q_star.flatten()[FROZEN_NO], torch.mean(posterior_samples[-average_over:].reshape(average_over, -1), axis=0)))
+                    else:
+                        error_all_percentage.append(mean_squared_error(Q_star.flatten()[env.learnable_no], torch.mean(posterior_samples[-average_over:].reshape(average_over, -1), axis=0)))
                     print('error_all_percentage', error_all_percentage)
                 samples_all_stepsize.append(posterior_samples)
                 if kernel.original:

@@ -20,7 +20,7 @@ def generate_samples(para, model, obs, batch_indices=None, buffer_size=BUFFER_SI
         para = para.reshape(model.state_size + (model.action_size, ))
         return model.q_value(para, s0.T, a) - torch.where(dones == 1, torch.zeros(len(s0)), model.gamma * model.v_value(para, s1.T)) #time 
     except:
-        para = para.reshape((model.state_size[0], model.state_size[1] - 1) + (model.action_size, ))
+        # para = para.reshape(env.learnable_shape + (model.action_size, ))
         return model.q_value(para, s0.T, a, full=False) - torch.where(dones == 1, torch.zeros(len(s0)), model.gamma * model.v_value(para, s1.T, full=False)) #time 
 
 def generate_z(indices=slice(None), obs=None, env=None):

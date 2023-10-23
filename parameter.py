@@ -1,7 +1,7 @@
 import numpy as np
 #RL
 #Env 
-ENV_NAME = 'GridWorld'
+ENV_NAME = 'DeepSea' #'Maze', 'GridWorld'， DeepSea
 CORRECT_MOVE_PROB = 0.5
 STOCHASTIC = True
 #ENV_NAME = 'MountainCar'
@@ -46,7 +46,7 @@ N_PARTICLE = 4
 MIN_ESS = 0.5
 
 #MCMC
-PRIOR_SIGMA = 1
+PRIOR_SIGMA = 20
 UPDATE_FREQUENCY = 5
 INITIAL_STEPSIZE = STEPSIZE = 1e-2
 DECREASING_FACTOR = 1.0
@@ -62,7 +62,7 @@ NUM_STEPS = 1000
 TRAJECTORY_LENGTH = 2 * np.pi
 MASS = 1
 FULL_MASS = False
-FROZEN = True
+FROZEN = False
 FROZEN_NO = [0, 1] if FROZEN else None
 FROZEN_IDX = [(0, 0, 0), (0, 0, 1)] if FROZEN else None
 TRANSFORM = False
@@ -73,7 +73,7 @@ OBSERVE_DATA_START = 0
 OBSERVE_DATA_END = 8
 
 #ABC
-EPSILON = 0.1
+EPSILON = 0.01
 M_Z = 1200
 
 #Results
