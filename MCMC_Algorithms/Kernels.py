@@ -693,7 +693,6 @@ class NUTS_pyro(Kernel):
         pyro.clear_param_store()
         self.full_para = full_para
         pyro_model = lambda data: self.model.pyro_model(data=data, parameter_len=parameter_len, full_para=full_para)
-        print('pyro nuts', self.adapt_step_size, self.kwargs)
         self.pyro_kernel =  pyro.infer.mcmc.NUTS(model=pyro_model)#, step_size=self.stepsize, adapt_step_size=self.adapt_step_size, **self.kwargs)
         return self.pyro_kernel
 

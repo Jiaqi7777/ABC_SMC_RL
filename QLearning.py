@@ -5,7 +5,31 @@ import matplotlib
 import matplotlib.pyplot as plt
 '''module import'''
 from parameter import *
-def DynamicProgramming(Q, A, S, env, thresh=1e-5, gamma=0.95, show=False, alpha=1):
+
+def DynamicProgramming(Q, A, S, env, show=False, gamma=1):
+    for s in S[::-1]:
+        for a in A:
+            pre_q = Q[s + (a,) ]
+            s1, r, done, _ = env.step(a, s)
+            # print(s, a, s1, r, done)
+            if done:
+                Q[s + (a,) ] = r
+            else:
+                Q[s + (a,) ] = r + gamma * max(Q[s1])
+    V = np.max(Q, axis=-1)
+    # print('Q', np.round(Q, 2), delta)
+    # print('Value', np.round(V, 2))
+    # print('Policy:', np.argmax(Q, axis=-1))
+    pi = np.argmax(Q, axis=-1)
+    # plt.imshow(V)
+    # plt.colorbar()
+    # plt.title('V table Values of Dynamic Programming')
+    # if show:
+    #     plt.show()
+    return pi, Q, V#, delta_l
+
+
+def OfflineQLearning(Q, A, S, env, thresh=1e-5, gamma=0.95, show=False, alpha=1):
     initial_alpha = alpha
     delta_l=[]
     loop = 0
@@ -15,7 +39,7 @@ def DynamicProgramming(Q, A, S, env, thresh=1e-5, gamma=0.95, show=False, alpha=
     # for i in range(800):
         '''1-d state'''
         delta = thresh*0.9
-        for s in S:
+        for s in S[::-1]:
             for a in A:
                 pre_q = Q[s + (a,) ]
                 s1, r, done, _ = env.step(a, s)
@@ -42,7 +66,7 @@ def DynamicProgramming(Q, A, S, env, thresh=1e-5, gamma=0.95, show=False, alpha=
     #     plt.show()
     return pi, Q, V#, delta_l
 
-def QLearning(Q, env, n_episodes=10, horizon=50, gamma=0.95, epsilon=0.4, alpha=0.2):
+def OnlineQLearning(Q, env, n_episodes=10, horizon=50, gamma=0.95, epsilon=0.4, alpha=0.2):
     initial_alpha = alpha
     # while delta > thresh:
     #     loop += 1
@@ -123,9 +147,9 @@ if __name__ == '__main__':
     A = range(env.action_space.n)
     smooth = 50
     # for alpha in [0.2, 0.3, 0.5, 0.7, 1]:
-    #     pi, Q, V, return_,regret_ = QLearning(Q, env, n_episodes=1000, horizon=HORIZON)
+    #     pi, Q, V, return_,regret_ = OnlineQLearning(Q, env, n_episodes=1000, horizon=HORIZON)
     #     plt.plot(np.convolve(np.array(return_), np.ones(smooth)/smooth, mode='valid'), label=f'Initial alpha={alpha}')
-    pi_star, Q_star, V_star = DynamicProgramming(Q, A, S, env, thresh=1e-1, gamma=1, show=True)
+    pi_star, Q_star, V_star = OfflineQLearning(Q, A, S, env, thresh=1e-1, gamma=1, show=True)
     # plt.plot(delta_l)
     # plt.legend()
     # plt.show()
@@ -137,15 +161,15 @@ if __name__ == '__main__':
     #         print('Q table with shape', Q.shape)
     #         # S = range(env.n_cell)
     #         A = range(env.action_space.n)
-    #         # DynamicProgramming(V, A, S, env)
-    #         pi, Q, V, return_,regret_ = QLearning(Q, env, n_episodes=EPISODES, horizon=HORIZON)
+    #         # OfflineQLearning(V, A, S, env)
+    #         pi, Q, V, return_,regret_ = OnlineQLearning(Q, env, n_episodes=EPISODES, horizon=HORIZON)
     #         return_all_repeat_qlearning.append(return_)
     #         regret_all_repeat_qlearning.append(regret_)
     #         # S = []
     #         # for i in range(env.n_cell[0]):
     #         #     for j in range(env.n_cell[1]):
     #         #         S.append((i,j)) 
-    #         # DynamicProgramming(Q, A, S, env)
+    #         # OfflineQLearning(Q, A, S, env)
     #     with open(f'Returns/MCMC/q_learning_return_T{training_steps}_{time}.npy', 'wb') as f:
     #         np.save(f, return_all_repeat_qlearning)
     #         print('Return saved at', f'Returns/MCMC/q_learning_return_T{training_steps}_{time}.npy')

@@ -162,10 +162,11 @@ class MCMC_pyro(MCMC):
             - MCMC kernel from pyro
         See MCMC()
         """
-        super(MCMC_pyro, self).__init__(kernel=kernel, warmup_steps=warmup_steps, num_samples=num_samples, initial_params=initial_params[FROZEN_NO], params_dim=params_dim, **kwargs)
+        super(MCMC_pyro, self).__init__(kernel=kernel, warmup_steps=warmup_steps, num_samples=num_samples, initial_params=initial_params, params_dim=params_dim, **kwargs)
         self.kernel_ = kernel
         self.pyro_kernel = kernel.get_pyro_kernel(parameter_len=self.params_dim, full_para=torch.log(-torch.tensor(Q_star, dtype=torch.float32).reshape(-1)))
-        self.pyro_mcmc = pyro.infer.mcmc.MCMC(kernel=self.pyro_kernel, num_samples=num_samples, initial_params={'prior_parameter': initial_params[FROZEN_NO]}, warmup_steps=warmup_steps, disable_progbar=disable_progbar, **kwargs)
+        print('disable_progbar', disable_progbar)
+        self.pyro_mcmc = pyro.infer.mcmc.MCMC(kernel=self.pyro_kernel, num_samples=num_samples, initial_params={'prior_parameter': initial_params}, warmup_steps=warmup_steps, disable_progbar=disable_progbar, **kwargs)
         self.data = self.kernel.model.data
 
     def run(self):
@@ -216,7 +217,7 @@ class MCMC_Gibbs(MCMC):
         
         self.reset_stat()
         
-        pbar = tqdm(range(self.num_samples), position=0, leave=True)
+        pbar = tqdm(range(self.num_samples), position=0, leave=True, dynamic_ncols=True)
         current_para = self.initial_params
         current_para_info_dict = dict()
         
@@ -343,8 +344,8 @@ def MCMC_update(obs, posterior_samples, model, env):
             #kernel = MALA(model=Model, stepsize=STEPSIZE, precondition_matrix=None)
             #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=USE_AUTOGRAD)
             # kernel = HMC_pyro(model=Model, stepsize=STEPSIZE, full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB, num_steps=NUM_STEPS)
-            kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=USE_AUTOGRAD, traj_len=TRAJECTORY_LENGTH)
-            # kernel = NUTS_pyro(model=Model, stepsize=STEPSIZE, full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB)
+            # kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=USE_AUTOGRAD, traj_len=TRAJECTORY_LENGTH)
+            kernel = NUTS_pyro(model=Model, stepsize=STEPSIZE, full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB)
 
         # kernel = AM(model=Model,  stepsize=STEPSIZE)
         #kernel = mMALA(model=Model, stepsize=STEPSIZE, use_autograd=USE_AUTOGRAD, use_autohess=False)
@@ -387,12 +388,11 @@ def display_results(posterior_samples, model, accept_probs, logdensities=None, p
     values = torch.round(torch.max(torch.mean(model.get_parameter()[-display_indices:], 0), -1).values, decimals=2)
     model.plot_policy(paras=model.get_parameter()[-display_indices:].numpy(), title=f'policy_T{training_steps}_{time}', additional_info = values, save=save, show=show)
     # model.plot_value(paras=posterior_samples.numpy(), title=f'value_T{training_steps}_{time}')
-    print(posterior_samples.shape)
     # plt.imshow(values)
     # plt.colorbar()
     if show:
         plt.show()
-    print('Q learnt', torch.mean(posterior_samples[-display_indices:], 0))
+    # print('Q learnt', torch.mean(posterior_samples[-display_indices:], 0))
     data_plot = posterior_samples.numpy().reshape(posterior_samples.shape[0], -1)[:, OBSERVE_DATA_START:OBSERVE_DATA_END]#Change the indices of names and Q_star below as well
     f = mcp.plot_chain_panel(chains=data_plot, names=env.names[OBSERVE_DATA_START:OBSERVE_DATA_END],
                                                     settings=dict(add_pm2std=True, fig=dict(figsize=(10,10), dpi=250),
@@ -519,6 +519,7 @@ if __name__ == '__main__':
                     S.append((i,j)) 
     Q = np.zeros(shape=(env.n_cell + (env.action_space.n, ))) / env.observation_space.n / env.action_space.n
     A = range(env.action_space.n)
+    # pi_star, Q_star, V_star = OfflineQLearning(Q, A, S, env, gamma=GAMMA, show=show, thresh=1e-3, alpha=1)
     pi_star, Q_star, V_star = DynamicProgramming(Q, A, S, env, gamma=GAMMA, show=show)
     dim = env.observation_space.n * env.action_space.n
     model = Tabular(env=env, n_particle=N_PARTICLE, prior='normal', gamma=GAMMA, initial_tables=Q_star, idx=FROZEN_IDX)
