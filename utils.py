@@ -94,6 +94,44 @@ def plot_3d(X, Y, Z, title=None, xlabel='s0', ylabel='s1', zlabel='Value', show=
     plt.savefig(f'{figure_path+title}.png')
     print('figure saved at ', f'{figure_path+title}.png')
     plt.clf()
+    
+def plot_obs(obs, env, env_name=ENV_NAME, title=None, xlabel='s0', ylabel='s1', zlabel='Path', show=False, additional_info=[], save=False, figure_path = '../Figures/MCMC/'):
+    print('plot obs......')
+    action_dim = env.action_space.n
+    arrows = {2: (1, 0), 0: (-1, 0), 1: (0,1), 3: (0, -1)} if action_dim == 4 else {0: (1, 1), 1: (1, -1)}#{0: (0, 1), 1: (0, -1)}
+    if env_name == 'DeepSea':
+        arrows = {0: (1, 1), 1: (1, -1)}
+    scale = 0.25
+    size = 1
+    fig, ax = plt.subplots(figsize=(env.n_cell[0] * size, env.n_cell[1] * size))
+    if additional_info != []:
+        additional_info = expand_dims(additional_info)
+        im = ax.imshow(additional_info)
+        cbar = fig.colorbar(im)
+    if env_name == 'GridWorld':
+        ax.set_xticks(np.arange(env.n_cell[1])) 
+        ax.set_yticks(np.arange(env.n_cell[0])) 
+    elif env_name == 'Maze':
+        ax.set_yticks(np.arange(env.n_cell[1])) 
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    cmap = plt.get_cmap('twilight')
+    e = 0
+    for s0, s1, a, r, d in np.array(list(obs._buffers.values())).T:
+        ax.plot(s0[1], s0[0], marker='o', markersize=8, color=cmap(e))
+        ax.arrow(s0[1], s0[0], s1[1]-s0[1], s1[0]-s0[0], head_width=0.2, fc=cmap(e), ec=cmap(e))
+        if d:
+            e+=0.1
+            e = e % EPISODES
+
+    ax.set_title(title)
+    fig.tight_layout()
+    if show:
+        plt.show()
+    if save:
+        plt.savefig(f'{figure_path+title}.png')
+        plt.clf()
+        print('figure saved at ', f'{figure_path+title}.png')
 
 def replace_line(file_path, variable, new_value):
     with open(file_path) as f:

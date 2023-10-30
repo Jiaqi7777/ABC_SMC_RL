@@ -165,7 +165,6 @@ class MCMC_pyro(MCMC):
         super(MCMC_pyro, self).__init__(kernel=kernel, warmup_steps=warmup_steps, num_samples=num_samples, initial_params=initial_params, params_dim=params_dim, **kwargs)
         self.kernel_ = kernel
         self.pyro_kernel = kernel.get_pyro_kernel(parameter_len=self.params_dim, full_para=torch.log(-torch.tensor(Q_star, dtype=torch.float32).reshape(-1)))
-        print('disable_progbar', disable_progbar)
         self.pyro_mcmc = pyro.infer.mcmc.MCMC(kernel=self.pyro_kernel, num_samples=num_samples, initial_params={'prior_parameter': initial_params}, warmup_steps=warmup_steps, disable_progbar=disable_progbar, **kwargs)
         self.data = self.kernel.model.data
 
@@ -344,7 +343,7 @@ def MCMC_update(obs, posterior_samples, model, env):
             #kernel = MALA(model=Model, stepsize=STEPSIZE, precondition_matrix=None)
             #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=USE_AUTOGRAD)
             # kernel = HMC_pyro(model=Model, stepsize=STEPSIZE, full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB, num_steps=NUM_STEPS)
-            # kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=USE_AUTOGRAD, traj_len=TRAJECTORY_LENGTH)
+            # kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=USE_AUTOGRAD, mass=MASS, traj_len=TRAJECTORY_LENGTH)
             kernel = NUTS_pyro(model=Model, stepsize=STEPSIZE, full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB)
 
         # kernel = AM(model=Model,  stepsize=STEPSIZE)
@@ -360,11 +359,11 @@ def MCMC_update(obs, posterior_samples, model, env):
     print('submatrix_shape', submatrix_shape_)
     if kernel.original is True:
         if STOCHASTIC:
-            mcmc = MCMC_Gibbs(variables=['para', 'z'], kernel_functions={'para': kernel, 'z': z_kernel}, num_samples=training_steps, initial_params={'para': posterior_samples[-1].reshape(-1), 'z': z_sample}, warmup_steps=np.int64(np.floor(training_steps*WARMUP_RATIO)), warup_settings=dict(target_prob=0.7, auto_init_stepsize=True))
+            mcmc = MCMC_Gibbs(variables=['para', 'z'], kernel_functions={'para': kernel, 'z': z_kernel}, num_samples=training_steps, initial_params={'para': posterior_samples[-1].reshape(-1), 'z': z_sample}, warmup_steps=np.int64(np.floor(training_steps*WARMUP_RATIO)), warup_settings=dict(target_prob=TARGET_ACCEPT_PROB, auto_init_stepsize=True))
             posterior_samples = mcmc.run(idx={'para':FROZEN_NO, 'z': None})
             posterior_samples = posterior_samples.reshape((len(posterior_samples), ) + submatrix_shape_ + (env.action_space.n, )) #if FROZEN else posterior_samples.reshape((len(posterior_samples), ) + env.n_cell + (env.action_space.n, ))
         else:
-            mcmc = MCMC(num_samples=training_steps, kernel=kernel, initial_params=posterior_samples[-1].reshape(-1), warmup_steps=np.int64(np.floor(training_steps*WARMUP_RATIO)), warup_settings=dict(target_prob=0.7, auto_init_stepsize=True))
+            mcmc = MCMC(num_samples=training_steps, kernel=kernel, initial_params=posterior_samples[-1].reshape(-1), warmup_steps=np.int64(np.floor(training_steps*WARMUP_RATIO)), warup_settings=dict(target_prob=TARGET_ACCEPT_PROB, auto_init_stepsize=True))
             posterior_samples = mcmc.run()
             posterior_samples = posterior_samples.reshape((len(posterior_samples), ) + submatrix_shape_ + (env.action_space.n, )) #if FROZEN else posterior_samples.reshape((len(posterior_samples), ) + env.n_cell + (env.action_space.n, ))
         logdensities = mcmc.get_logdensities()
@@ -379,7 +378,7 @@ def MCMC_update(obs, posterior_samples, model, env):
         else:
             mcmc = MCMC_pyro(num_samples=pyro_training_steps, kernel=kernel, initial_params=posterior_samples[-1].reshape(-1), warmup_steps=np.int64(np.floor(pyro_training_steps*WARMUP_RATIO)), disable_progbar=MCMC_SHOW_DISABLE)
         posterior_samples = mcmc.run()
-        posterior_samples = posterior_samples.reshape((-1, ) + submatrix_shape_ + (env.action_space.n, )) if FROZEN else posterior_samples.reshape((len(posterior_samples), ) + env.n_cell + (env.action_space.n, ))
+        posterior_samples = posterior_samples.reshape((-1, ) + submatrix_shape_ + (env.action_space.n, )) #if FROZEN else posterior_samples.reshape((len(posterior_samples), ) + env.n_cell + (env.action_space.n, ))
         # posterior_samples = mcmc.run().reshape((-1, ) + )
         return posterior_samples, accept_probs, mcmc, kernel, None, None
     
@@ -488,8 +487,9 @@ if __name__ == '__main__':
     use_precondition = args.precondition
     
     ADAPT_STEP_SIZE = True if WARMUP_RATIO > 0 else False
-    ADAPT_MASS_MATRIX = False #True if WARMUP_RATIO > 0 else False
+    ADAPT_MASS_MATRIX = True if WARMUP_RATIO > 0 else False
     KERNEL_NAME = 'NUTS'
+    EPISODES = 100
 
     N_PARTICLE = training_steps + 1 
     random.seed(seed)
@@ -557,10 +557,16 @@ if __name__ == '__main__':
                     obs.insert({'state0': s0, 'state1': s1, 'action': int(action), 'rewards': r, 'done': done}, unique=UNIQUE_OBS)
                     s0 = s1
                     if done or ( h + 1)  % FROZEN_T == 0:
+                        plot_obs(obs, env, env_name=ENV_NAME, title=f'Eploration path till ep {e}', additional_info=V_star)
+                        plt.show()
                         #MCMC
+                        if TRANSFORM:
+                            posterior_samples = TruncatedGaussianABCLikelihood.log_neg_transform(posterior_samples)
                         # posterior_samples, accept_probs = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env)[:2]
-                        posterior_samples, accept_probs, logdensities, proposed_logdensities = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env)[:4]
-                        model.set_parameter(posterior_samples, idx=FROZEN_IDX)
+                        posterior_samples, accept_probs, mcmc, kernel, logdensities, proposed_logdensities = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env)
+                        if TRANSFORM:
+                            posterior_samples = TruncatedGaussianABCLikelihood.neg_exp_transform(posterior_samples)
+                        model.set_learnable_parameter(posterior_samples)
                         display_results(posterior_samples=posterior_samples, model=model, accept_probs=accept_probs, logdensities=logdensities, proposed_logdensities=proposed_logdensities)
 
                     if done:
