@@ -19,9 +19,12 @@ from MCMC_Algorithms.Models import *
 from parameter import *
 from utils import *
 
+import torch.multiprocessing as mp
+import queue
+
 class MCMC:
     """the class to run MCMC"""
-    def __init__(self, kernel, warmup_steps=0, num_samples=MCMC_SAMPLE, initial_params=None, params_dim=None, warmup_settings=dict(target_prob=0.7, auto_init_stepsize=True), **kwargs):
+    def __init__(self, kernel, warmup_steps=0, num_samples=MCMC_SAMPLE, initial_params=None, num_chains=1, params_dim=None, warmup_settings=dict(target_prob=0.7, auto_init_stepsize=True), **kwargs):
         """
         kernel: a Kernel() class instance (note that a pyro kernel instance does not work)
             - the kernel instance to propose move for the MCMC and provide acceptance probability of the move
@@ -38,12 +41,33 @@ class MCMC:
         """
         self.num_samples = num_samples
         self.kernel = kernel
+        self.num_chains = num_chains
+
+        #check cpu numbers
+        if num_chains > 1:
+
+            num_cpus = max(mp.cpu_count()-1, 1)
+            if num_chains <= num_cpus and num_cpus > 1:
+                self.parallel = True
+            else:
+                print("WARNING: num_cpus > num of cpus, MCMC chains will be generated sequentially.")
+                self.parallel = False
+
         assert initial_params is not None or params_dim is not None, "Should either specify initial_params or params_dim"
         if initial_params is not None:
-            self.initial_params = initial_params
-            self.params_dim = len(initial_params)
+            if self.parallel:
+                assert initial_params.shape[0] == num_chains, "Leading dimension of initial_params should match num_chains for parallel computing"
+                self.initial_params = initial_params
+                self.params_dim = len(initial_params[0])
+            else:
+                assert (initial_params.shape[0] == 1 and len(initial_params.shape) == 2) or len(initial_params.shape) == 1, "Leading dimension of initial_params must be either 1 or params_dim for sequential computing"
+                self.initial_params = initial_params.reshape(-1)
+                self.params_dim = len(self.initial_params)
         else:
-            self.initial_params = torch.zeros(params_dim)
+            if self.parallel:
+                self.initial_params = torch.zeros([num_chains,params_dim])
+            else:
+                self.initial_params = torch.zeros(params_dim)
             self.params_dim = params_dim
 
         assert warmup_steps is None or isinstance(warmup_steps,int) or isinstance(warmup_steps, np.integer), "warmup_steps must be None or integer"
@@ -52,11 +76,74 @@ class MCMC:
 
         self.reset_stat()
 
+
     def run(self, idx=None):
+        if self.parallel:
+            self.init_multiprocesses(self, idx=idx)
+            self.sample
+            active_processes = self.num_chains
+            try:
+                for p in self.processes:
+                    p.start()
+                while active_processes > 0:
+                    try: 
+                        chain_num, sample = self.samples_queue.get(timeout=5)
+                    except queue.Empty:
+                        continue
+
+                    if isinstance(sample, Exception):
+                        raise sample
+                    
+                    if sample is not None:
+                        self.events[chain_num].set()
+                    else:
+                        active_workers -= 1
+            finally:
+                self.terminate_multiprocesses()
+
+        else:
+            samples = self._run_sequential(self, idx=idx, initial_param=self.initial_params)
+
+    def init_multiprocesses(self, idx):
+        self.context = mp.get_context("spawn")
+        self.events = [self.context.Event() for _ in range(self.num_chains)]
+        self.samples_queue = self.context.Queue()
+
+        self.processes = []
+        for chain_num in range(self.num_chains):
+            initial_param = self.initial_params[chain_num]
+            self.processes.append(
+                self.context.Process(name=str(chain_num), target=self._run_per_process, args=(idx,initial_param, self.events[chain_num], chain_num)))
+
+    def terminate_multiprocesses(self):
+        for p in self.processes:
+            if p.is_alive():
+                p.terminate()
+
+    def _run_multi_per_process(self, idx, initial_param, event, chain_num=0):
+        try: 
+            for sample in self._run_per_chain_iterables(idx=idx, initial_param=initial_param):
+                self.samples_queue.put_nowait((chain_num, sample))
+                event.wait()
+                event.clear()
+        
+        except Exception as e:
+            self.samples_queue.put_nowait((chain_num, e))
+
+    def _run_sequential(self, idx, initial_param):
+        for idx, sample in enumerate(self._run_per_chain_iterables(initial_param=initial_param, idx=idx)):
+            self.samples[idx] = sample
+
+        return self.samples
+
+    def _run_per_chain_iterables(self, initial_param, idx=None):
 
         self.reset_stat()
 
-        current_para = self.initial_params
+        #current_para = self.initial_params
+        current_para = initial_param
+        yield current_para
+
         current_logtarget_density, current_para_llh_info_dict  = self.kernel.model.logtarget_density(parameter=current_para, llh_info_dict=dict())
         current_para_info_dict = {"logdensities":current_logtarget_density, "llh_info_dict":current_para_llh_info_dict}
 
@@ -66,7 +153,7 @@ class MCMC:
             except NotImplementedError:
                 print("Warmup is not implemented for the current kernel. Skip to sampling...")
 
-        self.samples[0] = current_para
+        # self.samples[0] = current_para
         # self.logdensities[0] = current_logtarget_density
         # self.proposed_logdensities[0] = current_logtarget_density
 
@@ -82,12 +169,13 @@ class MCMC:
 
             pbar.set_description("Acceptance probability {}".format(np.round(self.accepted/(i+1), 2)))
 
-            self.samples[i+1] = current_para
+            yield current_para
+            # self.samples[i+1] = current_para
             # self.logdensities[i+1] = current_para_info_dict["logdensities"]
             # self.proposed_logdensities[i+1] = proposed_para_info_dict["logdensities"]
             # self.accept_prob[i+1] = accept_prob
 
-        return self.samples
+        #return self.samples
     
     def warmup(self, init_para, init_para_info_dict=dict()):
         current_para, current_para_info_dict, info = self.kernel.warmup(init_para=init_para, 
