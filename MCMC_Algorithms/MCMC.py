@@ -80,7 +80,7 @@ class MCMC:
     def run(self, idx=None):
         if self.parallel:
             self.init_multiprocesses(self, idx=idx)
-            self.sample
+            self.sample = 
             active_processes = self.num_chains
             try:
                 for p in self.processes:
