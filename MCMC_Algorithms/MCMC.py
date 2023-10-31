@@ -23,7 +23,9 @@ import torch.multiprocessing as mp
 import queue
 
 class MCMC:
-    """the class to run MCMC"""
+    """the class to run MCMC
+    parallel computing follows a similar structure to https://docs.pyro.ai/en/stable/_modules/pyro/infer/mcmc/api.html#MCMC
+    """
     def __init__(self, kernel, warmup_steps=0, num_samples=MCMC_SAMPLE, initial_params=None, num_chains=1, params_dim=None, warmup_settings=dict(target_prob=0.7, auto_init_stepsize=True), **kwargs):
         """
         kernel: a Kernel() class instance (note that a pyro kernel instance does not work)
@@ -52,6 +54,9 @@ class MCMC:
             else:
                 print("WARNING: num_cpus > num of cpus, MCMC chains will be generated sequentially.")
                 self.parallel = False
+        
+        else:
+            self.parallel = False
 
         assert initial_params is not None or params_dim is not None, "Should either specify initial_params or params_dim"
         if initial_params is not None:
@@ -74,35 +79,44 @@ class MCMC:
         self.warmup_steps = 0 if warmup_steps is None else warmup_steps
         self.warmup_settings = warmup_settings
 
-        self.reset_stat()
+        #self.reset_stat()
 
 
     def run(self, idx=None):
         if self.parallel:
-            self.init_multiprocesses(self, idx=idx)
-            self.sample = 
-            active_processes = self.num_chains
-            try:
-                for p in self.processes:
-                    p.start()
-                while active_processes > 0:
-                    try: 
-                        chain_num, sample = self.samples_queue.get(timeout=5)
-                    except queue.Empty:
-                        continue
-
-                    if isinstance(sample, Exception):
-                        raise sample
-                    
-                    if sample is not None:
-                        self.events[chain_num].set()
-                    else:
-                        active_workers -= 1
-            finally:
-                self.terminate_multiprocesses()
-
+            self.samples = torch.zeros((self.num_chains, self.num_samples, self.params_dim))
+            samples = self._run_parallel(idx=idx)
         else:
-            samples = self._run_sequential(self, idx=idx, initial_param=self.initial_params)
+            self.samples = torch.zeros((self.num_samples, self.params_dim))
+            samples = self._run_sequential(idx=idx)
+        return samples
+
+    def _run_parallel(self, idx):
+        self.init_multiprocesses(self, idx=idx)
+        active_processes = self.num_chains
+
+        chain_counts = [0 for _ in range(self.num_chains)]
+
+        try:
+            for p in self.processes:
+                p.start()
+            while active_processes > 0:
+                try: 
+                    chain_num, sample = self.samples_queue.get(timeout=5)
+                except queue.Empty:
+                    continue
+
+                if isinstance(sample, Exception):
+                    raise sample
+
+                if sample is not None:
+                    self.events[chain_num].set()
+                    self.samples[chain_num][chain_counts[chain_num]] = sample
+                    chain_counts[chain_num] += 1
+                else:
+                    active_processes -= 1
+        finally:
+            self.terminate_multiprocesses()
 
     def init_multiprocesses(self, idx):
         self.context = mp.get_context("spawn")
@@ -113,36 +127,34 @@ class MCMC:
         for chain_num in range(self.num_chains):
             initial_param = self.initial_params[chain_num]
             self.processes.append(
-                self.context.Process(name=str(chain_num), target=self._run_per_process, args=(idx,initial_param, self.events[chain_num], chain_num)))
+                self.context.Process(name=str(chain_num), target=self._run_parallel_per_process, args=(idx,initial_param, self.events[chain_num], chain_num)))
 
     def terminate_multiprocesses(self):
         for p in self.processes:
             if p.is_alive():
                 p.terminate()
 
-    def _run_multi_per_process(self, idx, initial_param, event, chain_num=0):
+    def _run_parallel_per_process(self, idx, initial_param, event, chain_num=0):
         try: 
-            for sample in self._run_per_chain_iterables(idx=idx, initial_param=initial_param):
+            for sample in self._run_per_chain_iterable(idx=idx, initial_param=initial_param):
                 self.samples_queue.put_nowait((chain_num, sample))
                 event.wait()
                 event.clear()
-        
         except Exception as e:
             self.samples_queue.put_nowait((chain_num, e))
 
-    def _run_sequential(self, idx, initial_param):
-        for idx, sample in enumerate(self._run_per_chain_iterables(initial_param=initial_param, idx=idx)):
-            self.samples[idx] = sample
+    def _run_sequential(self, idx):
+        for i, sample in enumerate(self._run_per_chain_iterable(initial_param=self.initial_params, idx=idx)):
+            self.samples[i] = sample
 
         return self.samples
 
-    def _run_per_chain_iterables(self, initial_param, idx=None):
+    def _run_per_chain_iterable(self, initial_param, idx=None):
 
-        self.reset_stat()
+        accepted = 0
 
         #current_para = self.initial_params
         current_para = initial_param
-        yield current_para
 
         current_logtarget_density, current_para_llh_info_dict  = self.kernel.model.logtarget_density(parameter=current_para, llh_info_dict=dict())
         current_para_info_dict = {"logdensities":current_logtarget_density, "llh_info_dict":current_para_llh_info_dict}
@@ -165,9 +177,10 @@ class MCMC:
             if np.random.uniform(0,1) < accept_prob:
                 current_para = proposed_para
                 current_para_info_dict = proposed_para_info_dict
-                self.accepted += 1
+                #self.accepted += 1
+                accepted += 1
 
-            pbar.set_description("Acceptance probability {}".format(np.round(self.accepted/(i+1), 2)))
+            pbar.set_description("Acceptance probability {}".format(np.round(accepted/(i+1), 2)))
 
             yield current_para
             # self.samples[i+1] = current_para
@@ -201,12 +214,12 @@ class MCMC:
     def get_accept_prob(self):
         return self.accept_prob
     
-    def reset_stat(self):
-        self.samples = torch.zeros((self.num_samples+1, self.params_dim))
-        # self.logdensities = torch.zeros(self.num_samples+1)
-        # self.proposed_logdensities = torch.zeros(self.num_samples+1)
-        self.accepted = 0
-        # self.accept_prob = torch.zeros(self.num_samples+1)
+    # def reset_stat(self):
+    #     self.samples = torch.zeros((int(self.num_samples * self.num_chains), self.params_dim))
+    #     # self.logdensities = torch.zeros(self.num_samples+1)
+    #     # self.proposed_logdensities = torch.zeros(self.num_samples+1)
+    #     self.accepted = 0
+    #     # self.accept_prob = torch.zeros(self.num_samples+1)
 
 
 class MCMC_pyro(MCMC):
@@ -339,7 +352,7 @@ class MCMC_Gibbs(MCMC):
 
     
 #MCMC
-def MCMC_update(obs, posterior_samples, model, env):
+def MCMC_update(obs, posterior_samples, model, env, num_chains):
     global STEPSIZE, Model
     if BATCH_TRAINING:
         batch_indices = random.sample(range(min(len(obs._buffers['state0']), BUFFER_SIZE)), k=min(BATCH_SIZE, len(obs._buffers['state0']))) #TODO: what is this?
@@ -397,7 +410,9 @@ def MCMC_update(obs, posterior_samples, model, env):
             mcmc = MCMC_Gibbs(variables=['para', 'z'], kernel_functions={'para': kernel, 'z': z_kernel}, num_samples=training_steps, initial_params={'para': posterior_samples[-1].reshape(-1), 'z': z_sample}, warmup_steps=np.int64(np.floor(training_steps*WARMUP_RATIO)), warup_settings=dict(target_prob=0.7, auto_init_stepsize=True))
             posterior_samples = mcmc.run(idx={'para':FROZEN_NO, 'z': None}).reshape((-1, ) + env.n_cell + (env.action_space.n, ))
         else:
-            mcmc = MCMC(num_samples=training_steps, kernel=kernel, initial_params=posterior_samples[-1].reshape(-1), warmup_steps=np.int64(np.floor(training_steps*WARMUP_RATIO)), warup_settings=dict(target_prob=0.7, auto_init_stepsize=True))
+            #initial_params = posterior_samples[-1].reshape(-1).repeat([num_chains,1])
+            #initial_params = torch.tile(initial_params, num_chains)
+            mcmc = MCMC(num_samples=training_steps, kernel=kernel, initial_params=posterior_samples[-1].reshape(-1), warmup_steps=np.int64(np.floor(training_steps*WARMUP_RATIO)), warup_settings=dict(target_prob=0.7, auto_init_stepsize=True), num_chains=num_chains)
             posterior_samples = mcmc.run(idx=FROZEN_NO).reshape((-1, ) + env.n_cell + (env.action_space.n, ))
         # logdensities = mcmc.get_logdensities()
         # proposed_logdensities = mcmc.get_proposed_logdensities()
@@ -479,6 +494,7 @@ if __name__ == '__main__':
     parser.add_argument('-e', '--epsilon', default=EPSILON, type=float)
     parser.add_argument('-n', '--stepsize', default=STEPSIZE, type=float)
     parser.add_argument('--seed', default=SEED, type=int)
+    parser.add_argument('--num_chains', default=1, type=int)
     parser.add_argument('--MCMC', default=True, action='store_false', help='Bool type')
     parser.add_argument('-g', '--Greedy', default=GREEDY, action='store_true', help='Bool type')
     parser.add_argument('--Env', default=ENV_NAME)
@@ -503,8 +519,9 @@ if __name__ == '__main__':
     ONLINE_LEARNING = args.online
     USE_AUTOGRAD = args.auto
     
+    num_chains = args.num_chains
 
-    N_PARTICLE = training_steps + 1
+    N_PARTICLE = training_steps
     random.seed(seed)
     pyro.set_rng_seed(seed)
     np.random.seed(seed)
@@ -563,7 +580,7 @@ if __name__ == '__main__':
                     if done or ( h + 1)  % FROZEN_T == 0:
                         #MCMC
                         # posterior_samples, accept_probs = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env)[:2]
-                        posterior_samples, accept_probs, logdensities, proposed_logdensities = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env)
+                        posterior_samples, accept_probs, logdensities, proposed_logdensities = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env, num_chains=num_chains)
                         model.set_parameter(posterior_samples, idx=idx)
                         display_results(posterior_samples=posterior_samples, model=model, accept_probs=accept_probs, logdensities=logdensities, proposed_logdensities=proposed_logdensities)
 
@@ -600,7 +617,8 @@ if __name__ == '__main__':
                     obs = env.uniform_obs
                     posterior_samples = model.get_parameter()
                     # posterior_samples, accept_probs = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env)[:2]
-                    posterior_samples, accept_probs, logdensities, proposed_logdensities, mcmc = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env)
+                    posterior_samples, accept_probs, logdensities, proposed_logdensities, mcmc = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env, num_chains=num_chains)
+                    print(posterior_samples.shape)
                     model.set_parameter(posterior_samples, idx=FROZEN_IDX)
                     display_results(posterior_samples=posterior_samples, model=model, accept_probs=accept_probs, logdensities=logdensities, proposed_logdensities=proposed_logdensities)
                     average_over = min(100, len(posterior_samples))
