@@ -174,11 +174,12 @@ class MCMC:
             accept_prob, proposed_para, proposed_para_info_dict  = self.kernel.propose_accept(current_para=current_para,
                                                                          current_para_info_dict=current_para_info_dict, indices=idx)
 
-            if np.random.uniform(0,1) < accept_prob:
+            if np.random.uniform(0, 1) < accept_prob:
                 current_para = proposed_para
                 current_para_info_dict = proposed_para_info_dict
-                #self.accepted += 1
                 accepted += 1
+                # self.accepted += 1
+                # self.ifaccept[i + 1] = 1
 
             pbar.set_description("Acceptance probability {}".format(np.round(accepted/(i+1), 2)))
 
@@ -187,6 +188,7 @@ class MCMC:
             # self.logdensities[i+1] = current_para_info_dict["logdensities"]
             # self.proposed_logdensities[i+1] = proposed_para_info_dict["logdensities"]
             # self.accept_prob[i+1] = accept_prob
+
 
         #return self.samples
     
@@ -215,11 +217,12 @@ class MCMC:
         return self.accept_prob
     
     # def reset_stat(self):
-    #     self.samples = torch.zeros((int(self.num_samples * self.num_chains), self.params_dim))
-    #     # self.logdensities = torch.zeros(self.num_samples+1)
-    #     # self.proposed_logdensities = torch.zeros(self.num_samples+1)
+    #     self.samples = torch.zeros((self.num_samples+1, self.params_dim))
+    #     self.logdensities = torch.zeros(self.num_samples + 1)
+    #     self.proposed_logdensities = torch.zeros(self.num_samples + 1)
     #     self.accepted = 0
-    #     # self.accept_prob = torch.zeros(self.num_samples+1)
+    #     self.accept_prob = torch.zeros(self.num_samples + 1)
+    #     self.ifaccept = torch.zeros(self.num_samples + 1)
 
 
 class MCMC_pyro(MCMC):
@@ -359,7 +362,10 @@ def MCMC_update(obs, posterior_samples, model, env, num_chains):
     else:
         batch_indices = slice(None)
         
-    prior = IsotropicGaussianPrior(sd=PRIOR_SIGMA)
+    if TRANSFORM:
+        prior = TruncatedGaussianPrior(sd=PRIOR_SIGMA)
+    else:
+        prior = IsotropicGaussianPrior(sd=PRIOR_SIGMA)
     data = torch.tensor(obs._buffers["rewards"], dtype=torch.float32)[-BUFFER_SIZE:][batch_indices]
     
     if STOCHASTIC:
@@ -373,7 +379,10 @@ def MCMC_update(obs, posterior_samples, model, env, num_chains):
 
     else:
         '''Determinisitc'''
-        abclikelihood = GaussianABCLikelihood(epsilon=EPSILON)
+        if TRANSFORM:
+            abclikelihood = TruncatedGaussianABCLikelihood(epsilon=EPSILON)
+        else:
+            abclikelihood = GaussianABCLikelihood(epsilon=EPSILON)
         r_hat = partial(generate_samples, model=model, obs=obs._buffers,  batch_indices=batch_indices)
         llh_transform_grad_fn = lambda parameter:  tabular_indicator_deterministic(para=parameter.reshape(env.n_cell + (env.action_space.n, )), model=model, obs=obs._buffers)#standard form
         Model = DeterministicSRModel(prior=prior, abclikelihood=abclikelihood, data=data, llh_transform_fn=r_hat, llh_transform_grad_fn=llh_transform_grad_fn)
@@ -387,6 +396,7 @@ def MCMC_update(obs, posterior_samples, model, env, num_chains):
         z_kernel = Z(model=Model)
     else:
         # hessian = torch.autograd.functional.hessian(fn, posterior_samples[0].reshape(-1)) + 1e-6 * torch.eye(len(posterior_samples[0]).reshape(-1))
+        hessian = torch.autograd.functional.hessian(fn, torch.tensor(Q_star, dtype=torch.float32).reshape(-1)) - 1e-6 * torch.eye(len(posterior_samples[0].reshape(-1)))
         # kernel = RandomWalk(model=Model, stepsize=STEPSIZE)
         #kernel = RandomWalk(model=Model, stepsize=STEPSIZE, covariance_matrix=-torch.linalg.inv(hessian))
         #kernel = pCN(model=Model, stepsize=STEPSIZE)
@@ -395,10 +405,10 @@ def MCMC_update(obs, posterior_samples, model, env, num_chains):
         #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=USE_AUTOGRAD)
         #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=USE_AUTOGRAD, precondition_matrix=-torch.linalg.inv(hessian))
         # kernel = HMC_pyro(model=Model, stepsize=STEPSIZE, full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB, num_steps=NUM_STEPS)
-        kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=USE_AUTOGRAD)
+        # kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=USE_AUTOGRAD)
         # kernel = AM(model=Model,  stepsize=STEPSIZE)
-        # kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=USE_AUTOGRAD, precondition_matrix=-torch.linalg.inv(hessian), traj_len=None)
-        # kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=USE_AUTOGRAD, precondition_matrix=-torch.linalg.inv(hessian), traj_len=None)
+        # kernel = HMC(model=Model, stepsize=STEPSIZE, use_autograd=USE_AUTOGRAD, mass=MASS, precondition_matrix=-torch.linalg.inv(hessian))
+        kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=USE_AUTOGRAD, mass=MASS, precondition_matrix=-torch.linalg.inv(hessian), traj_len=None)
         #kernel = mMALA(model=Model, stepsize=STEPSIZE, use_autograd=USE_AUTOGRAD, use_autohess=False)
         #kernel = mMALA(model=Model, stepsize=STEPSIZE, use_autograd=USE_AUTOGRAD, use_autohess=True)
         #kernel = mHMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=USE_AUTOGRAD, use_autohess=False, traj_len=None, fp_iterations=50)
@@ -414,10 +424,10 @@ def MCMC_update(obs, posterior_samples, model, env, num_chains):
             #initial_params = torch.tile(initial_params, num_chains)
             mcmc = MCMC(num_samples=training_steps, kernel=kernel, initial_params=posterior_samples[-1].reshape(-1), warmup_steps=np.int64(np.floor(training_steps*WARMUP_RATIO)), warup_settings=dict(target_prob=0.7, auto_init_stepsize=True), num_chains=num_chains)
             posterior_samples = mcmc.run(idx=FROZEN_NO).reshape((-1, ) + env.n_cell + (env.action_space.n, ))
-        # logdensities = mcmc.get_logdensities()
-        # proposed_logdensities = mcmc.get_proposed_logdensities()
-        # accept_probs = mcmc.get_accept_prob()
-        return posterior_samples, accept_probs, None, None, None#, logdensities, proposed_logdensities, mcmc
+        logdensities = mcmc.get_logdensities()
+        proposed_logdensities = mcmc.get_proposed_logdensities()
+        accept_probs = mcmc.get_accept_prob()
+        return posterior_samples, accept_probs, logdensities, proposed_logdensities, mcmc, kernel
 
     else:
         if STOCHASTIC:
@@ -493,6 +503,7 @@ if __name__ == '__main__':
     parser.add_argument('-p', '--show', default=SHOW)
     parser.add_argument('-e', '--epsilon', default=EPSILON, type=float)
     parser.add_argument('-n', '--stepsize', default=STEPSIZE, type=float)
+    parser.add_argument('--mass', default=MASS, type=float)
     parser.add_argument('--seed', default=SEED, type=int)
     parser.add_argument('--num_chains', default=1, type=int)
     parser.add_argument('--MCMC', default=True, action='store_false', help='Bool type')
@@ -501,6 +512,8 @@ if __name__ == '__main__':
     parser.add_argument('--sto', default=False)
     parser.add_argument('--online', default=False)
     parser.add_argument('--auto', default=False)
+    parser.add_argument('--warmup', default=WARMUP_RATIO, type=float)
+    parser.add_argument('--transform', default=TRANSFORM)
     args = parser.parse_args()
     print(args)
     time = args.time
@@ -512,14 +525,19 @@ if __name__ == '__main__':
     seed = args.seed
     MCMC_SHOW_DISABLE=args.MCMC
     STEPSIZE = args.stepsize
+    MASS = args.mass
     warmup_steps = int(training_steps * WARMUP_RATIO)
     GREEDY = args.Greedy
     env_name = args.Env
     STOCHASTIC = args.sto
     ONLINE_LEARNING = args.online
     USE_AUTOGRAD = args.auto
+    WARMUP_RATIO = args.warmup
+    TRANSFORM = args.transform
     
     num_chains = args.num_chains
+    ADAPT_STEP_SIZE = True if WARMUP_RATIO > 0 else False
+    ADAPT_MASS_MATRIX = False #True if WARMUP_RATIO > 0 else False
 
     N_PARTICLE = training_steps
     random.seed(seed)
@@ -580,8 +598,8 @@ if __name__ == '__main__':
                     if done or ( h + 1)  % FROZEN_T == 0:
                         #MCMC
                         # posterior_samples, accept_probs = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env)[:2]
-                        posterior_samples, accept_probs, logdensities, proposed_logdensities = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env, num_chains=num_chains)
-                        model.set_parameter(posterior_samples, idx=idx)
+                        posterior_samples, accept_probs, logdensities, proposed_logdensities = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env, num_chains=num_chains)[:4]
+                        model.set_parameter(posterior_samples, idx=FROZEN_IDX)
                         display_results(posterior_samples=posterior_samples, model=model, accept_probs=accept_probs, logdensities=logdensities, proposed_logdensities=proposed_logdensities)
 
                     if done:
@@ -606,10 +624,15 @@ if __name__ == '__main__':
         block_accept = []
         epsilon_lst = [10, 1, 1e-1, 1e-2, 1e-3, 1e-4][2:3]
         data_percentage_lst = np.linspace(0.1, 1, 10)[-1:]
+        s_l = [1e-4, 1e-3, 1e-2, 1e-1]
         for repeat in range(REPEAT_EXPERIMENT):
             print('Repeat no. ', repeat)
             error_all_epsilon = []
+            samples_all_stepsize = []
+            H_change_all_stepsize = []
             for EPSILON in epsilon_lst:
+            # for STEPSIZE in s_l:
+                print('MCMC Stepsize', STEPSIZE)
                 error_all_percentage = []
                 for data_percentage in data_percentage_lst:
                     print(f'Experiment with epsilon={EPSILON}, %={data_percentage}')
@@ -617,15 +640,22 @@ if __name__ == '__main__':
                     obs = env.uniform_obs
                     posterior_samples = model.get_parameter()
                     # posterior_samples, accept_probs = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env)[:2]
-                    posterior_samples, accept_probs, logdensities, proposed_logdensities, mcmc = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env, num_chains=num_chains)
-                    print(posterior_samples.shape)
+                    # print(posterior_samples)
+                    if TRANSFORM:
+                        posterior_samples = TruncatedGaussianABCLikelihood.log_neg_transform(posterior_samples)
+                    # print(posterior_samples)
+                    posterior_samples, accept_probs, logdensities, proposed_logdensities, mcmc, kernel = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env, num_chains=num_chains)
+                    if TRANSFORM:
+                        posterior_samples = TruncatedGaussianABCLikelihood.neg_exp_transform(posterior_samples)
                     model.set_parameter(posterior_samples, idx=FROZEN_IDX)
                     display_results(posterior_samples=posterior_samples, model=model, accept_probs=accept_probs, logdensities=logdensities, proposed_logdensities=proposed_logdensities)
                     average_over = min(100, len(posterior_samples))
                     error_all_percentage.append(mean_squared_error(Q_star.flatten(), torch.mean(posterior_samples[-average_over:].reshape(average_over, -1), axis=0)))
                     print('error_all_percentage', error_all_percentage)
-                error_all_epsilon.append(error_all_percentage)
-            error_all.append(error_all_epsilon)
+                samples_all_stepsize.append(posterior_samples)
+                H_change_all_stepsize.append(kernel.H_change)
+                # error_all_epsilon.append(error_all_percentage)
+            # error_all.append(error_all_epsilon)
             experiment_info = {
                 'args': vars(args), 
                 'epsilon_list': epsilon_lst, 

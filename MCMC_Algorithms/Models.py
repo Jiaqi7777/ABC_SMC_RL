@@ -1,5 +1,5 @@
 import numpy as np
-import scipy.stats as stats
+from scipy.stats import truncnorm
 import torch
 import pyro
 import pyro.distributions as dist
@@ -116,6 +116,47 @@ class IsotropicGaussianPrior:
             - the dimension of the parameter
         """
         return (self.sigma ** 2) * torch.eye(parameter_len)
+
+class TruncatedGaussianPrior:
+    def __init__(self, sd=1., mean=0.):
+        """log(p(para)) independent gaussian prior
+        sd: float
+            - standard deviaition of each dimension
+        mean: float
+            - mean of each dimension
+        """
+        self.sigma = float(sd)
+        self.mean = mean #before truncation
+        
+    def logprior(self, parameter):
+        parameter = TruncatedGaussianABCLikelihood.neg_exp_transform(parameter)
+        """return the log prior of a given parameter
+        parameter: torch.tensor
+            - the parameter for which the log prior is computed"""
+        return 4 * torch.where(parameter <= 0, torch.distributions.normal.Normal(loc=self.mean, scale=self.sigma).log_prob(parameter), torch.full_like(parameter, - float('inf'))).sum(axis=-1)
+    
+    def logprior_gradient(self, parameter):
+        parameter = TruncatedGaussianABCLikelihood.neg_exp_transform(parameter)
+        """return the gradient of the log prior with respect to the parameter
+        parameter: torch.tensor
+            - the parameter for which the log prior gradient is computed
+        """
+        return torch.where(parameter <= 0, - 4 * parameter / (self.sigma ** 2), torch.full_like(parameter, - float('inf'))) * parameter + torch.ones_like(parameter)
+    
+    def logprior_hessian(self, parameter):
+        """return the hessian of the log prior with respect to the parameter
+        parameter: torch.tensor
+            - the parameter for which the log prior hessian is computed
+        """
+        return torch.where(parameter <= 0, - 4 / (self.sigma ** 2) * torch.eye(parameter.size()[-1]), torch.full_like(parameter, - float('inf'))) * parameter + torch.ones_like(parameter)
+    
+    
+    def covariance_matrix(self, parameter_len):
+        """return the overall covariance matrix of the prior given the dimension of the parameter
+        parameter_len: int
+            - the dimension of the parameter
+        """
+        return 4 * (self.sigma ** 2) * torch.eye(parameter_len)
 
         
 class GaussianABCLikelihood():
@@ -250,56 +291,37 @@ class TruncatedGaussianABCLikelihood(GaussianABCLikelihood):
     def __init__(self, epsilon):
         super().__init__(epsilon)
 
+    @staticmethod
+    def neg_exp_transform(parameter):
+        return - torch.exp(parameter)
+    
+    @staticmethod
+    def log_neg_transform(parameter):
+        return torch.log(- parameter)
+    
     def llh_(self, data, parameter=None, mean_fn=None, llh_info_dict=dict()):
         """see self.llh, where mean_fn is the llh_transform_fn of self.llh"""
-        mean = self.compute_mean(parameter=parameter, mean_fn=mean_fn, llh_info_dict=llh_info_dict)
-        llh = torch.distributions.normal.Normal(loc=mean, scale=self.epsilon).log_prob(data).sum(axis=-1)
+        original_parameter = self.neg_exp_transform(parameter)
+        mean = self.compute_mean(parameter=original_parameter, mean_fn=mean_fn, llh_info_dict=llh_info_dict)
+        if FROZEN:
+            parameter = parameter[FROZEN_NO]
+        llh = torch.distributions.normal.Normal(loc=mean, scale=self.epsilon).log_prob(data).sum(axis=-1) + torch.sum(parameter)
         return llh, {"mean": mean.detach()}
     
-    def compute_mean(self, parameter=None, mean_fn=None, llh_info_dict=dict()):
-        """function to compute the mean of the Gaussian ABC likelihood, see self.llh and self.llh_"""
-        assert llh_info_dict.get("mean") is not None or mean_fn is not None, "either mean or mean_fn of the form mean_fn(parameter) -> mean should be provided"
-        if llh_info_dict.get("mean") is None:
-            mean = mean_fn(parameter).float()
-        else:
-            mean = llh_info_dict["mean"]
-        return mean
-
-    def llh_gradient(self, data, parameter, llh_transform_grad_fn, llh_info_dict=dict(), llh_transform_fn=None): #standard form
-        """compute the gradient of the log likelihood function with respect to the parameter
-        data: see self.llh
-        parameter: see self.llh
-        llh_info_dict: see self.llh
-        llh_transform_fn: see self.llh
-        llh_transform_grad_fn: function torch.tensor -> torch.tensor
-            - a function that takes the parameter and output the gradient (Jacobian) of the mean of the Gaussian ABC likelihood function with respect to the parameter
-        """
-        return self.llh_gradient_(data=data, parameter=parameter, mean_jacobian_fn=llh_transform_grad_fn, mean_fn=llh_transform_fn, llh_info_dict=llh_info_dict)
-
     def llh_gradient_(self, data, parameter, mean_jacobian_fn=None, mean_fn=None, llh_info_dict=dict()):
         """see self.llh_gradient, in which mean_jacobian_fn is the llh_transform_grad_fn"""
-        mean = self.compute_mean(parameter=parameter, mean_fn=mean_fn, llh_info_dict=llh_info_dict)
-        mean_jacobian = mean_jacobian_fn(parameter=parameter)
+        original_parameter = self.neg_exp_transform(parameter)
+        mean = self.compute_mean(parameter=original_parameter, mean_fn=mean_fn, llh_info_dict=llh_info_dict)
+        mean_jacobian = mean_jacobian_fn(parameter=original_parameter)
         
-        gradient = 1. / (self.epsilon**2) *  torch.mv(torch.t(mean_jacobian), (data - mean))
+        gradient = 1. / (self.epsilon**2) *  torch.mv(torch.t(mean_jacobian), (data - mean)) * original_parameter + torch.ones_like(parameter)
         return gradient, {"mean_jacobian":mean_jacobian}
-    
-    def llh_hessian(self, parameter, llh_transform_grad_fn=None, llh_transform_hessian_fn=None, llh_grad_info_dict=dict(), **kwargs):
-        """compute the hessian of the log likelihood with respect to the parameter at the parameter
-        parameter: see self.llh
-        llh_transform_grad_fn: see self.llh_gradient
-        llh_transform_hessian_fn: None
-            - a function that takes the parameter and output the hessian of the mean of the Gaussian ABC likelihood function with respect to the parameter. Currently not implemented, hence only accept None
-        llh_grad_info_dict: dict, of the form {"mean_jacobian": torch.tensor}
-            - the dictionary output by self.llh_gradient that contains the jacobian of the mean of the Gaussian ABC likelihood function with respect to the parameter    
-        """
-        return self.llh_hessian_(parameter=parameter, mean_jacobian_fn=llh_transform_grad_fn, mean_hessian_fn=llh_transform_hessian_fn, llh_grad_info_dict=llh_grad_info_dict, **kwargs)
     
     def llh_hessian_(self, parameter, mean_jacobian_fn=None, mean_hessian_fn=None, llh_grad_info_dict=dict(), **kwargs):
         """see self.llh_hessian, in which mean_jacobian_fn is the llh_transform_grad_fn, and mean_hessian_fn is the llh_transform_hessian_fn"""
         if mean_hessian_fn is None:
             if llh_grad_info_dict.get("mean_jacobian") is None:
-                mean_jacobian = mean_jacobian_fn(parameter=parameter)
+                mean_jacobian = mean_jacobian_fn(parameter=self.neg_exp_transform(parameter))
             else:
                 mean_jacobian = llh_grad_info_dict.get("mean_jacobian")
             return - 1. / (self.epsilon**2) * torch.matmul(mean_jacobian.T, mean_jacobian)
@@ -359,7 +381,9 @@ class DeterministicSRModel():
     def logtarget_gradient(self, parameter, llh_info_dict=dict()):
         """compute the gradient of the log target density with respect to the parameter and return the gradient, using the explicit derivation of the gradient"""
         logprior_grad = self.prior.logprior_gradient(parameter=parameter)
+        # print(logprior_grad, 'prior gra')
         llh_grad, llh_grad_info = self.abclikelihood.llh_gradient(data=self.data, parameter=parameter, llh_info_dict=llh_info_dict, llh_transform_fn=self.llh_transform_fn, llh_transform_grad_fn=self.llh_transform_grad_fn)
+        # print(llh_grad, 'llh gradient')
         return logprior_grad + llh_grad, llh_grad_info
     
     def logtarget_auto_gradient(self, parameter):

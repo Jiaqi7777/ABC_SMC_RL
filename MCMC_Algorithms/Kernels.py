@@ -52,7 +52,7 @@ class Kernel:
             - llh_info_dict: dict
                 - The llh_info_dict returned by the the logtarget_density as a by-product
         """
-
+        parameter = parameter.to(torch.float32)#torch.tensor(parameter, dtype=torch.float32)
         llh_info_dict = info_dict["llh_info_dict"] if info_dict.get("llh_info_dict") is not None else dict()
         logtarget_density = info_dict.get("logdensities")
         llh_grad_info_dict = dict()
@@ -64,7 +64,8 @@ class Kernel:
                 logtarget_density, gradient, llh_info_dict = self.model.logtarget_auto_gradient(parameter=parameter) #llh_info_dict must be none to compute the gradient correctly
             else:
                 gradient, llh_grad_info_dict = self.model.logtarget_gradient(parameter=parameter, llh_info_dict=llh_info_dict)
-
+            # print(gradient, parameter)
+        # print(gradient)
         if return_logtarget_density is True:
             if logtarget_density is None or llh_info_dict is None:
                 logtarget_density, llh_info_dict = self.model.logtarget_density(parameter=parameter, llh_info_dict=llh_info_dict)
@@ -325,7 +326,7 @@ class mMALA(MALA):
 
 
 class HMC(Kernel):
-    def __init__(self, model, traj_len=2*np.pi, num_steps=None, stepsize=0.5, precondition_matrix=None, use_autograd=True, *args, **kwargs):
+    def __init__(self, model, traj_len=2*np.pi, num_steps=None, stepsize=0.5, mass=1., precondition_matrix=None, use_autograd=True, *args, **kwargs):
         """HMC kernel with precondition matrix
         model: see Kernel()
         traj_len:
@@ -343,8 +344,11 @@ class HMC(Kernel):
         super(HMC, self).__init__(model=model, *args, **kwargs)  
         self.traj_len = traj_len 
         self.stepsize = stepsize
-        self.precondition = precondition_matrix
+        self.mass = mass
+        self.precondition = precondition_matrix / mass if precondition_matrix is not None else None
         self.use_autograd = use_autograd
+        self.momentum = []
+        self.H_change = []
     
         self.set_L(num_steps=num_steps, traj_len=traj_len, stepsize=stepsize, set_L=True)
 
@@ -368,12 +372,14 @@ class HMC(Kernel):
                 - the info dict returned by the log likelihood function at q, see Kernel().gradient
         """
         if self.precondition is not None:
+            if full_para is not None:
+                self.precondition = self.precondition[indices][:, indices]
             p0 = torch.distributions.multivariate_normal.MultivariateNormal(loc=torch.zeros(current_para.size()), precision_matrix=self.precondition).sample()
         else:
-            p0 = torch.normal(mean=torch.zeros(current_para.size()), std=1.)
+            p0 = torch.normal(mean=torch.zeros(current_para.size()), std=self.mass)
 
         p = p0 + stepsize * current_gradient * 0.5
-        q = current_para
+        q = deepcopy(current_para)
         if full_para is None:
             for i in range(L):
                 q_move = torch.mv(self.precondition, p) if self.precondition is not None else p
@@ -385,7 +391,7 @@ class HMC(Kernel):
             p = p + stepsize * proposed_gradient * 0.5
         else:
             for i in range(L):
-                q_move = torch.mv(self.precondition, p) if self.precondition is not None else p
+                q_move = torch.mv(self.precondition, p) if self.precondition is not None else p / self.mass
                 q = q + stepsize * q_move
                 full_para[indices] = q
                 if i != (L-1):
@@ -394,7 +400,7 @@ class HMC(Kernel):
             proposed_gradient, proposed_logtarget_density, proposed_para_llh_info_dict, proposed_para_llh_grad_info_dict = self.gradient(parameter=full_para, info_dict=dict(), return_logtarget_density=True)
             p = p + stepsize * proposed_gradient[indices] * 0.5
         p = -p
-        
+        self.momentum.append(p)
         q_info_dict = {"logdensities":proposed_logtarget_density, "gradient":proposed_gradient, "llh_info_dict":proposed_para_llh_info_dict, "llh_grad_info_dict":proposed_para_llh_grad_info_dict}
         return q, p0, p, q_info_dict
 
@@ -409,14 +415,13 @@ class HMC(Kernel):
             proposed_para, p0, p, q_info_dict = self.move_(current_para=current_para, current_gradient=current_gradient, L=L, stepsize=stepsize)
         else:
             proposed_para = deepcopy(current_para)
-            proposed_para[indices], p0, p, q_info_dict = self.move_(current_para=current_para[indices], current_gradient=current_gradient[indices], L=L, stepsize=stepsize, full_para=current_para, indices=indices)
-
-
+            proposed_para[indices], p0, p, q_info_dict = self.move_(current_para=current_para[indices], current_gradient=current_gradient[indices], L=L, stepsize=stepsize, full_para=deepcopy(current_para), indices=indices)
         proposed_logtarget_density = q_info_dict["logdensities"]
         proposed_para_info_dict = q_info_dict
 
         H_old = self.hamiltonian(q=current_para, p=p0, q_logtarget_density=current_logtarget_density)
         H_new =  self.hamiltonian(q=proposed_para, p=p, q_logtarget_density=proposed_logtarget_density)
+        self.H_change.append(H_old - H_new)
         accept_prob = np.exp(torch_max_0(H_old - H_new))
 
         return accept_prob, proposed_para, proposed_para_info_dict
@@ -502,10 +507,10 @@ class HMC(Kernel):
         gamma = 0.05
         t0 = 10
         kappa = 0.75
-
+        traj_len = 2 * np.pi if self.traj_len is None else self.traj_len
         pbar = tqdm(range(iterations))
         for i in pbar:
-            L = self.set_L(num_steps=None, traj_len=self.traj_len, stepsize=eps, set_L=False)
+            L = self.set_L(num_steps=None, traj_len=traj_len, stepsize=eps, set_L=False)
             try:
                 accept_prob, proposed_para, proposed_para_info_dict  = self.propose_accept_(current_para=current_para, 
                                                                             current_para_info_dict=current_para_info_dict,
@@ -529,7 +534,7 @@ class HMC(Kernel):
         stepsize = np.exp(logeps_bar)
         if set_stepsize is True:   
             self.set_stepsize(stepsize=stepsize)
-            self.set_L(num_steps=None, traj_len=self.traj_len, stepsize=stepsize, set_L=True)
+            self.set_L(num_steps=None, traj_len=traj_len, stepsize=stepsize, set_L=True)
             print("HMC stepsize set up {}".format(self.stepsize))
 
         return current_para, current_para_info_dict, stepsize
@@ -554,13 +559,14 @@ class HMC(Kernel):
         return:
             - num_steps: int
         """
-
         if traj_len is not None:
             num_steps = np.int64(np.ceil(traj_len / stepsize))
             if set_L is True:
                 self.L = num_steps
             return num_steps
         else:
+            if num_steps is None:
+                raise ValueError('Num_step cannot be None while traj_len is None in warmup')
             if set_L is True:
                 self.L = num_steps
             return num_steps
@@ -679,7 +685,7 @@ class Z(Kernel):
     def propose_accept(self, current_para, indices=None, current_para_info_dict=None):
         current_para_llh_info_dict = current_para_info_dict["llh_info_dict"] if current_para_info_dict.get("llh_info_dict") is not None else dict()
         proposed_blocked_para = self.move_(indices=indices)
-        proposed_para = current_para.copy()
+        proposed_para = current_para.deepcopy()
         proposed_para[slice(None), indices] = proposed_blocked_para
 
         # if current_para_info_dict.get("logdensities") is not None:
@@ -742,7 +748,7 @@ class AM(Kernel):
         return self.stepsize * torch.cov(torch.vstack(para_history).T) + self.stepsize * self.am_epsilon * torch.eye(len(para_history[0]))
     
     def move_ratio(self, current_para, proposed_para):
-        proposed_para_history = self.para_history.copy()
+        proposed_para_history = self.para_history.deepcopy()
         proposed_para_history[-1] = proposed_para
         proposed_cov = self.cov(proposed_para_history)
         move_ratio = stats.multivariate_normal.logpdf(proposed_para, mean=current_para, cov=self.covariance_matrix) - \

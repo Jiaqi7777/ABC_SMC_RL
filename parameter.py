@@ -56,13 +56,14 @@ BURN_IN = 0.1
 SKIP = 10
 TARGET_ACCEPT_PROB = 0.7
 WARMUP_RATIO = 0
-ADAPT_STEP_SIZE = True if WARMUP_RATIO > 0 else False
-ADAPT_MASS_MATRIX = False #True if WARMUP_RATIO > 0 else False
+
 NUM_STEPS = 1000
+MASS = 1
 FULL_MASS = False
 FROZEN = True
 FROZEN_NO = [0, 1] if FROZEN else None
 FROZEN_IDX = [(0, 0, 0), (0, 0, 1)] if FROZEN else None
+TRANSFORM = False
 
 #Plot
 PLOT_THRESHOLD = 2#percentile
@@ -70,7 +71,7 @@ OBSERVE_DATA_START = 0
 OBSERVE_DATA_END = 8
 
 #ABC
-EPSILON = 0.05
+EPSILON = 0.1
 M_Z = 1200
 
 #Results
