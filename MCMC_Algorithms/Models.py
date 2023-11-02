@@ -47,20 +47,23 @@ def generate_samples_with_z(para, model, obs, batch_indices=None, buffer_size=BU
     return model.q_value(para_, s0.T, a) - torch.where(dones == 1, torch.zeros(len(s0)), model.gamma * s1_value / M_Z)
 
 def tabular_indicator_deterministic(para, model, obs):
+
+    para_ = para.reshape(model.state_size + (model.action_size, ))
     s0 = obs['state0']
     s1 = obs['state1']
     a = obs['action']
     done = np.array(obs['done'])
     s01, s02 = np.array(s0).T
     s11, s12 = np.array(s1)[done == False].T
-    a_prime = np.argmax(para[s11, s12], axis=-1)
-    Indicator = np.zeros(shape=(len(a), ) + para.shape) #TxTheta
+    a_prime = np.argmax(para_[s11, s12], axis=-1)
+    Indicator = np.zeros(shape=(len(a), ) + para_.shape) #TxTheta
     Indicator[range(len(a)), s01, s02, a] = 1.
     Indicator[np.arange(len(a))[done == False], s11, s12, a_prime] -= model.gamma
     return torch.tensor(Indicator, dtype=torch.float32).reshape((len(a), -1))
 
 def tabular_indicator_stochastic(para, model, obs):
-    para_ = para['para']
+
+    para_ = para['para'].reshape(model.state_size + (model.action_size, ))
     s1_lst = para['z']
     s0 = obs['state0']
     a = obs['action']

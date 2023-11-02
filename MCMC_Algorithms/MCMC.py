@@ -21,12 +21,106 @@ from utils import *
 
 import torch.multiprocessing as mp
 import queue
+import time
+
+class MCMC_Process:
+    def __init__(self, kernel, event, chain_num, sample_queue, initial_params, warmup_steps, warmup_settings, num_samples, comm_interval=1):
+        self.kernel = kernel
+        self.event = event
+        self.chain_num = chain_num
+        self.sample_queue = sample_queue
+        self.initial_params = initial_params
+        self.warmup_steps = warmup_steps
+        self.warmup_settings = warmup_settings
+        self.num_samples = num_samples
+        self.comm_interval = comm_interval if comm_interval is not None else 1
+
+    def run(self, idx):
+        counter = 0
+        temp_list = []
+        try: 
+            for sample in generate_samples_iterable(kernel=self.kernel,
+                                                    initial_params=self.initial_params,
+                                                    warmup_steps=self.warmup_steps,
+                                                    warmup_settings=self.warmup_settings,
+                                                    num_samples=self.num_samples,
+                                                    idx=idx,
+                                                    use_progress_bar=False):
+
+                counter += 1
+                temp_list.append((self.chain_num, sample))
+                if counter == self.comm_interval:
+                    self.sample_queue.put_nowait(temp_list)
+                    self.event.wait()
+                    self.event.clear()
+
+                    temp_list = []
+                    counter = 0
+
+            if len(temp_list) > 0:
+                self.sample_queue.put_nowait(temp_list)
+                self.event.wait()
+                self.event.clear()
+
+        except Exception as e:
+            self.sample_queue.put_nowait([(self.chain_num, e)])
+
+
+def warmup(kernel, warmup_steps, warmup_settings, init_para, init_para_info_dict=dict()):
+    current_para, current_para_info_dict, info = kernel.warmup(init_para=init_para, 
+                                                                    init_para_info_dict=init_para_info_dict,
+                                                                    iterations=warmup_steps, 
+                                                                    set_stepsize=True,
+                                                                    **warmup_settings)
+
+    return current_para, current_para_info_dict, info
+
+def generate_samples_iterable(kernel, initial_params, warmup_steps, warmup_settings, num_samples, idx=None, use_progress_bar=True):
+
+    accepted = 0
+
+    current_para = initial_params
+
+    current_logtarget_density, current_para_llh_info_dict  = kernel.model.logtarget_density(parameter=current_para, llh_info_dict=dict())
+    current_para_info_dict = {"logdensities":current_logtarget_density, "llh_info_dict":current_para_llh_info_dict}
+
+    if warmup_steps > 0:
+        try: 
+            current_para, current_para_info_dict, _ = warmup(
+                kernel=kernel,
+                warmup_steps=warmup_steps,
+                warmup_settings=warmup_settings,
+                init_para=current_para,
+                init_para_info_dict=current_para_info_dict)
+    
+        except NotImplementedError:
+            print("Warmup is not implemented for the current kernel. Skip to sampling...")
+
+    pbar = tqdm(range(num_samples)) if use_progress_bar is True else range(num_samples)
+    for i in pbar:
+
+        accept_prob, proposed_para, proposed_para_info_dict  = kernel.propose_accept(current_para=current_para,
+                                                                        current_para_info_dict=current_para_info_dict, indices=idx)
+
+        ifaccept = 0
+        if np.random.uniform(0, 1) < accept_prob:
+            current_para = proposed_para
+            current_para_info_dict = proposed_para_info_dict
+            accepted += 1
+            ifaccept = 1
+
+        if use_progress_bar:
+            pbar.set_description("Acceptance probability {}".format(np.round(accepted/(i+1), 2)))
+
+        yield current_para, current_para_info_dict["logdensities"], proposed_para_info_dict["logdensities"], accept_prob, ifaccept
+    
+    yield None #indicate finish
 
 class MCMC:
     """the class to run MCMC
     parallel computing follows a similar structure to https://docs.pyro.ai/en/stable/_modules/pyro/infer/mcmc/api.html#MCMC
     """
-    def __init__(self, kernel, warmup_steps=0, num_samples=MCMC_SAMPLE, initial_params=None, num_chains=1, params_dim=None, warmup_settings=dict(target_prob=0.7, auto_init_stepsize=True), **kwargs):
+    def __init__(self, kernel, warmup_steps=0, num_samples=MCMC_SAMPLE, initial_params=None, num_chains=1, params_dim=None, warmup_settings=dict(target_prob=0.7, auto_init_stepsize=True), mp_settings=dict(comm_interval=1, mp_context="spawn"), **kwargs):
         """
         kernel: a Kernel() class instance (note that a pyro kernel instance does not work)
             - the kernel instance to propose move for the MCMC and provide acceptance probability of the move
@@ -44,17 +138,17 @@ class MCMC:
         self.num_samples = num_samples
         self.kernel = kernel
         self.num_chains = num_chains
+        self.mp_settings = mp_settings
 
         #check cpu numbers
         if num_chains > 1:
 
             num_cpus = max(mp.cpu_count()-1, 1)
-            if num_chains <= num_cpus and num_cpus > 1:
+            if num_chains <= num_cpus:
                 self.parallel = True
             else:
-                print("WARNING: num_cpus > num of cpus, MCMC chains will be generated sequentially.")
-                self.parallel = False
-        
+                raise AssertionError("num_chains > num of cpus - 1, aborted")
+
         else:
             self.parallel = False
 
@@ -88,9 +182,26 @@ class MCMC:
         if self.parallel:
             samples = self._run_parallel(idx=idx)
         else:
-            self.samples = torch.zeros((self.num_samples, self.params_dim))
             samples = self._run_sequential(idx=idx)
         return samples
+    
+    def _run_sequential(self, idx):
+        for i, sample in enumerate(generate_samples_iterable(kernel=self.kernel,
+                                                             initial_params=self.initial_params,
+                                                             warmup_steps=self.warmup_steps,
+                                                             warmup_settings=self.warmup_settings,
+                                                             num_samples=self.num_samples,
+                                                             idx=idx,
+                                                             use_progress_bar=True)):
+            if sample is not None:
+                current_parameter, current_logtarget_density, proposed_logtarget_density, accept_prob, ifaccept = sample
+                self.samples[i] = current_parameter
+                self.logdensities[i] = current_logtarget_density
+                self.proposed_logdensities[i] = proposed_logtarget_density
+                self.accept_prob[i] = accept_prob
+                self.ifaccept[i] = ifaccept
+
+        return self.samples
 
     def _run_parallel(self, idx):
         self.init_multiprocesses(idx=idx)
@@ -101,113 +212,60 @@ class MCMC:
         try:
             for p in self.processes:
                 p.start()
+            progress_bars = [tqdm(total=self.num_samples, position=0, leave=True) for _ in range(self.num_chains)]
+
             while active_processes > 0:
                 try: 
-                    chain_num, sample = self.samples_queue.get(timeout=5)
+                    #chain_num, sample = self.sample_queue.get(timeout=5)
+                    items = self.sample_queue.get(timeout=5)
                 except queue.Empty:
                     continue
 
-                if isinstance(sample, Exception):
-                    raise sample
+                for (chain_num, sample) in items:
+                    if isinstance(sample, Exception):
+                        raise sample
 
-                if sample is not None:
-                    self.events[chain_num].set()
+                    if sample is not None:
+                        self.events[chain_num].set()
 
-                    pos = chain_counts[chain_num]
+                        pos = chain_counts[chain_num]
 
-                    current_parameter, current_logtarget_density, current_logtarget_density, accept_prob, ifaccept = sample
-                    self.samples[chain_num][pos] = current_parameter.clone()
-                    self.logdensities[chain_num][pos] = current_logtarget_density.clone()
-                    self.proposed_logdensities[chain_num][pos] = current_logtarget_density.clone()
-                    self.accept_prob[chain_num][pos] = accept_prob
-                    self.ifaccept[chain_num][pos] = ifaccept
+                        current_parameter, current_logtarget_density, proposed_logtarget_density, accept_prob, ifaccept = sample
+                        self.samples[chain_num][pos] = current_parameter.clone()
+                        self.logdensities[chain_num][pos] = proposed_logtarget_density.clone()
+                        self.proposed_logdensities[chain_num][pos] = current_logtarget_density.clone()
+                        self.accept_prob[chain_num][pos] = accept_prob
+                        self.ifaccept[chain_num][pos] = ifaccept
 
-                    del sample
-                    chain_counts[chain_num] += 1
-                else:
-                    active_processes -= 1
+                        del sample
+                        chain_counts[chain_num] += 1
+                        progress_bars[chain_num].update(1)
+                        progress_bars[chain_num].set_description("Chain ID: {}, Acceptance probability {}".format(chain_num, np.round(self.ifaccept[chain_num].sum()/(chain_counts[chain_num]+1), 2)))
+                    else:
+                        active_processes -= 1
         finally:
             self.terminate_multiprocesses()
 
+        return self.samples
+
     def init_multiprocesses(self, idx):
-        self.context = mp.get_context("spawn")
+        self.context = mp.get_context(self.mp_settings.get("mp_context"))
         self.events = [self.context.Event() for _ in range(self.num_chains)]
-        self.samples_queue = self.context.Queue()
+        self.sample_queue = self.context.Queue()
 
         self.processes = []
         for chain_num in range(self.num_chains):
-            initial_param = self.initial_params[chain_num]
+            initial_params = self.initial_params[chain_num]
+
+            process = MCMC_Process(kernel=self.kernel, event=self.events[chain_num], chain_num=chain_num, sample_queue=self.sample_queue, initial_params=initial_params, warmup_steps=self.warmup_steps, warmup_settings=self.warmup_settings, num_samples=self.num_samples, comm_interval=self.mp_settings.get("comm_interval"))
+
             self.processes.append(
-                self.context.Process(name=str(chain_num), target=self._run_parallel_per_process, args=(idx, initial_param, self.events[chain_num], chain_num)))
+                self.context.Process(name=str(chain_num), target=process.run, args=(idx,)))
 
     def terminate_multiprocesses(self):
         for p in self.processes:
             if p.is_alive():
                 p.terminate()
-
-    def _run_parallel_per_process(self, idx, initial_param, event, chain_num=0):
-        try: 
-            for sample in self._run_per_chain_iterable(idx=idx, initial_param=initial_param):
-                self.samples_queue.put_nowait((chain_num, sample))
-                event.wait()
-                event.clear()
-        except Exception as e:
-            self.samples_queue.put_nowait((chain_num, e))
-
-    def _run_sequential(self, idx):
-        for i, (current_parameter, current_logtarget_density, current_logtarget_density, accept_prob, ifaccept) in enumerate(self._run_per_chain_iterable(initial_param=self.initial_params, idx=idx)):
-            self.samples[i] = current_parameter
-            self.logdensities[i] = current_logtarget_density
-            self.proposed_logdensities[i] = current_logtarget_density
-            self.accept_prob[i] = accept_prob
-            self.ifaccept[i] = ifaccept
-
-        return self.samples
-
-    def _run_per_chain_iterable(self, initial_param, idx=None):
-
-        accepted = 0
-
-        #current_para = self.initial_params
-        current_para = initial_param
-
-        current_logtarget_density, current_para_llh_info_dict  = self.kernel.model.logtarget_density(parameter=current_para, llh_info_dict=dict())
-        current_para_info_dict = {"logdensities":current_logtarget_density, "llh_info_dict":current_para_llh_info_dict}
-
-        if self.warmup_steps > 0:
-            try: 
-                current_para, current_para_info_dict, _ = self.warmup(init_para=current_para, init_para_info_dict=current_para_info_dict)
-            except NotImplementedError:
-                print("Warmup is not implemented for the current kernel. Skip to sampling...")
-
-
-        pbar = tqdm(range(self.num_samples))
-        for i in pbar:
-            accept_prob, proposed_para, proposed_para_info_dict  = self.kernel.propose_accept(current_para=current_para,
-                                                                         current_para_info_dict=current_para_info_dict, indices=idx)
-
-            ifaccept = 0
-            if np.random.uniform(0, 1) < accept_prob:
-                current_para = proposed_para
-                current_para_info_dict = proposed_para_info_dict
-                accepted += 1
-                ifaccept = 1
-
-            pbar.set_description("Acceptance probability {}".format(np.round(accepted/(i+1), 2)))
-
-            yield current_para, current_para_info_dict["logdensities"], proposed_para_info_dict["logdensities"], accept_prob, ifaccept
-
-
-        #return self.samples
-    
-    def warmup(self, init_para, init_para_info_dict=dict()):
-        current_para, current_para_info_dict, info = self.kernel.warmup(init_para=init_para, 
-                                                                        init_para_info_dict=init_para_info_dict,
-                                                                        iterations=self.warmup_steps, 
-                                                                        set_stepsize=True,
-                                                                        **self.warmup_settings)
-
-        return current_para, current_para_info_dict, info
 
     def set_initial_params(self, initial_params):
         self.initial_params = initial_params
@@ -230,13 +288,13 @@ class MCMC:
             self.logdensities = torch.zeros((self.num_chains, self.num_samples))
             self.proposed_logdensities = torch.zeros((self.num_chains, self.num_samples))
             self.accept_prob = torch.zeros((self.num_chains, self.num_samples))
-            self.ifaccept = torch.zeros((self.num_chains, self.num_samples))
+            self.ifaccept = np.zeros((self.num_chains, self.num_samples))
         else:
             self.samples = torch.zeros((self.num_samples, self.params_dim))
             self.logdensities = torch.zeros(self.num_samples)
             self.proposed_logdensities = torch.zeros(self.num_samples)
             self.accept_prob = torch.zeros(self.num_samples)
-            self.ifaccept = torch.zeros(self.num_samples)
+            self.ifaccept = np.zeros(self.num_samples)
 
 
 class MCMC_pyro(MCMC):
@@ -398,7 +456,8 @@ def MCMC_update(obs, posterior_samples, model, env, num_chains):
         else:
             abclikelihood = GaussianABCLikelihood(epsilon=EPSILON)
         r_hat = partial(generate_samples, model=model, obs=obs._buffers,  batch_indices=batch_indices)
-        llh_transform_grad_fn = lambda parameter:  tabular_indicator_deterministic(para=parameter.reshape(env.n_cell + (env.action_space.n, )), model=model, obs=obs._buffers)#standard form
+        #llh_transform_grad_fn = lambda parameter:  tabular_indicator_deterministic(para=parameter, model=model, obs=obs._buffers)#standard form
+        llh_transform_grad_fn = partial(tabular_indicator_deterministic, model=model, obs=obs._buffers)
         Model = DeterministicSRModel(prior=prior, abclikelihood=abclikelihood, data=data, llh_transform_fn=r_hat, llh_transform_grad_fn=llh_transform_grad_fn)
 
     def fn(parameter):
@@ -496,7 +555,7 @@ def display_results(posterior_samples, model, accept_probs, logdensities, propos
 
 
 if __name__ == '__main__':
-    from tqdm import tqdm
+    from tqdm.notebook import tqdm
     import json
     from mcmcplot import mcmcplot as mcp
     from arviz import ess, plot_autocorr, plot_trace
@@ -509,7 +568,8 @@ if __name__ == '__main__':
     from model import *
     from QLearning import *
     
-    __spec__ = "ModuleSpec(name='builtins', loader=<class '_frozen_importlib.BuiltinImporter'>)"
+    #__spec__ = "ModuleSpec(name='builtins', loader=<class '_frozen_importlib.BuiltinImporter'>)" #https://stackoverflow.com/questions/45720153/python-multiprocessing-error-attributeerror-module-main-has-no-attribute
+    __spec__ = None
 
     parser = argparse.ArgumentParser()
     parser.add_argument('-T', '--training_step', default=MCMC_T, type=int)
@@ -531,8 +591,8 @@ if __name__ == '__main__':
     parser.add_argument('--transform', default=TRANSFORM)
     args = parser.parse_args()
     print(args)
-    time = args.time
-    print('time:', time)
+    #time = args.time
+    #print('time:', time)
     training_steps = args.training_step
     save = args.save
     show = args.show
