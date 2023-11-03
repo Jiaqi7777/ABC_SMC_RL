@@ -216,7 +216,6 @@ class MCMC:
 
             while active_processes > 0:
                 try: 
-                    #chain_num, sample = self.sample_queue.get(timeout=5)
                     items = self.sample_queue.get(timeout=5)
                 except queue.Empty:
                     continue
@@ -494,7 +493,7 @@ def MCMC_update(obs, posterior_samples, model, env, num_chains):
             posterior_samples = mcmc.run(idx={'para':FROZEN_NO, 'z': None}).reshape((-1, ) + env.n_cell + (env.action_space.n, ))
         else:
             initial_params = posterior_samples[-1].reshape(-1).repeat([num_chains,1]) if num_chains > 1 else posterior_samples[-1].reshape(-1) #TODO temporary
-            mcmc = MCMC(num_samples=training_steps, kernel=kernel, initial_params=initial_params, warmup_steps=np.int64(np.floor(training_steps*WARMUP_RATIO)), warup_settings=dict(target_prob=0.7, auto_init_stepsize=True), num_chains=num_chains)
+            mcmc = MCMC(num_samples=training_steps, kernel=kernel, initial_params=initial_params, warmup_steps=np.int64(np.floor(training_steps*WARMUP_RATIO)), warup_settings=dict(target_prob=0.7, auto_init_stepsize=True), num_chains=num_chains, mp_settings=dict(comm_interval=COMM_INTERVAL, mp_context=MP_CONTEXT))
             posterior_samples = mcmc.run(idx=FROZEN_NO).reshape((-1, ) + env.n_cell + (env.action_space.n, ))
         logdensities = mcmc.get_logdensities()
         proposed_logdensities = mcmc.get_proposed_logdensities()

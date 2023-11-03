@@ -65,6 +65,9 @@ FROZEN_NO = [0, 1] if FROZEN else None
 FROZEN_IDX = [(0, 0, 0), (0, 0, 1)] if FROZEN else None
 TRANSFORM = False
 
+MP_CONTEXT = "spawn" #must be spawn or forkserver
+COMM_INTERVAL = 1
+
 #Plot
 PLOT_THRESHOLD = 2#percentile
 OBSERVE_DATA_START = 0
