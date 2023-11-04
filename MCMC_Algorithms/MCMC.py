@@ -24,8 +24,9 @@ import queue
 import time
 
 class MCMC_Process:
-    def __init__(self, kernel, event, chain_num, sample_queue, initial_params, warmup_steps, warmup_settings, num_samples, comm_interval=1):
+    def __init__(self, kernel, iterable_fn, event, chain_num, sample_queue, initial_params, warmup_steps, warmup_settings, num_samples, comm_interval=1):
         self.kernel = kernel
+        self.iterable_fn = iterable_fn
         self.event = event
         self.chain_num = chain_num
         self.sample_queue = sample_queue
@@ -35,17 +36,11 @@ class MCMC_Process:
         self.num_samples = num_samples
         self.comm_interval = comm_interval if comm_interval is not None else 1
 
-    def run(self, idx):
+    def run(self):
         counter = 0
         temp_list = []
         try: 
-            for sample in generate_samples_iterable(kernel=self.kernel,
-                                                    initial_params=self.initial_params,
-                                                    warmup_steps=self.warmup_steps,
-                                                    warmup_settings=self.warmup_settings,
-                                                    num_samples=self.num_samples,
-                                                    idx=idx,
-                                                    use_progress_bar=False):
+            for sample in self.iterable_fn():
 
                 counter += 1
                 temp_list.append((self.chain_num, sample))
@@ -78,12 +73,9 @@ def warmup(kernel, warmup_steps, warmup_settings, init_para, init_para_info_dict
 def generate_samples_iterable(kernel, initial_params, warmup_steps, warmup_settings, num_samples, idx=None, use_progress_bar=True):
 
     accepted = 0
-
     current_para = initial_params
-
     current_logtarget_density, current_para_llh_info_dict  = kernel.model.logtarget_density(parameter=current_para, llh_info_dict=dict())
     current_para_info_dict = {"logdensities":current_logtarget_density, "llh_info_dict":current_para_llh_info_dict}
-
     if warmup_steps > 0:
         try: 
             current_para, current_para_info_dict, _ = warmup(
@@ -115,6 +107,68 @@ def generate_samples_iterable(kernel, initial_params, warmup_steps, warmup_setti
         yield current_para, current_para_info_dict["logdensities"], proposed_para_info_dict["logdensities"], accept_prob, ifaccept
     
     yield None #indicate finish
+
+def generate_samples_gibbs_iterable(kernel, block_size, data_length, variables, initial_params, warmup_steps, warmup_settings, num_samples, idx=None, use_progress_bar=True):
+    
+    current_para = initial_params
+    current_para_info_dict = dict()
+
+    for var in variables:
+        kernel[var].model.set_var(var)
+        kernel[var].model.set_samples(current_para)
+        current_logtarget_density, current_para_llh_info_dict  = kernel[var].model.logtarget_density(parameter=current_para[var], llh_info_dict=dict())
+        current_para_info_dict[var] = {"logdensities":current_logtarget_density, "llh_info_dict":current_para_llh_info_dict}
+
+        if warmup_steps > 0:
+            try:
+                current_para[var], current_para_info_dict[var], _ = warmup(kernel=kernel[var],
+                                                                           warmup_steps=warmup_steps,
+                                                                           warmup_settings=warmup_settings,
+                                                                           init_para=current_para[var],
+                                                                           init_para_info_dict=current_para_info_dict[var])
+            except NotImplementedError:
+                print("Warmup is not implemented for the current kernel. Skip to sampling...")
+
+    pbar = tqdm(range(num_samples)) if use_progress_bar is True else range(num_samples)
+    accepted = {var: 0 for var in variables}
+
+    for i in pbar:
+
+        ifaccept = {var: np.zeros([math.ceil(data_length[var] / block_size[var])]) for var in variables}
+        accept_probs = {var: np.zeros(math.ceil(data_length[var] / block_size[var])) for var in variables}
+        current_logdensities = {var: 0. for var in variables}
+        proposed_logdensities = {var: 0. for var in variables}
+
+        for var in variables:
+            kernel[var].model.set_var(var)
+            for j in range(math.ceil(data_length[var] / block_size[var])):
+                '''proposed_block_z: block_size x M_Z x 2'''
+                selected_indices = idx[var] if idx[var] is not None else slice(None)
+                indices = range(j * block_size[var], min((j + 1) * block_size[var], data_length[var]))[selected_indices]
+                accept_prob, proposed_para, proposed_para_info_dict = kernel[var].propose_accept(current_para=current_para[var], 
+                                                            indices=indices, current_para_info_dict=current_para_info_dict[var])
+                # if j==4 and var=='z':
+                #     print(current_para[var], proposed_para)
+                    # print('accept prob', j, accept_prob)
+
+                if np.random.uniform(0, 1) < accept_prob:
+                    current_para[var] = proposed_para
+                    current_para_info_dict[var] = proposed_para_info_dict
+                    ifaccept[var][j] = 1
+                    accepted[var] += 1
+                
+                accept_probs[var][j] = accept_prob
+
+            current_logdensities[var] = current_para_info_dict[var]["logdensities"]
+            proposed_logdensities[var] = proposed_para_info_dict["logdensities"]
+            kernel[var].model.set_samples(current_para)
+
+        yield current_para, current_logdensities, proposed_logdensities, accept_probs, ifaccept
+
+        if use_progress_bar:
+            pbar.set_description("Acceptance probability {}".format({var: np.round(accepted[var]/((i+1)*math.ceil(data_length[var] / block_size[var])), 2) for var in variables}))
+        
+    yield None # indicate finish
 
 class MCMC:
     """the class to run MCMC
@@ -151,7 +205,15 @@ class MCMC:
 
         else:
             self.parallel = False
+        self.check_initial_params_and_dims(initial_params=initial_params, params_dim=params_dim)
 
+        assert warmup_steps is None or isinstance(warmup_steps,int) or isinstance(warmup_steps, np.integer), "warmup_steps must be None or integer"
+        self.warmup_steps = 0 if warmup_steps is None else warmup_steps
+        self.warmup_settings = warmup_settings
+
+        self.reset_stat()
+
+    def check_initial_params_and_dims(self, initial_params, params_dim):
         assert initial_params is not None or params_dim is not None, "Should either specify initial_params or params_dim"
         if initial_params is not None:
             if self.parallel:
@@ -169,12 +231,6 @@ class MCMC:
                 self.initial_params = torch.zeros(params_dim)
             self.params_dim = params_dim
 
-        assert warmup_steps is None or isinstance(warmup_steps,int) or isinstance(warmup_steps, np.integer), "warmup_steps must be None or integer"
-        self.warmup_steps = 0 if warmup_steps is None else warmup_steps
-        self.warmup_settings = warmup_settings
-
-        self.reset_stat()
-
 
     def run(self, idx=None):
         self.reset_stat()
@@ -184,24 +240,22 @@ class MCMC:
         else:
             samples = self._run_sequential(idx=idx)
         return samples
-    
+
     def _run_sequential(self, idx):
-        for i, sample in enumerate(generate_samples_iterable(kernel=self.kernel,
-                                                             initial_params=self.initial_params,
-                                                             warmup_steps=self.warmup_steps,
-                                                             warmup_settings=self.warmup_settings,
-                                                             num_samples=self.num_samples,
-                                                             idx=idx,
-                                                             use_progress_bar=True)):
+        iterable = self.get_iterable_fn(idx=idx, initial_params=self.initial_params, use_progress_bar=True)()
+        for i, sample in enumerate(iterable):
             if sample is not None:
-                current_parameter, current_logtarget_density, proposed_logtarget_density, accept_prob, ifaccept = sample
-                self.samples[i] = current_parameter
-                self.logdensities[i] = current_logtarget_density
-                self.proposed_logdensities[i] = proposed_logtarget_density
-                self.accept_prob[i] = accept_prob
-                self.ifaccept[i] = ifaccept
+                self.unpack_sample_sequential(sample=sample, pos=i)
 
         return self.samples
+
+    def unpack_sample_sequential(self, sample, pos):
+        current_parameter, current_logtarget_density, proposed_logtarget_density, accept_prob, ifaccept = sample
+        self.samples[pos] = current_parameter
+        self.logdensities[pos] = current_logtarget_density
+        self.proposed_logdensities[pos] = proposed_logtarget_density
+        self.accept_prob[pos] = accept_prob
+        self.ifaccept[pos] = ifaccept
 
     def _run_parallel(self, idx):
         self.init_multiprocesses(idx=idx)
@@ -228,24 +282,36 @@ class MCMC:
                         self.events[chain_num].set()
 
                         pos = chain_counts[chain_num]
+                        self.unpack_sample_parallel(sample=sample, chain_num=chain_num, pos=pos)
 
-                        current_parameter, current_logtarget_density, proposed_logtarget_density, accept_prob, ifaccept = sample
-                        self.samples[chain_num][pos] = current_parameter.clone()
-                        self.logdensities[chain_num][pos] = proposed_logtarget_density.clone()
-                        self.proposed_logdensities[chain_num][pos] = current_logtarget_density.clone()
-                        self.accept_prob[chain_num][pos] = accept_prob
-                        self.ifaccept[chain_num][pos] = ifaccept
-
-                        del sample
                         chain_counts[chain_num] += 1
                         progress_bars[chain_num].update(1)
-                        progress_bars[chain_num].set_description("Chain ID: {}, Acceptance probability {}".format(chain_num, np.round(self.ifaccept[chain_num].sum()/(chain_counts[chain_num]+1), 2)))
+                        # progress_bars[chain_num].set_description("Chain ID: {}, Acceptance probability {}".format(chain_num, np.round(self.ifaccept[chain_num].sum()/(chain_counts[chain_num]+1), 2)))
+                        progress_bars[chain_num].set_description("Chain ID: {}, Acceptance probability {}".format(chain_num, self.get_acceptance_prob_stat(num_iter=chain_counts[chain_num], chain_num=chain_num)))
+
                     else:
                         active_processes -= 1
+
+                del items
         finally:
             self.terminate_multiprocesses()
 
         return self.samples
+    
+    def unpack_sample_parallel(self, sample, chain_num, pos):
+        current_parameter, current_logtarget_density, proposed_logtarget_density, accept_prob, ifaccept = sample
+        self.samples[chain_num, pos] = current_parameter.clone()
+        self.logdensities[chain_num, pos] = proposed_logtarget_density.clone()
+        self.proposed_logdensities[chain_num, pos] = current_logtarget_density.clone()
+        self.accept_prob[chain_num, pos] = accept_prob
+        self.ifaccept[chain_num, pos] = ifaccept
+
+    def get_acceptance_prob_stat(self, num_iter=None, chain_num=0):
+        if self.parallel:
+            return np.round(self.ifaccept[chain_num].sum()/num_iter, 2)
+        else:
+            return np.round(self.ifaccept.sum()/num_iter, 2)
+
 
     def init_multiprocesses(self, idx):
         self.context = mp.get_context(self.mp_settings.get("mp_context"))
@@ -256,15 +322,26 @@ class MCMC:
         for chain_num in range(self.num_chains):
             initial_params = self.initial_params[chain_num]
 
-            process = MCMC_Process(kernel=self.kernel, event=self.events[chain_num], chain_num=chain_num, sample_queue=self.sample_queue, initial_params=initial_params, warmup_steps=self.warmup_steps, warmup_settings=self.warmup_settings, num_samples=self.num_samples, comm_interval=self.mp_settings.get("comm_interval"))
+            iterable_fn = self.get_iterable_fn(idx=idx, initial_params=initial_params, use_progress_bar=False)
+            process = MCMC_Process(kernel=self.kernel, iterable_fn=iterable_fn, event=self.events[chain_num], chain_num=chain_num, sample_queue=self.sample_queue, initial_params=initial_params, warmup_steps=self.warmup_steps, warmup_settings=self.warmup_settings, num_samples=self.num_samples, comm_interval=self.mp_settings.get("comm_interval"))
 
             self.processes.append(
-                self.context.Process(name=str(chain_num), target=process.run, args=(idx,)))
+                self.context.Process(name=str(chain_num), target=process.run))
 
     def terminate_multiprocesses(self):
         for p in self.processes:
             if p.is_alive():
                 p.terminate()
+
+    def get_iterable_fn(self, idx, initial_params, use_progress_bar):
+        iterable = partial(generate_samples_iterable,kernel=self.kernel,
+                                         initial_params=initial_params,
+                                         warmup_steps=self.warmup_steps,
+                                         warmup_settings=self.warmup_settings,
+                                         num_samples=self.num_samples,
+                                         idx=idx,
+                                         use_progress_bar=use_progress_bar)
+        return iterable
 
     def set_initial_params(self, initial_params):
         self.initial_params = initial_params
@@ -286,13 +363,13 @@ class MCMC:
             self.samples = torch.zeros((self.num_chains, self.num_samples, self.params_dim))
             self.logdensities = torch.zeros((self.num_chains, self.num_samples))
             self.proposed_logdensities = torch.zeros((self.num_chains, self.num_samples))
-            self.accept_prob = torch.zeros((self.num_chains, self.num_samples))
+            self.accept_prob = np.zeros((self.num_chains, self.num_samples))
             self.ifaccept = np.zeros((self.num_chains, self.num_samples))
         else:
             self.samples = torch.zeros((self.num_samples, self.params_dim))
             self.logdensities = torch.zeros(self.num_samples)
             self.proposed_logdensities = torch.zeros(self.num_samples)
-            self.accept_prob = torch.zeros(self.num_samples)
+            self.accept_prob = np.zeros(self.num_samples)
             self.ifaccept = np.zeros(self.num_samples)
 
 
@@ -326,8 +403,124 @@ class MCMC_pyro(MCMC):
     
     def get_accept_prob(self):
         raise NotImplementedError
-    
+
 class MCMC_Gibbs(MCMC):
+    """the class to run Gibbs sampler for z"""
+    def __init__(self, variables, kernel_functions, block_size={'para': 10000, 'z':1}, num_samples=MCMC_SAMPLE, initial_params=None, params_dim=None, warmup_steps=MCMC_T//5, warmup_settings=dict(target_prob=0.7, auto_init_stepsize=True), mp_settings=dict(comm_interval=1, mp_context="spawn"), **kwargs):
+        """
+        kernel_functions: dictionary {'para': para_kernel, 'z': z_kernel}
+            - dictionary of a parameter kernel which conditioned on u, z, r, and a z kernel which could generate a block of z given u, and return the likelihood function
+        block_size: block size of z that are being updated together
+        """
+        self.variables = variables      
+        self.block_size = block_size
+        self.data_length = {var: len(kernel_functions[var].model.data) for var in self.variables}
+
+        super(MCMC_Gibbs, self).__init__(kernel=kernel_functions, warmup_steps=warmup_steps, num_samples=num_samples, initial_params=initial_params, num_chains=num_chains, params_dim=params_dim, warmup_settings=warmup_settings, mp_settings=mp_settings, **kwargs) 
+
+
+    def check_initial_params_and_dims(self, initial_params, params_dim): #TODO: not ideal
+        # assert initial_params is not None or params_dim is not None, "Should either specify initial_params or params_dim"
+        # if initial_params is not None:
+        #     if self.parallel:
+        #         for var in self.variables:
+        #            assert initial_params[var].shape[0] == num_chains, "Leading dimension of initial params should match num_chains for parallel computing"
+        #         self.params_dim = {var: initial_params[var][0].shape for var in self.variables}
+        #     else:
+        #         self.params_dim = {var: initial_params[var].shape for var in self.variables}
+        #     self.initial_params = initial_params
+        # else:
+        #     raise NotImplementedError
+
+        # if initial_params is not None:
+        #     if self.parallel:
+        #         for var in self.variables:
+        #            assert initial_params[var].shape[0] == num_chains, "Leading dimension of initial params should match num_chains for parallel computing"
+        #         self.initial_params = initial_params
+        #         self.params_dim = {var: len(initial_params[var][0]) for var in self.variables}
+        #     else:
+        #         for var in self.variables:
+        #             assert (initial_params[var].shape[0] == 1 and len(initial_params[var].shape) == 2) or len(initial_params[var].shape) == 1, "Leading dimension of initial_params must be either 1 or params_dim for sequential computing"
+        #         self.initial_params = {var: initial_params[var].reshape(-1) for var in self.variables}
+        #         self.params_dim = {var: len(initial_params[var]) for var in self.variables}
+        # else:
+        #     if self.parallel:
+        #         self.initial_params = {var: torch.zeros([num_chains, params_dim[var]]) for var in self.variables}
+        #     else:
+        #         self.initial_params = {var: torch.zeros(params_dim[var]) for var in self.variables}
+        #     self.params_dim = params_dim
+
+
+        if initial_params is not None:
+            if self.parallel:
+                assert len(initial_params) == num_chains, "len(initial_params) should match num_chains for parallel computing"
+                self.initial_params = initial_params
+                self.params_dim = {var: initial_params[0][var].shape for var in self.variables}
+            else:
+                self.initial_params = initial_params[0] if (isinstance(initial_params,list) and len(initial_params) == 1) else initial_params
+                self.params_dim = {var: self.initial_params[var].shape for var in self.variables}
+        else:
+            raise NotImplementedError
+    
+    def unpack_sample_sequential(self, sample, pos):
+
+        current_parameter, current_logtarget_density, proposed_logtarget_density, accept_prob, ifaccept = sample
+        for var in self.variables:
+            self.samples[var][pos] = torch.tensor(current_parameter[var]) if type(current_parameter[var]) == np.ndarray else current_parameter[var]
+            self.logdensities[var][pos] = current_logtarget_density[var]
+            self.proposed_logdensities[var][pos] = proposed_logtarget_density[var]
+            self.accept_prob[var][pos] = accept_prob[var]
+            self.ifaccept[var][pos] = ifaccept[var]
+        
+    def unpack_sample_parallel(self, sample, chain_num, pos):
+        current_parameter, current_logtarget_density, proposed_logtarget_density, accept_prob, ifaccept = sample
+        for var in self.variables:
+            self.samples[var][chain_num, pos] = torch.tensor(current_parameter[var]) if type(current_parameter[var]) == np.ndarray else current_parameter[var]
+            self.logdensities[var][chain_num, pos] = current_logtarget_density[var]
+            self.proposed_logdensities[var][chain_num, pos] = proposed_logtarget_density[var]
+            self.accept_prob[var][chain_num, pos] = accept_prob[var]
+            self.ifaccept[var][chain_num, pos] = ifaccept[var]
+    
+    def get_acceptance_prob_stat(self, num_iter=None, chain_num=0):
+        num_iter = self.num_samples if num_iter is None else num_iter
+        if self.parallel:
+            return {var: np.round(self.ifaccept[var][chain_num].sum()/(self.ifaccept[var].shape[-1]*num_iter), 2) for var in self.variables}
+        else:
+            return {var: np.round(self.ifaccept[var].sum()/(self.ifaccept[var].shape[-1]*num_iter), 2) for var in self.variables}
+
+    
+    def get_iterable_fn(self, idx, initial_params, use_progress_bar):
+        iterable = partial(generate_samples_gibbs_iterable, kernel=self.kernel,
+                                               block_size=self.block_size,
+                                               data_length=self.data_length,
+                                               variables=self.variables,
+                                               initial_params=initial_params,
+                                               warmup_steps=self.warmup_steps,
+                                               warmup_settings=self.warmup_settings,
+                                               num_samples=self.num_samples,
+                                               idx=idx,
+                                               use_progress_bar=use_progress_bar)
+        return iterable
+    
+    def reset_stat(self):
+        if self.parallel:
+            self.samples = {var: torch.zeros(((self.num_chains, self.num_samples, ) + tuple(dim))) for var, dim in self.params_dim.items()}
+            self.logdensities = {var: torch.zeros(self.num_chains, self.num_samples) for var in self.params_dim.keys()}
+            self.proposed_logdensities = {var: torch.zeros(self.num_chains, self.num_samples) for var in self.params_dim.keys()}
+            self.accept_prob = {var: np.zeros([self.num_chains, self.num_samples, math.ceil(self.data_length[var] / self.block_size[var])]) for var in self.params_dim.keys()}
+            self.ifaccept = {var: np.zeros([self.num_chains, self.num_samples, math.ceil(self.data_length[var] / self.block_size[var])]) for var in self.params_dim.keys()}   
+        else:
+            self.samples = {var: torch.zeros(((self.num_samples,) + tuple(dim))) for var, dim in self.params_dim.items()}
+            # self.samples = {var: torch.zeros((self.num_samples + 1, math.ceil(self.data_length[var] / self.block_size[var]), ) + tuple(dim)) for var, dim in self.params_dim.items()}  
+            self.logdensities = {var: torch.zeros(self.num_samples) for var in self.params_dim.keys()}
+            self.proposed_logdensities = {var: torch.zeros(self.num_samples) for var in self.params_dim.keys()}
+            self.accept_prob = {var: np.zeros([self.num_samples, math.ceil(self.data_length[var] / self.block_size[var])]) for var in self.params_dim.keys()}
+            self.ifaccept = {var: np.zeros([self.num_samples, math.ceil(self.data_length[var] / self.block_size[var])]) for var in self.params_dim.keys()}   
+            # self.proposed_samples = {var: torch.zeros((self.num_samples, math.ceil(self.data_length[var] / self.block_size[var]), ) + tuple(dim)) for var, dim in self.params_dim.items()}   
+
+    
+
+class MCMC_Gibbs2(MCMC):
     """the class to run Gibbs sampler for z"""
     def __init__(self, variables, kernel_functions, block_size={'para': 10000, 'z':1}, num_samples=MCMC_SAMPLE, initial_params=None, params_dim=None, warmup_steps=MCMC_T//5, disable_progbar=MCMC_SHOW_DISABLE, warmup_settings=dict(target_prob=0.7, auto_init_stepsize=True), **kwargs):
         """
@@ -445,7 +638,8 @@ def MCMC_update(obs, posterior_samples, model, env, num_chains):
         z_sample = generate_z(env=env, obs=obs._buffers)
         r_hat = partial(generate_samples_with_z, model=model, obs=obs._buffers, batch_indices=batch_indices)
         z_transform_func = partial(generate_z, env=env, obs=obs._buffers)
-        llh_transform_grad_fn = lambda parameter:  tabular_indicator_stochastic(para={'para': parameter['para'].reshape(env.n_cell + (env.action_space.n, )), 'z': parameter['z']}, model=model, obs=obs._buffers)#stochastic
+        #llh_transform_grad_fn = lambda parameter:  tabular_indicator_stochastic(para={'para': parameter['para'].reshape(env.n_cell + (env.action_space.n, )), 'z': parameter['z']}, model=model, obs=obs._buffers)#stochastic
+        llh_transform_grad_fn = partial(tabular_indicator_stochastic,model=model, obs=obs._buffers)#stochastic
         Model = StochasticSModel(prior=prior, abclikelihood=abclikelihood, data=data, z_transform_fn=z_transform_func, llh_transform_fn=r_hat, llh_transform_grad_fn=llh_transform_grad_fn)
 
     else:
@@ -489,8 +683,9 @@ def MCMC_update(obs, posterior_samples, model, env, num_chains):
 
     if kernel.original is True:
         if STOCHASTIC:
-            mcmc = MCMC_Gibbs(variables=['para', 'z'], kernel_functions={'para': kernel, 'z': z_kernel}, num_samples=training_steps, initial_params={'para': posterior_samples[-1].reshape(-1), 'z': z_sample}, warmup_steps=np.int64(np.floor(training_steps*WARMUP_RATIO)), warup_settings=dict(target_prob=0.7, auto_init_stepsize=True))
-            posterior_samples = mcmc.run(idx={'para':FROZEN_NO, 'z': None}).reshape((-1, ) + env.n_cell + (env.action_space.n, ))
+            initial_params = [{'para': posterior_samples[-1].reshape(-1), 'z': z_sample}]*num_chains if num_chains > 1 else {'para': posterior_samples[-1].reshape(-1), 'z': z_sample} #TODO temporary
+            mcmc = MCMC_Gibbs(variables=['para', 'z'], kernel_functions={'para': kernel, 'z': z_kernel}, num_samples=training_steps, initial_params=initial_params, warmup_steps=np.int64(np.floor(training_steps*WARMUP_RATIO)), warup_settings=dict(target_prob=0.7, auto_init_stepsize=True))
+            posterior_samples = mcmc.run(idx={'para':FROZEN_NO, 'z': None})["para"].reshape((-1, ) + env.n_cell + (env.action_space.n, ))
         else:
             initial_params = posterior_samples[-1].reshape(-1).repeat([num_chains,1]) if num_chains > 1 else posterior_samples[-1].reshape(-1) #TODO temporary
             mcmc = MCMC(num_samples=training_steps, kernel=kernel, initial_params=initial_params, warmup_steps=np.int64(np.floor(training_steps*WARMUP_RATIO)), warup_settings=dict(target_prob=0.7, auto_init_stepsize=True), num_chains=num_chains, mp_settings=dict(comm_interval=COMM_INTERVAL, mp_context=MP_CONTEXT))
@@ -620,7 +815,7 @@ if __name__ == '__main__':
     torch.manual_seed(seed)
     
     if env_name == 'GridWorld':
-        env = GridWorld((1,2), obstacles=False, stochastic=STOCHASTIC)
+        env = GridWorld((3,3), obstacles=False, stochastic=STOCHASTIC)
         # env.plot_env()
     if env_name == 'Maze':
         env = Maze()

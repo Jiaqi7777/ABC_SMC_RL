@@ -685,7 +685,7 @@ class Z(Kernel):
     def propose_accept(self, current_para, indices=None, current_para_info_dict=None):
         current_para_llh_info_dict = current_para_info_dict["llh_info_dict"] if current_para_info_dict.get("llh_info_dict") is not None else dict()
         proposed_blocked_para = self.move_(indices=indices)
-        proposed_para = current_para.deepcopy()
+        proposed_para = deepcopy(current_para)
         proposed_para[slice(None), indices] = proposed_blocked_para
 
         # if current_para_info_dict.get("logdensities") is not None:
