@@ -220,7 +220,7 @@ class MCMC:
         assert initial_params is not None or params_dim is not None, "Should either specify initial_params or params_dim"
         if initial_params is not None:
             if self.parallel:
-                assert initial_params.shape[0] == num_chains, "Leading dimension of initial_params should match num_chains for parallel computing"
+                assert initial_params.shape[0] == self.num_chains, "Leading dimension of initial_params should match num_chains for parallel computing"
                 self.initial_params = initial_params
                 self.params_dim = len(initial_params[0])
             else:
@@ -426,7 +426,7 @@ class MCMC_Gibbs(MCMC):
 
         if initial_params is not None:
             if self.parallel:
-                assert len(initial_params) == num_chains, "len(initial_params) should match num_chains for parallel computing"
+                assert len(initial_params) == self.num_chains, "len(initial_params) should match num_chains for parallel computing"
                 self.initial_params = initial_params
                 self.params_dim = {var: initial_params[0][var].shape for var in self.variables}
             else:
