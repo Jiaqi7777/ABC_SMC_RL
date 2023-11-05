@@ -477,7 +477,7 @@ class StochasticSModel(DeterministicSRModel):
         if self.var is not None:
             samples[self.var] = parameter
         if self.var == 'z':
-            logprior = 0 
+            logprior = 0 #self.logprior(parameter=samples["para"])
         else:
             logprior = self.logprior(parameter=parameter)
         llh, llh_info_dict = self.llh(parameter=samples, llh_info_dict=llh_info_dict)

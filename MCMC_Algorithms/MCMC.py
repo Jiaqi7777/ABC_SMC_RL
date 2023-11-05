@@ -117,19 +117,19 @@ def generate_samples_gibbs_iterable(kernel, block_size, data_length, variables, 
         kernel[var].model.set_var(var)
         kernel[var].model.set_samples(current_para)
         current_logtarget_density, current_para_llh_info_dict  = kernel[var].model.logtarget_density(parameter=current_para[var], llh_info_dict=dict())
-        current_para_info_dict[var] = {"logdensities":current_logtarget_density, "llh_info_dict":current_para_llh_info_dict}
+        current_para_info_dict = {"logdensities":current_logtarget_density, "llh_info_dict":current_para_llh_info_dict}
 
         if warmup_steps > 0:
             try:
-                current_para[var], current_para_info_dict[var], _ = warmup(kernel=kernel[var],
+                current_para[var], current_para_info_dict, _ = warmup(kernel=kernel[var],
                                                                            warmup_steps=warmup_steps,
                                                                            warmup_settings=warmup_settings,
                                                                            init_para=current_para[var],
-                                                                           init_para_info_dict=current_para_info_dict[var])
+                                                                           init_para_info_dict=current_para_info_dict)
             except NotImplementedError:
                 print("Warmup is not implemented for the current kernel. Skip to sampling...")
 
-    pbar = tqdm(range(num_samples)) if use_progress_bar is True else range(num_samples)
+    pbar = tqdm(range(num_samples), position=0, leave=True) if use_progress_bar is True else range(num_samples)
     accepted = {var: 0 for var in variables}
 
     for i in pbar:
@@ -141,32 +141,35 @@ def generate_samples_gibbs_iterable(kernel, block_size, data_length, variables, 
 
         for var in variables:
             kernel[var].model.set_var(var)
+            current_logtarget_density, current_para_llh_info_dict  = kernel[var].model.logtarget_density(parameter=current_para[var], llh_info_dict=dict())
+            current_para_info_dict = {"logdensities":current_logtarget_density, "llh_info_dict":current_para_llh_info_dict}
             for j in range(math.ceil(data_length[var] / block_size[var])):
                 '''proposed_block_z: block_size x M_Z x 2'''
                 selected_indices = idx[var] if idx[var] is not None else slice(None)
                 indices = range(j * block_size[var], min((j + 1) * block_size[var], data_length[var]))[selected_indices]
                 accept_prob, proposed_para, proposed_para_info_dict = kernel[var].propose_accept(current_para=current_para[var], 
-                                                            indices=indices, current_para_info_dict=current_para_info_dict[var])
+                                                            indices=indices, current_para_info_dict=current_para_info_dict)
                 # if j==4 and var=='z':
                 #     print(current_para[var], proposed_para)
                     # print('accept prob', j, accept_prob)
 
                 if np.random.uniform(0, 1) < accept_prob:
                     current_para[var] = proposed_para
-                    current_para_info_dict[var] = proposed_para_info_dict
+                    current_para_info_dict = proposed_para_info_dict
                     ifaccept[var][j] = 1
                     accepted[var] += 1
                 
                 accept_probs[var][j] = accept_prob
+                kernel[var].model.set_samples(current_para)
 
-            current_logdensities[var] = current_para_info_dict[var]["logdensities"]
+            current_logdensities[var] = current_para_info_dict["logdensities"]
             proposed_logdensities[var] = proposed_para_info_dict["logdensities"]
-            kernel[var].model.set_samples(current_para)
-
-        yield current_para, current_logdensities, proposed_logdensities, accept_probs, ifaccept
+            
 
         if use_progress_bar:
             pbar.set_description("Acceptance probability {}".format({var: np.round(accepted[var]/((i+1)*math.ceil(data_length[var] / block_size[var])), 2) for var in variables}))
+
+        yield current_para, current_logdensities, proposed_logdensities, accept_probs, ifaccept
         
     yield None # indicate finish
 
@@ -301,17 +304,17 @@ class MCMC:
     def unpack_sample_parallel(self, sample, chain_num, pos):
         current_parameter, current_logtarget_density, proposed_logtarget_density, accept_prob, ifaccept = sample
         self.samples[chain_num, pos] = current_parameter.clone()
-        self.logdensities[chain_num, pos] = proposed_logtarget_density.clone()
-        self.proposed_logdensities[chain_num, pos] = current_logtarget_density.clone()
+        self.logdensities[chain_num, pos] = current_logtarget_density.clone()
+        self.proposed_logdensities[chain_num, pos] = proposed_logtarget_density.clone()
         self.accept_prob[chain_num, pos] = accept_prob
         self.ifaccept[chain_num, pos] = ifaccept
 
     def get_acceptance_prob_stat(self, num_iter=None, chain_num=0):
+        num_iter = self.num_samples if num_iter is None else num_iter
         if self.parallel:
             return np.round(self.ifaccept[chain_num].sum()/num_iter, 2)
         else:
             return np.round(self.ifaccept.sum()/num_iter, 2)
-
 
     def init_multiprocesses(self, idx):
         self.context = mp.get_context(self.mp_settings.get("mp_context"))
@@ -404,9 +407,10 @@ class MCMC_pyro(MCMC):
     def get_accept_prob(self):
         raise NotImplementedError
 
+
 class MCMC_Gibbs(MCMC):
     """the class to run Gibbs sampler for z"""
-    def __init__(self, variables, kernel_functions, block_size={'para': 10000, 'z':1}, num_samples=MCMC_SAMPLE, initial_params=None, params_dim=None, warmup_steps=MCMC_T//5, warmup_settings=dict(target_prob=0.7, auto_init_stepsize=True), mp_settings=dict(comm_interval=1, mp_context="spawn"), **kwargs):
+    def __init__(self, variables, kernel_functions, block_size={'para': 10000, 'z':1}, num_samples=MCMC_SAMPLE, initial_params=None, num_chains=1, params_dim=None, warmup_steps=MCMC_T//5, warmup_settings=dict(target_prob=0.7, auto_init_stepsize=True), mp_settings=dict(comm_interval=1, mp_context="spawn"), **kwargs):
         """
         kernel_functions: dictionary {'para': para_kernel, 'z': z_kernel}
             - dictionary of a parameter kernel which conditioned on u, z, r, and a z kernel which could generate a block of z given u, and return the likelihood function
@@ -418,38 +422,7 @@ class MCMC_Gibbs(MCMC):
 
         super(MCMC_Gibbs, self).__init__(kernel=kernel_functions, warmup_steps=warmup_steps, num_samples=num_samples, initial_params=initial_params, num_chains=num_chains, params_dim=params_dim, warmup_settings=warmup_settings, mp_settings=mp_settings, **kwargs) 
 
-
     def check_initial_params_and_dims(self, initial_params, params_dim): #TODO: not ideal
-        # assert initial_params is not None or params_dim is not None, "Should either specify initial_params or params_dim"
-        # if initial_params is not None:
-        #     if self.parallel:
-        #         for var in self.variables:
-        #            assert initial_params[var].shape[0] == num_chains, "Leading dimension of initial params should match num_chains for parallel computing"
-        #         self.params_dim = {var: initial_params[var][0].shape for var in self.variables}
-        #     else:
-        #         self.params_dim = {var: initial_params[var].shape for var in self.variables}
-        #     self.initial_params = initial_params
-        # else:
-        #     raise NotImplementedError
-
-        # if initial_params is not None:
-        #     if self.parallel:
-        #         for var in self.variables:
-        #            assert initial_params[var].shape[0] == num_chains, "Leading dimension of initial params should match num_chains for parallel computing"
-        #         self.initial_params = initial_params
-        #         self.params_dim = {var: len(initial_params[var][0]) for var in self.variables}
-        #     else:
-        #         for var in self.variables:
-        #             assert (initial_params[var].shape[0] == 1 and len(initial_params[var].shape) == 2) or len(initial_params[var].shape) == 1, "Leading dimension of initial_params must be either 1 or params_dim for sequential computing"
-        #         self.initial_params = {var: initial_params[var].reshape(-1) for var in self.variables}
-        #         self.params_dim = {var: len(initial_params[var]) for var in self.variables}
-        # else:
-        #     if self.parallel:
-        #         self.initial_params = {var: torch.zeros([num_chains, params_dim[var]]) for var in self.variables}
-        #     else:
-        #         self.initial_params = {var: torch.zeros(params_dim[var]) for var in self.variables}
-        #     self.params_dim = params_dim
-
 
         if initial_params is not None:
             if self.parallel:
@@ -463,7 +436,6 @@ class MCMC_Gibbs(MCMC):
             raise NotImplementedError
     
     def unpack_sample_sequential(self, sample, pos):
-
         current_parameter, current_logtarget_density, proposed_logtarget_density, accept_prob, ifaccept = sample
         for var in self.variables:
             self.samples[var][pos] = torch.tensor(current_parameter[var]) if type(current_parameter[var]) == np.ndarray else current_parameter[var]
@@ -475,9 +447,9 @@ class MCMC_Gibbs(MCMC):
     def unpack_sample_parallel(self, sample, chain_num, pos):
         current_parameter, current_logtarget_density, proposed_logtarget_density, accept_prob, ifaccept = sample
         for var in self.variables:
-            self.samples[var][chain_num, pos] = torch.tensor(current_parameter[var]) if type(current_parameter[var]) == np.ndarray else current_parameter[var]
-            self.logdensities[var][chain_num, pos] = current_logtarget_density[var]
-            self.proposed_logdensities[var][chain_num, pos] = proposed_logtarget_density[var]
+            self.samples[var][chain_num, pos] = torch.tensor(current_parameter[var]) if type(current_parameter[var]) == np.ndarray else current_parameter[var].clone()
+            self.logdensities[var][chain_num, pos] = current_logtarget_density[var].clone()
+            self.proposed_logdensities[var][chain_num, pos] = proposed_logtarget_density[var].clone()
             self.accept_prob[var][chain_num, pos] = accept_prob[var]
             self.ifaccept[var][chain_num, pos] = ifaccept[var]
     
@@ -488,7 +460,6 @@ class MCMC_Gibbs(MCMC):
         else:
             return {var: np.round(self.ifaccept[var].sum()/(self.ifaccept[var].shape[-1]*num_iter), 2) for var in self.variables}
 
-    
     def get_iterable_fn(self, idx, initial_params, use_progress_bar):
         iterable = partial(generate_samples_gibbs_iterable, kernel=self.kernel,
                                                block_size=self.block_size,
@@ -505,8 +476,8 @@ class MCMC_Gibbs(MCMC):
     def reset_stat(self):
         if self.parallel:
             self.samples = {var: torch.zeros(((self.num_chains, self.num_samples, ) + tuple(dim))) for var, dim in self.params_dim.items()}
-            self.logdensities = {var: torch.zeros(self.num_chains, self.num_samples) for var in self.params_dim.keys()}
-            self.proposed_logdensities = {var: torch.zeros(self.num_chains, self.num_samples) for var in self.params_dim.keys()}
+            self.logdensities = {var: torch.zeros((self.num_chains, self.num_samples)) for var in self.params_dim.keys()}
+            self.proposed_logdensities = {var: torch.zeros((self.num_chains, self.num_samples)) for var in self.params_dim.keys()}
             self.accept_prob = {var: np.zeros([self.num_chains, self.num_samples, math.ceil(self.data_length[var] / self.block_size[var])]) for var in self.params_dim.keys()}
             self.ifaccept = {var: np.zeros([self.num_chains, self.num_samples, math.ceil(self.data_length[var] / self.block_size[var])]) for var in self.params_dim.keys()}   
         else:
@@ -520,102 +491,102 @@ class MCMC_Gibbs(MCMC):
 
     
 
-class MCMC_Gibbs2(MCMC):
-    """the class to run Gibbs sampler for z"""
-    def __init__(self, variables, kernel_functions, block_size={'para': 10000, 'z':1}, num_samples=MCMC_SAMPLE, initial_params=None, params_dim=None, warmup_steps=MCMC_T//5, disable_progbar=MCMC_SHOW_DISABLE, warmup_settings=dict(target_prob=0.7, auto_init_stepsize=True), **kwargs):
-        """
-        kernel_functions: dictionary {'para': para_kernel, 'z': z_kernel}
-            - dictionary of a parameter kernel which conditioned on u, z, r, and a z kernel which could generate a block of z given u, and return the likelihood function
-        block_size: block size of z that are being updated together
-        """
-        self.num_samples = num_samples
-        self.kernel = kernel_functions
-        assert initial_params is not None or params_dim is not None, "Should either specify initial_params or params_dim"
-        if initial_params is not None:
-            self.initial_params = initial_params
-            self.params_dim = {var: torch.tensor(initial_params[var]).shape for var in variables}
-        else:
-            self.initial_params = torch.zeros(params_dim)
-            self.params_dim = params_dim
+# class MCMC_Gibbs2(MCMC):
+#     """the class to run Gibbs sampler for z"""
+#     def __init__(self, variables, kernel_functions, block_size={'para': 10000, 'z':1}, num_samples=MCMC_SAMPLE, initial_params=None, params_dim=None, warmup_steps=MCMC_T//5, disable_progbar=MCMC_SHOW_DISABLE, warmup_settings=dict(target_prob=0.7, auto_init_stepsize=True), **kwargs):
+#         """
+#         kernel_functions: dictionary {'para': para_kernel, 'z': z_kernel}
+#             - dictionary of a parameter kernel which conditioned on u, z, r, and a z kernel which could generate a block of z given u, and return the likelihood function
+#         block_size: block size of z that are being updated together
+#         """
+#         self.num_samples = num_samples
+#         self.kernel = kernel_functions
+#         assert initial_params is not None or params_dim is not None, "Should either specify initial_params or params_dim"
+#         if initial_params is not None:
+#             self.initial_params = initial_params
+#             self.params_dim = {var: torch.tensor(initial_params[var]).shape for var in variables}
+#         else:
+#             self.initial_params = torch.zeros(params_dim)
+#             self.params_dim = params_dim
 
-        assert warmup_steps is None or isinstance(warmup_steps,int) or isinstance(warmup_steps, np.integer), "warmup_steps must be None or integer"
-        self.warmup_steps = 0 if warmup_steps is None else warmup_steps
-        self.warmup_settings = warmup_settings  
+#         assert warmup_steps is None or isinstance(warmup_steps,int) or isinstance(warmup_steps, np.integer), "warmup_steps must be None or integer"
+#         self.warmup_steps = 0 if warmup_steps is None else warmup_steps
+#         self.warmup_settings = warmup_settings  
         
-        self.variables = variables      
-        self.block_size = block_size
+#         self.variables = variables      
+#         self.block_size = block_size
         
-        self.reset_stat()
+#         self.reset_stat()
         
-    def run(self, idx=None):
+#     def run(self, idx=None):
         
-        self.reset_stat()
+#         self.reset_stat()
         
-        pbar = tqdm(range(self.num_samples), position=0, leave=True)
-        current_para = self.initial_params
-        current_para_info_dict = dict()
+#         pbar = tqdm(range(self.num_samples), position=0, leave=True)
+#         current_para = self.initial_params
+#         current_para_info_dict = dict()
         
-        for var in self.variables:
-            self.kernel[var].model.set_var(var)
-            self.kernel[var].model.set_samples(current_para)
-            current_logtarget_density, current_para_llh_info_dict  = self.kernel[var].model.logtarget_density(parameter=current_para[var], llh_info_dict=dict())
-            current_para_info_dict[var] = {"logdensities":current_logtarget_density, "llh_info_dict":current_para_llh_info_dict}
-            self.samples[var][0] = torch.tensor(current_para[var])
-            self.logdensities[var][0] = current_logtarget_density
-            self.proposed_logdensities[var][0] = current_logtarget_density
+#         for var in self.variables:
+#             self.kernel[var].model.set_var(var)
+#             self.kernel[var].model.set_samples(current_para)
+#             current_logtarget_density, current_para_llh_info_dict  = self.kernel[var].model.logtarget_density(parameter=current_para[var], llh_info_dict=dict())
+#             current_para_info_dict[var] = {"logdensities":current_logtarget_density, "llh_info_dict":current_para_llh_info_dict}
+#             self.samples[var][0] = torch.tensor(current_para[var])
+#             self.logdensities[var][0] = current_logtarget_density
+#             self.proposed_logdensities[var][0] = current_logtarget_density
             
-            if self.warmup_steps > 0:
-                try: 
-                    current_para[var], current_para_info_dict[var], _ = self.warmup(var=var, init_para=current_para[var], init_para_info_dict=current_para_info_dict)
-                except NotImplementedError:
-                    print("Warmup is not implemented for the current kernel. Skip to sampling...")
+#             if self.warmup_steps > 0:
+#                 try: 
+#                     current_para[var], current_para_info_dict[var], _ = self.warmup(var=var, init_para=current_para[var], init_para_info_dict=current_para_info_dict)
+#                 except NotImplementedError:
+#                     print("Warmup is not implemented for the current kernel. Skip to sampling...")
         
-        for i in pbar:
-            for var in self.variables:
-                self.kernel[var].model.set_var(var)
-                for j in range(math.ceil(self.data_length[var] / self.block_size[var])):
-                    '''proposed_block_z: block_size x M_Z x 2'''
-                    selected_indices = idx[var] if idx[var] is not None else slice(None)
-                    indices = range(j * self.block_size[var], min((j + 1) * self.block_size[var], self.data_length[var]))[selected_indices]
-                    accept_prob, proposed_para, proposed_para_info_dict = self.kernel[var].propose_accept(current_para=current_para[var], 
-                                                                indices=indices, current_para_info_dict=current_para_info_dict[var])
-                    # if j==4 and var=='z':
-                    #     print(current_para[var], proposed_para)
-                        # print('accept prob', j, accept_prob)
-                    if np.random.uniform(0, 1) < accept_prob:
-                        current_para[var] = proposed_para
-                        current_para_info_dict[var] = proposed_para_info_dict
-                        self.accepted[var] += 1
+#         for i in pbar:
+#             for var in self.variables:
+#                 self.kernel[var].model.set_var(var)
+#                 for j in range(math.ceil(self.data_length[var] / self.block_size[var])):
+#                     '''proposed_block_z: block_size x M_Z x 2'''
+#                     selected_indices = idx[var] if idx[var] is not None else slice(None)
+#                     indices = range(j * self.block_size[var], min((j + 1) * self.block_size[var], self.data_length[var]))[selected_indices]
+#                     accept_prob, proposed_para, proposed_para_info_dict = self.kernel[var].propose_accept(current_para=current_para[var], 
+#                                                                 indices=indices, current_para_info_dict=current_para_info_dict[var])
+#                     # if j==4 and var=='z':
+#                     #     print(current_para[var], proposed_para)
+#                         # print('accept prob', j, accept_prob)
+#                     if np.random.uniform(0, 1) < accept_prob:
+#                         current_para[var] = proposed_para
+#                         current_para_info_dict[var] = proposed_para_info_dict
+#                         self.accepted[var] += 1
                         
-                    self.accept_prob[var][i][j] = accept_prob
-                    # self.proposed_samples[var][i][j] = torch.tensor(proposed_para)
-                    # self.samples[var][i + 1][j] = torch.tensor(current_para[var])
-                self.samples[var][i + 1] = torch.tensor(current_para[var])
-                self.logdensities[var][i + 1] = current_para_info_dict[var]["logdensities"]
-                self.proposed_logdensities['z'][i + 1] = proposed_para_info_dict["logdensities"]
-                self.kernel[var].model.set_samples(current_para)
+#                     self.accept_prob[var][i][j] = accept_prob
+#                     # self.proposed_samples[var][i][j] = torch.tensor(proposed_para)
+#                     # self.samples[var][i + 1][j] = torch.tensor(current_para[var])
+#                 self.samples[var][i + 1] = torch.tensor(current_para[var])
+#                 self.logdensities[var][i + 1] = current_para_info_dict[var]["logdensities"]
+#                 self.proposed_logdensities['z'][i + 1] = proposed_para_info_dict["logdensities"]
+#                 self.kernel[var].model.set_samples(current_para)
             
-            pbar.set_description("Acceptance probability {}".format(np.round(self.accepted['para']/(i+1), 2)))
-        return self.samples['para']
+#             pbar.set_description("Acceptance probability {}".format(np.round(self.accepted['para']/(i+1), 2)))
+#         return self.samples['para']
     
-    def warmup(self, var, init_para, init_para_info_dict=dict()):
-        current_para, current_para_info_dict, info = self.kernel[var].warmup(init_para=init_para, 
-                                                                        init_para_info_dict=init_para_info_dict,
-                                                                        iterations=self.warmup_steps, 
-                                                                        set_stepsize=True,
-                                                                        **self.warmup_settings)
+#     def warmup(self, var, init_para, init_para_info_dict=dict()):
+#         current_para, current_para_info_dict, info = self.kernel[var].warmup(init_para=init_para, 
+#                                                                         init_para_info_dict=init_para_info_dict,
+#                                                                         iterations=self.warmup_steps, 
+#                                                                         set_stepsize=True,
+#                                                                         **self.warmup_settings)
 
-        return current_para, current_para_info_dict, info
+#         return current_para, current_para_info_dict, info
     
-    def reset_stat(self):
-        self.data_length = {var: len(self.kernel[var].model.data) for var in self.variables}
-        self.samples = {var: torch.zeros(((self.num_samples + 1, ) + tuple(dim))) for var, dim in self.params_dim.items()}
-        # self.samples = {var: torch.zeros((self.num_samples + 1, math.ceil(self.data_length[var] / self.block_size[var]), ) + tuple(dim)) for var, dim in self.params_dim.items()}  
-        self.logdensities = {var: torch.zeros(self.num_samples+1) for var in self.params_dim.keys()}
-        self.proposed_logdensities = {var: torch.zeros(self.num_samples+1) for var in self.params_dim.keys()}
-        self.accepted = {var: 0 for var in self.params_dim.keys()}
-        self.accept_prob = {var: torch.zeros(self.num_samples, math.ceil(self.data_length[var] / self.block_size[var])) for var in self.params_dim.keys()}   
-        # self.proposed_samples = {var: torch.zeros((self.num_samples, math.ceil(self.data_length[var] / self.block_size[var]), ) + tuple(dim)) for var, dim in self.params_dim.items()}   
+#     def reset_stat(self):
+#         self.data_length = {var: len(self.kernel[var].model.data) for var in self.variables}
+#         self.samples = {var: torch.zeros(((self.num_samples + 1, ) + tuple(dim))) for var, dim in self.params_dim.items()}
+#         # self.samples = {var: torch.zeros((self.num_samples + 1, math.ceil(self.data_length[var] / self.block_size[var]), ) + tuple(dim)) for var, dim in self.params_dim.items()}  
+#         self.logdensities = {var: torch.zeros(self.num_samples+1) for var in self.params_dim.keys()}
+#         self.proposed_logdensities = {var: torch.zeros(self.num_samples+1) for var in self.params_dim.keys()}
+#         self.accepted = {var: 0 for var in self.params_dim.keys()}
+#         self.accept_prob = {var: torch.zeros(self.num_samples, math.ceil(self.data_length[var] / self.block_size[var])) for var in self.params_dim.keys()}   
+#         # self.proposed_samples = {var: torch.zeros((self.num_samples, math.ceil(self.data_length[var] / self.block_size[var]), ) + tuple(dim)) for var, dim in self.params_dim.items()}   
 
     
 #MCMC
