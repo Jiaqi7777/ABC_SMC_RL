@@ -361,11 +361,11 @@ def MCMC_update(obs, posterior_samples, model, env):
         if STOCHASTIC:
             mcmc = MCMC_Gibbs(variables=['para', 'z'], kernel_functions={'para': kernel, 'z': z_kernel}, num_samples=training_steps, initial_params={'para': posterior_samples[-1].reshape(-1), 'z': z_sample}, warmup_steps=np.int64(np.floor(training_steps*WARMUP_RATIO)), warup_settings=dict(target_prob=TARGET_ACCEPT_PROB, auto_init_stepsize=True))
             posterior_samples = mcmc.run(idx={'para':FROZEN_NO, 'z': None})
-            posterior_samples = posterior_samples.reshape((len(posterior_samples), ) + submatrix_shape_ + (env.action_space.n, )) #if FROZEN else posterior_samples.reshape((len(posterior_samples), ) + env.n_cell + (env.action_space.n, ))
+            # posterior_samples = posterior_samples.reshape((len(posterior_samples), ) + submatrix_shape_ + (env.action_space.n, )) #if FROZEN else posterior_samples.reshape((len(posterior_samples), ) + env.n_cell + (env.action_space.n, ))
         else:
             mcmc = MCMC(num_samples=training_steps, kernel=kernel, initial_params=posterior_samples[-1].reshape(-1), warmup_steps=np.int64(np.floor(training_steps*WARMUP_RATIO)), warup_settings=dict(target_prob=TARGET_ACCEPT_PROB, auto_init_stepsize=True))
             posterior_samples = mcmc.run()
-            posterior_samples = posterior_samples.reshape((len(posterior_samples), ) + submatrix_shape_ + (env.action_space.n, )) #if FROZEN else posterior_samples.reshape((len(posterior_samples), ) + env.n_cell + (env.action_space.n, ))
+            # posterior_samples = posterior_samples.reshape((len(posterior_samples), ) + submatrix_shape_ + (env.action_space.n, )) #if FROZEN else posterior_samples.reshape((len(posterior_samples), ) + env.n_cell + (env.action_space.n, ))
         logdensities = mcmc.get_logdensities()
         proposed_logdensities = mcmc.get_proposed_logdensities()
         accept_probs = mcmc.get_accept_prob()
@@ -378,13 +378,14 @@ def MCMC_update(obs, posterior_samples, model, env):
         else:
             mcmc = MCMC_pyro(num_samples=pyro_training_steps, kernel=kernel, initial_params=posterior_samples[-1].reshape(-1), warmup_steps=np.int64(np.floor(pyro_training_steps*WARMUP_RATIO)), disable_progbar=MCMC_SHOW_DISABLE)
         posterior_samples = mcmc.run()
-        posterior_samples = posterior_samples.reshape((-1, ) + submatrix_shape_ + (env.action_space.n, )) #if FROZEN else posterior_samples.reshape((len(posterior_samples), ) + env.n_cell + (env.action_space.n, ))
+        # posterior_samples = posterior_samples.reshape((-1, ) + submatrix_shape_ + (env.action_space.n, )) #if FROZEN else posterior_samples.reshape((len(posterior_samples), ) + env.n_cell + (env.action_space.n, ))
         # posterior_samples = mcmc.run().reshape((-1, ) + )
         return posterior_samples, accept_probs, mcmc, kernel, None, None
     
 def display_results(posterior_samples, model, accept_probs, logdensities=None, proposed_logdensities=None):
-    display_indices = min(len(posterior_samples) // 10 + 1, 1000)
-    values = torch.round(torch.max(torch.mean(model.get_parameter()[-display_indices:], 0), -1).values, decimals=2)
+    display_indices = min(len(posterior_samples) // 1 + 1, 1000)
+    plot_qtable(torch.mean(model.get_parameter()[:], 0))
+    values = torch.round(torch.max(torch.mean(model.get_parameter()[:], 0), -1).values, decimals=2)
     model.plot_policy(paras=model.get_parameter()[-display_indices:].numpy(), title=f'policy_T{training_steps}_{time}', additional_info = values, save=save, show=show)
     # model.plot_value(paras=posterior_samples.numpy(), title=f'value_T{training_steps}_{time}')
     # plt.imshow(values)
@@ -399,7 +400,7 @@ def display_results(posterior_samples, model, accept_probs, logdensities=None, p
                                                     plot=dict(color='k', label='trace')))
     ax = f.get_axes()
     for i, ai in enumerate(ax):
-        ai.axhline(y = Q_star.flatten()[OBSERVE_DATA_START:OBSERVE_DATA_END][i], linestyle=':', linewidth=5, color = 'g',  label = 'true q')
+        ai.axhline(y = Q_star[env.learnable_idx][OBSERVE_DATA_START:OBSERVE_DATA_END][i], linestyle=':', linewidth=5, color = 'g',  label = 'true q')
         q = np.percentile(data_plot[:, i], [PLOT_THRESHOLD, 100 - PLOT_THRESHOLD])
         ai.set_ylim(q)  
     f.tight_layout()
@@ -489,7 +490,7 @@ if __name__ == '__main__':
     ADAPT_STEP_SIZE = True if WARMUP_RATIO > 0 else False
     ADAPT_MASS_MATRIX = True if WARMUP_RATIO > 0 else False
     KERNEL_NAME = 'NUTS'
-    EPISODES = 100
+    EPISODES = 30
 
     N_PARTICLE = training_steps + 1 
     random.seed(seed)
@@ -503,7 +504,7 @@ if __name__ == '__main__':
     if env_name == 'Maze':
         env = Maze()
     if env_name == 'DeepSea':
-        env = DeepSea(depth=20)
+        env = DeepSea(depth=12)
     
     S = []
     if len(env.n_cell) == 1:
@@ -522,7 +523,7 @@ if __name__ == '__main__':
     # pi_star, Q_star, V_star = OfflineQLearning(Q, A, S, env, gamma=GAMMA, show=show, thresh=1e-3, alpha=1)
     pi_star, Q_star, V_star = DynamicProgramming(Q, A, S, env, gamma=GAMMA, show=show)
     dim = env.observation_space.n * env.action_space.n
-    model = Tabular(env=env, n_particle=N_PARTICLE, prior='normal', gamma=GAMMA, initial_tables=Q_star, idx=FROZEN_IDX)
+    model = Tabular(env=env, n_particle=N_PARTICLE, prior='normal', mean=PRIOR_MEAN, std=PRIOR_SIGMA, gamma=GAMMA, initial_tables=Q_star, idx=FROZEN_IDX)
     model.plot_policy(paras=np.array([Q_star]), title=f'True Values/Policy by Dynamic Programming', additional_info = V_star, show=show)
     
     env.reset()
@@ -532,18 +533,17 @@ if __name__ == '__main__':
         for repeat in range(REPEAT_EXPERIMENT):
             STEPSIZE = INITIAL_STEPSIZE
             # model = Tabular(env=env, n_particle=N_PARTICLE, prior='normal', gamma=GAMMA)
-            model = Tabular(env=env, n_particle=N_PARTICLE, prior='normal', gamma=GAMMA, initial_tables=Q_star, idx=FROZEN_IDX)#For frozen all but one dimensions
-            r_all_epi = []
+            model = Tabular(env=env, n_particle=N_PARTICLE, prior='normal', mean=PRIOR_MEAN, std=PRIOR_SIGMA, gamma=GAMMA, initial_tables=Q_star, idx=FROZEN_IDX)#For frozen all but one dimensions
+            r_all_epi = [] 
             obs = Buffer(['state0', 'state1', 'action', 'rewards', 'done'])
             s0, _ = env.reset()
-            posterior_samples = torch.tensor(model.get_learnable_parameter())
             for e in range(EPISODES):
                 s0, _ = env.reset()
-                para = model.sample_para()
+                para = model.sample_para(burn_in=int(training_steps * BURN_IN))
+                plot_qtable(para, title=f'Sampled Q table for episode {e}')
                 print(f'Episode {e} in repeat {repeat}')
                 R = 0
-                R_star = 0
-                h = 0
+                # h = 0
                 # while True: #Turn on h += 1
                 for h in tqdm(range(HORIZON)):
                     action = model.act(s0, para, greedy=GREEDY)
@@ -557,6 +557,8 @@ if __name__ == '__main__':
                     obs.insert({'state0': s0, 'state1': s1, 'action': int(action), 'rewards': r, 'done': done}, unique=UNIQUE_OBS)
                     s0 = s1
                     if done or ( h + 1)  % FROZEN_T == 0:
+                        model.set_learnable_idx(obs)
+                        posterior_samples = torch.tensor(model.get_learnable_parameter())
                         plot_obs(obs, env, env_name=ENV_NAME, title=f'Eploration path till ep {e}', additional_info=V_star)
                         plt.show()
                         #MCMC
@@ -580,7 +582,7 @@ if __name__ == '__main__':
             r_all_iter.append(r_all_epi)
             if save:
                 save_results(results=r_all_iter, folder='Returns', stochastic=STOCHASTIC, episode=e, training_steps=training_steps, greedy=GREEDY, epsilon=EPSILON, initial_stepsize=INITIAL_STEPSIZE, decreasing_factor=DECREASING_FACTOR, time=time, m_z=M_Z, repeat=repeat)        
-        plt.plot(R)
+        plt.plot(r_all_epi)
         if show:
             plt.show()
             

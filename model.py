@@ -40,6 +40,7 @@ class Buffer:
     def __init__(self, entry_keys, seed=SEED):
         self._buffers = {key: [] for key in entry_keys}
         self.unique_set = []
+        self._unique_buffers = {key: [] for key in entry_keys}
 
     def insert(self, items, unique=False, unique_verbose=True):
         if set(items.keys()) != set(self._buffers.keys()):
@@ -47,15 +48,19 @@ class Buffer:
         unique_check = list(items.values())
         unique_check.remove(items['state1'])
         unique_check = str(unique_check)
-        if unique and unique_check in self.unique_set:
-            return 
-        if unique_verbose:
-            print('New items added', unique_check)
+        if unique_check in self.unique_set:
+            if unique:
+                return 
+        else:
+            self.unique_set.append(unique_check)
+            for k, v in items.items():
+                self._unique_buffers[k].append(v)       
+            if unique_verbose:
+                print('New items added', unique_check)
         for k, v in items.items():
             self._buffers[k].append(v)
             # if len(self._buffers[k]) > BUFFER_SIZE:
             #     self._buffers[k].pop(0)
-        self.unique_set.append(unique_check)
         
     def get_minibatch(self, batch_size):
         if batch_size == 1:
@@ -73,7 +78,7 @@ class Buffer:
         return len(list(self._buffers.values())[0])
 
 class Tabular:
-    def __init__(self, env, n_particle, prior='normal', discrete=False, gamma=0.95, std=0.1, verbose=True, bins=(10,), initial_tables=None, idx=None):
+    def __init__(self, env, n_particle, prior='normal', discrete=False, gamma=0.95, std=0.1, mean=0, verbose=True, bins=(10,), initial_tables=None, idx=None):
         self.env = env
         self.discrete = discrete
         self.obs_size = env.observation_space.shape
@@ -96,17 +101,17 @@ class Tabular:
         self.n_particle = n_particle
         self._weights = np.ones(n_particle) / n_particle
         if prior == 'normal':
-            random_tables = torch.normal(mean=0, std=1, size=((n_particle,) + self.bins + (self.action_size,)))
+            random_tables = torch.normal(mean=mean, std=std, size=((n_particle,) + self.bins + (self.action_size,)))
             self.tables = torch.tensor(np.repeat(initial_tables[np.newaxis, ...], n_particle, axis=0), dtype=torch.float32) if ((initial_tables is not None) and FROZEN) else random_tables
             if idx is not None:
                 # last_samples = torch.load('2DT1050000HMC.pt')[-1]
                 for i in idx:
-                    self.tables[(slice(None), *i)] = torch.minimum(torch.normal(mean=-5, std=1, size=(n_particle, )), torch.zeros(n_particle))
+                    self.tables[(slice(None), *i)] = torch.minimum(torch.normal(mean=mean, std=std, size=(n_particle, )), torch.zeros(n_particle))
             if env.goal_idx:
                 for n in range(n_particle):
                     self.tables[n][env.goal_idx] = 0
             if verbose:
-                print("Q table size:", self.tables[-1].shape)       
+                print("Q table size:", self.tables[-1].shape)     
         else:
             raise NotImplementedError(f'The prior method corresponds to {prior} has not been implemented')
 
@@ -138,12 +143,12 @@ class Tabular:
         """Discretize a sample as per given grid."""
         return tuple(int(np.digitize(s, g)) for s, g in zip(sample_state, self.state_grid))  
 
-    def sample_para(self, weights=None):
+    def sample_para(self, weights=None, burn_in=0):
         # i = random.choices(range(len(self.tables)), weights)
         # print('Best table', i)
         if weights is None:
-            return random.choice(self.tables)
-        return random.choices(self.tables, weights)
+            return random.choice( self.tables[ burn_in : ] )
+        return random.choices (self.tables[ burn_in : ], weights )
     
     # def q_value_with_linear_index(self, para, s, a):
         
@@ -161,7 +166,7 @@ class Tabular:
         return table[s][a]
     
     def fill_learnable_table(self, table):
-        table = table.reshape(self.env.learnable_shape + (self.action_size, ))
+        # table = table.reshape(self.env.learnable_shape + (self.action_size, ))
         extend_table = torch.tensor(self.tables[0], dtype=torch.float32).clone()
         extend_table[self.env.learnable_idx] = table
         return extend_table
@@ -191,6 +196,14 @@ class Tabular:
         reward = obs['rewards'][-1]
         lld = stats.norm.pdf(reward, loc=sample, scale=self.std)
         return np.prod(lld)
+
+    def set_learnable_idx(self, obs):
+        index_arrays = []
+        all_obs = np.array(list(obs._unique_buffers.values())).T
+        for s0, _, a, _, _ in list(all_obs):
+            index_arrays.append(np.array(s0 + (a,)))
+        self.env.learnable_idx = tuple(torch.tensor(index_arrays).T)
+        self.env.names = index_arrays
 
     def get_parameter(self):
         return self.tables

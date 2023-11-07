@@ -19,13 +19,13 @@ class DeepSea:
         if goal_position == (-1, -1):
             goal_position = ( n_cell[0] - 1, n_cell[1] - 1 )
         self.goal_position = goal_position
-        self.treasure = 2 * depth + 2 if np.random.uniform(0, 1) > 0 else - 2 * depth - 2
+        self.treasure = 1 if np.random.uniform(0, 1) > 0 else - 1
         self.done = False
         self.observation_space = spaces.Discrete(n_cell[0] * n_cell[1])
         self.observation_space_high = (n_cell[0], n_cell[1])
         self.observation_space_low = (0, 0)
         self.action_space = spaces.Discrete(2)
-        self.R = np.zeros((n_cell[0], n_cell[1]))
+        self.R =  np.round(np.array([-1, 1]) / ( 2 * depth + 2 ), 2)
         print('goal: ', goal_position)
         print('start: ', starting_position)
         print('World Scale: ', f'{n_cell[0]}x{n_cell[1]}')
@@ -70,7 +70,7 @@ class DeepSea:
             else:
                 new_state = tuple(self.P[state + (action, )])
         if not multiple:
-            reward = 1 if action else -1
+            reward = self.R[action]
             if new_state[0] == self.goal_position[0]:
                 done = True
                 if new_state == self.goal_position:
