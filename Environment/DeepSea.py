@@ -25,6 +25,7 @@ class DeepSea:
         self.observation_space_high = (n_cell[0], n_cell[1])
         self.observation_space_low = (0, 0)
         self.action_space = spaces.Discrete(2)
+        self.action_size = self.action_space.n
         self.R =  np.round(np.array([-1, 1]) / ( 2 * depth + 2 ), 2)
         print('goal: ', goal_position)
         print('start: ', starting_position)
@@ -44,11 +45,24 @@ class DeepSea:
                 self.P[row, col, a] = s_prime
                 self.P[goal_position + (a, )] = goal_position
                 
-        self.names = [f'{i,j,a}' for i in range(n_cell[1]) for j in range(n_cell[0]) for a in range(self.action_space.n)]
-        self.learnable_idx = (slice(None, -1), slice(None))
+        # self.names = [f'{i,j,a}' for i in range(n_cell[1]) for j in range(n_cell[0]) for a in range(self.action_space.n)]
+        # self.learnable_idx = (slice(None, -1), slice(None))
+        learnable_idx = []
+        for i in range(self.n_cell[0] - 1):
+            for j in range(i+1):
+                learnable_idx.append(np.array((i, j, 0,)))
+                learnable_idx.append(np.array((i, j, 1,)))
+        self.learnable_idx = tuple(torch.tensor(learnable_idx).T)
+        self.names = learnable_idx
         self.learnable_no = range((n_cell[0] - 1) * n_cell[1] * self.action_space.n)
         self.learnable_shape = ((n_cell[0] - 1),  n_cell[1])
         self.goal_idx = (-1, Ellipsis)
+        not_learnable_idx = []
+        for i in range(n_cell[0]):
+            for j in range(i+1, n_cell[0]):
+                not_learnable_idx.append(np.array((i, j, 0,)))
+                not_learnable_idx.append(np.array((i, j, 1,)))
+        self.not_learnable_idx = tuple(torch.tensor(not_learnable_idx).T)
 
     def reset(self):
         self.state = self.starting_position

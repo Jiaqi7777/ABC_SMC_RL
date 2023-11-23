@@ -97,12 +97,13 @@ class Tabular:
                 print("Action space size:", self.action_size)
         
         self.gamma = gamma
+        self.mean = mean
         self.std = std
         self.n_particle = n_particle
         self._weights = np.ones(n_particle) / n_particle
         if prior == 'normal':
-            random_tables = torch.normal(mean=mean, std=std, size=((n_particle,) + self.bins + (self.action_size,)))
-            self.tables = torch.tensor(np.repeat(initial_tables[np.newaxis, ...], n_particle, axis=0), dtype=torch.float32) if ((initial_tables is not None) and FROZEN) else random_tables
+            self.random_tables = torch.normal(mean=mean, std=std, size=((n_particle,) + self.bins + (self.action_size,)))
+            self.tables = torch.tensor(np.repeat(initial_tables[np.newaxis, ...], n_particle, axis=0), dtype=torch.float32) if ((initial_tables is not None) and FROZEN) else self.random_tables
             if idx is not None:
                 # last_samples = torch.load('2DT1050000HMC.pt')[-1]
                 for i in idx:
@@ -110,6 +111,9 @@ class Tabular:
             if env.goal_idx:
                 for n in range(n_particle):
                     self.tables[n][env.goal_idx] = 0
+            if env.not_learnable_idx:
+                for n in range(n_particle):
+                    self.tables[n][env.not_learnable_idx] = 0
             if verbose:
                 print("Q table size:", self.tables[-1].shape)     
         else:
@@ -167,8 +171,12 @@ class Tabular:
     
     def fill_learnable_table(self, table):
         # table = table.reshape(self.env.learnable_shape + (self.action_size, ))
-        extend_table = torch.tensor(self.tables[0], dtype=torch.float32).clone()
-        extend_table[self.env.learnable_idx] = table
+        extend_table = torch.tensor(self.tables[0], dtype=torch.float32).clone().detach()
+        try:
+            extend_table[self.env.learnable_idx] = table
+        except:
+            table = table.reshape(extend_table[self.env.learnable_idx].shape)
+            extend_table[self.env.learnable_idx] = table
         return extend_table
     
     def v_value(self, table, s, full=True):
@@ -196,6 +204,11 @@ class Tabular:
         reward = obs['rewards'][-1]
         lld = stats.norm.pdf(reward, loc=sample, scale=self.std)
         return np.prod(lld)
+    
+    def sample_random_tables(self, set=False):
+        self.random_tables = torch.normal(mean=self.mean, std=self.std, size=((self.n_particle,) + self.bins + (self.action_size,)))
+        if set:
+            self.tables = self.random_tables        
 
     def set_learnable_idx(self, obs):
         index_arrays = []
@@ -221,7 +234,12 @@ class Tabular:
     def set_learnable_parameter(self, new_para):
         # for i in self.env.learnable_idx:
         #     self.tables[(slice(None), *i)] = new_para[(slice(None), *i)]
-        self.tables[(slice(None),  *self.env.learnable_idx) ] = new_para
+        try:
+            self.tables[(slice(None),  *self.env.learnable_idx) ] = new_para
+        except:
+            shape = self.tables[(slice(None),  *self.env.learnable_idx)].shape
+            new_para = new_para.reshape(shape)
+            self.tables[(slice(None),  *self.env.learnable_idx) ] = new_para
     
     def set_weights(self, new_weights):
         self._weights = new_weights

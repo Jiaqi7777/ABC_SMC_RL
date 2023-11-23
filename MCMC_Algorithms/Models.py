@@ -443,7 +443,7 @@ class DeterministicSRModel():
         parameter_len: int
             - the dimension of the parameter
         """
-        prior_parameter = pyro.sample("prior_parameter", dist.MultivariateNormal(torch.zeros(parameter_len), torch.eye(parameter_len)*PRIOR_SIGMA))
+        prior_parameter = pyro.sample("prior_parameter", dist.MultivariateNormal(torch.zeros(parameter_len), torch.eye(parameter_len)*self.prior.sigma))
         # print(prior_parameter, parameter_len)#, pyro.sample("test_para", dist.MultivariateNormal(torch.zeros(parameter_len), self.prior.covariance_matrix(parameter_len=parameter_len))))
         # if full_para is not None:
         #     print('Full para')

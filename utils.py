@@ -2,6 +2,7 @@ import random
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+from matplotlib.colors import Normalize
 import torch
 from parameter import *
 
@@ -137,9 +138,10 @@ def plot_obs(obs, env, env_name=ENV_NAME, title=None, xlabel='s0', ylabel='s1', 
 def plot_qtable(q, title=None):
     if title is None:
         title = 'Leanrt Mean of Q table'
+    norm = Normalize(vmin=torch.min(q), vmax=torch.max(q))
     fig, axes = plt.subplots(1, q.shape[-1], figsize=(12, 6))  # Adjust the number of subplots and figsize as needed
     for a in range(q.shape[-1]):
-        im = axes[a].imshow(q[:, :, a])
+        im = axes[a].imshow(q[:, :, a], norm=norm)
         axes[a].set_title(f'{title} action {a}')
         cbar = plt.colorbar(im)
     
