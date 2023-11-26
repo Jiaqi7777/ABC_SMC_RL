@@ -364,12 +364,12 @@ def MCMC_update(obs, posterior_samples, model, env, mode_idx=None):
     # print('submatrix_shape', submatrix_shape_)
     if kernel.original is True:
         if STOCHASTIC:
-            mcmc = MCMC_Gibbs(variables=['para', 'z'], kernel_functions={'para': kernel, 'z': z_kernel}, num_samples=training_steps, initial_params={'para': posterior_samples[-1].reshape(-1), 'z': z_sample}, warmup_steps=np.int64(np.floor(training_steps*WARMUP_RATIO)), warup_settings=dict(target_prob=TARGET_ACCEPT_PROB, auto_init_stepsize=True))
-            posterior_samples = mcmc.run(idx={'para':FROZEN_NO, 'z': None})
+            mcmc = MCMC_Gibbs(variables=['para', 'z'], kernel_functions={'para': kernel, 'z': z_kernel}, num_samples=training_steps_with_burnin, initial_params={'para': posterior_samples[-1].reshape(-1), 'z': z_sample}, warmup_steps=np.int64(np.floor(training_steps*WARMUP_RATIO)), warup_settings=dict(target_prob=TARGET_ACCEPT_PROB, auto_init_stepsize=True))
+            posterior_samples = mcmc.run(idx={'para':FROZEN_NO, 'z': None})[-training_steps:]
             # posterior_samples = posterior_samples.reshape((len(posterior_samples), ) + submatrix_shape_ + (env.action_space.n, )) #if FROZEN else posterior_samples.reshape((len(posterior_samples), ) + env.n_cell + (env.action_space.n, ))
         else:
-            mcmc = MCMC(num_samples=training_steps, kernel=kernel, initial_params=posterior_samples[-1].reshape(-1), warmup_steps=np.int64(np.floor(training_steps*WARMUP_RATIO)), warup_settings=dict(target_prob=TARGET_ACCEPT_PROB, auto_init_stepsize=True))
-            posterior_samples = mcmc.run()
+            mcmc = MCMC(num_samples=training_steps_with_burnin, kernel=kernel, initial_params=posterior_samples[-1].reshape(-1), warmup_steps=np.int64(np.floor(training_steps*WARMUP_RATIO)), warup_settings=dict(target_prob=TARGET_ACCEPT_PROB, auto_init_stepsize=True))
+            posterior_samples = mcmc.run()[-training_steps:]
             # posterior_samples = posterior_samples.reshape((len(posterior_samples), ) + submatrix_shape_ + (env.action_space.n, )) #if FROZEN else posterior_samples.reshape((len(posterior_samples), ) + env.n_cell + (env.action_space.n, ))
         logdensities = mcmc.get_logdensities()
         proposed_logdensities = mcmc.get_proposed_logdensities()
@@ -377,12 +377,12 @@ def MCMC_update(obs, posterior_samples, model, env, mode_idx=None):
         return posterior_samples, accept_probs, mcmc, kernel, logdensities, proposed_logdensities
 
     else:
-        pyro_training_steps = 1 + training_steps
+        pyro_training_steps = 1 + training_steps_with_burnin
         if STOCHASTIC:
             raise NotImplementedError('pyro model for stochastic hasn\'t been implemented' )
         else:
             mcmc = MCMC_pyro(num_samples=pyro_training_steps, kernel=kernel, initial_params=posterior_samples[-1].reshape(-1), warmup_steps=np.int64(np.floor(pyro_training_steps*WARMUP_RATIO)), disable_progbar=MCMC_SHOW_DISABLE)
-        posterior_samples = mcmc.run()
+        posterior_samples = mcmc.run()[-training_steps:]
         # posterior_samples = posterior_samples.reshape((-1, ) + submatrix_shape_ + (env.action_space.n, )) #if FROZEN else posterior_samples.reshape((len(posterior_samples), ) + env.n_cell + (env.action_space.n, ))
         # posterior_samples = mcmc.run().reshape((-1, ) + )
         return posterior_samples, accept_probs, mcmc, kernel, None, None
@@ -495,9 +495,10 @@ if __name__ == '__main__':
     ADAPT_STEP_SIZE = True if WARMUP_RATIO > 0 else False
     ADAPT_MASS_MATRIX = True if WARMUP_RATIO > 0 else False
     KERNEL_NAME = 'NUTS'
-    EPISODES = 150
+    EPISODES = 100
 
-    N_PARTICLE = training_steps + 1 
+    N_PARTICLE = training_steps 
+    training_steps_with_burnin = int(training_steps * (1 + BURN_IN))
     random.seed(seed)
     pyro.set_rng_seed(seed)
     np.random.seed(seed)
@@ -534,7 +535,8 @@ if __name__ == '__main__':
     env.reset()
     results = []
     if ONLINE_LEARNING:
-        r_all_iter = []
+        r_all_repeat = []
+        samples_all_repeat = []
         for repeat in range(REPEAT_EXPERIMENT):
             STEPSIZE = INITIAL_STEPSIZE
             # model = Tabular(env=env, n_particle=N_PARTICLE, prior='normal', gamma=GAMMA)
@@ -591,11 +593,15 @@ if __name__ == '__main__':
                 explore_pct_all = torch.tensor([explore_pct[0], explore_pct[0] & explore_pct[1],  explore_pct[0] & explore_pct[1] & explore_pct[2],   explore_pct[0] & explore_pct[1] & explore_pct[2] & explore_pct[3],  explore_pct[0] & explore_pct[1] & explore_pct[2] & explore_pct[3] & explore_pct[4]]) / len(posterior_samples)
                 print('explore percentage', explore_pct_all)
                 if save:
-                    save_results(results=r_all_epi, folder='Returns', stochastic=STOCHASTIC, episode=e, training_steps=training_steps, greedy=GREEDY, epsilon=EPSILON, initial_stepsize=INITIAL_STEPSIZE, decreasing_factor=DECREASING_FACTOR, time=time, m_z=M_Z, repeat=repeat, episodic=True)
-            r_all_iter.append(r_all_epi)
+                    save_results(results=r_all_epi, folder='Returns', stochastic=STOCHASTIC, episode=e, training_steps=training_steps, greedy=GREEDY, epsilon=EPSILON, time=time, m_z=M_Z, repeat=repeat, episodic=True)
+                    save_results(results=samples_all_ep, folder='Samples', stochastic=STOCHASTIC, episode=e, training_steps=training_steps, greedy=GREEDY, epsilon=EPSILON, time=time, m_z=M_Z, repeat=repeat, episodic=True)
+            r_all_repeat.append(r_all_epi)
+            samples_all_repeat.append(samples_all_ep)
             if save:
-                save_results(results=r_all_iter, folder='Returns', stochastic=STOCHASTIC, episode=e, training_steps=training_steps, greedy=GREEDY, epsilon=EPSILON, initial_stepsize=INITIAL_STEPSIZE, decreasing_factor=DECREASING_FACTOR, time=time, m_z=M_Z, repeat=repeat)        
-        plt.plot(r_all_epi)
+                save_results(results=r_all_repeat, folder='Returns', stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=EPSILON, time=time, m_z=M_Z, repeat=repeat)        
+                save_results(results=samples_all_repeat, folder='Samples', stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=EPSILON, time=time, m_z=M_Z, repeat=repeat)
+            plot_return_vs_episodes(r_all_epi, repeat=repeat)
+        plot_return_vs_episodes_repeat(r_all_repeat)
         if show:
             plt.show()
             
@@ -622,13 +628,13 @@ if __name__ == '__main__':
                 error_all_percentage = []
                 for data_percentage in data_percentage_lst:
                     print(f'Experiment with epsilon={EPSILON}, %={data_percentage}, std={PRIOR_SIGMA}')
-                    # env.uniform_policy(data_percentage=data_percentage)
-                    # obs = env.uniform_obs
+                    env.uniform_policy(data_percentage=data_percentage)
+                    obs = env.uniform_obs
                     
                     ##############
                     #For diagnosis
-                    with open('obs_for_diagnosis_6.pkl', 'rb') as pickle_file:
-                        obs = pickle.load(pickle_file)
+                    # with open('obs_for_diagnosis_6.pkl', 'rb') as pickle_file:
+                    #     obs = pickle.load(pickle_file)
                     # model.set_learnable_idx(obs)
                     ##############
                         

@@ -42,7 +42,7 @@ def submatrix_shape(table, indices):
 
     return (sub_num_rows, sub_num_columns)
 
-def plot_2d(X, Y, Z, env_name='GridWorld', action_dim=4, title=None, xlabel='s0', ylabel='s1', zlabel='Value', show=False, additional_info=[], save=False, figure_path = '../Figures/MCMC/'):
+def plot_2d(X, Y, Z, env_name='GridWorld', action_dim=4, title=None, xlabel='s0', ylabel='s1', zlabel='Value', show=SHOW, additional_info=[], save=False, figure_path = '../Figures/MCMC/'):
     Z = expand_dims(Z, dim=3)
     arrows = {2: (1, 0), 0: (-1, 0), 1: (0,1), 3: (0, -1)} if action_dim == 4 else {0: (1, 1), 1: (1, -1)}#{0: (0, 1), 1: (0, -1)}
     if env_name == 'DeepSea':
@@ -78,7 +78,7 @@ def plot_2d(X, Y, Z, env_name='GridWorld', action_dim=4, title=None, xlabel='s0'
         plt.clf()
         print('figure saved at ', f'{figure_path+title}.png')
     
-def plot_3d(X, Y, Z, title=None, xlabel='s0', ylabel='s1', zlabel='Value', show=False):
+def plot_3d(X, Y, Z, title=None, xlabel='s0', ylabel='s1', zlabel='Value', show=SHOW):
     if len(Z.shape) == 1:
         Z = np.expand_dims(Z, axis=0)
     figure_path = '../Figures/'
@@ -97,7 +97,7 @@ def plot_3d(X, Y, Z, title=None, xlabel='s0', ylabel='s1', zlabel='Value', show=
     print('figure saved at ', f'{figure_path+title}.png')
     plt.clf()
     
-def plot_obs(obs, env, env_name=ENV_NAME, title=None, xlabel='s0', ylabel='s1', zlabel='Path', show=False, additional_info=[], save=False, figure_path = '../Figures/MCMC/'):
+def plot_obs(obs, env, env_name=ENV_NAME, title=None, xlabel='s0', ylabel='s1', zlabel='Path', show=SHOW, additional_info=[], save=False, figure_path = '../Figures/MCMC/'):
     print('plot obs......')
     action_dim = env.action_space.n
     arrows = {2: (1, 0), 0: (-1, 0), 1: (0,1), 3: (0, -1)} if action_dim == 4 else {0: (1, 1), 1: (1, -1)}#{0: (0, 1), 1: (0, -1)}
@@ -159,7 +159,7 @@ def replace_line(file_path, variable, new_value):
             f.write(line)
     f.close()
     
-def plot_return_for_epsiodes(r_all_episodes, figure_path='../Figures/', show=False):
+def plot_return_for_epsiodes(r_all_episodes, figure_path='../Figures/', show=SHOW):
     colors = plt.cm.rainbow(np.linspace(0, 1, len(r_all_episodes)))
     for t, i in enumerate(r_all_episodes):
         plt.plot(i, label=f'Time {t}', color=colors[t])
@@ -174,12 +174,12 @@ def plot_return_for_epsiodes(r_all_episodes, figure_path='../Figures/', show=Fal
         plt.show()
     plt.clf()
     
-def plot_return_vs_episodes(r_all_episodes, smooth=1, figure_path='../Figures/', show=False, save=False):
+def plot_return_vs_episodes(r_all_episodes, repeat, smooth=1, figure_path='../Figures/', show=SHOW, save=False):
     r_all_episodes = np.convolve(np.array(r_all_episodes), np.ones(smooth)/smooth, mode='valid')
     plt.plot(r_all_episodes)
     plt.xlabel('episodes')
     plt.ylabel('Return')
-    title = 'Return for each episodes'
+    title = f'Return vs episodes at repeat {repeat}'
     plt.title(title)
     if save:
         plt.savefig(f'{figure_path+title}.png')
@@ -188,7 +188,7 @@ def plot_return_vs_episodes(r_all_episodes, smooth=1, figure_path='../Figures/',
         plt.show()
     plt.clf()
     
-def plot_return_vs_episodes_repeat(r_all_episodes_repeat, figure_path='../Figures/', show=False, title='', save=False):
+def plot_return_vs_episodes_repeat(r_all_episodes_repeat, figure_path='../Figures/', show=SHOW, title='', save=False):
     N = len(r_all_episodes_repeat)
     r_mean = np.mean(r_all_episodes_repeat, axis=0)
     r_std = np.std(r_all_episodes_repeat, axis=0)
@@ -197,11 +197,11 @@ def plot_return_vs_episodes_repeat(r_all_episodes_repeat, figure_path='../Figure
     plt.xlabel('episodes')
     plt.ylabel('Return')
     plt.title(f'Return for each episodes averaging over {N} random runs')
+    if show:
+        plt.show()
     if save:
         plt.savefig(f'{figure_path+title}.png')
         print('figure saved at ', f'{figure_path+title}.png')
-    if show:
-        plt.show()
     plt.clf()
     
 def get_outliers(data, threshold=5):
@@ -235,11 +235,10 @@ def compare_r_vs_episodes_repeat(r_1, r_2, figure_path='../Figures/', show=True,
         plt.show()
     plt.clf()
     
-def save_results(results, folder, stochastic, episode, training_steps, greedy, epsilon, initial_stepsize, decreasing_factor, time, m_z, repeat, episodic=False):
+def save_results(results, folder, training_steps, greedy, epsilon, time, m_z, repeat, episode=None, stochastic=False, episodic=False, prior_sigma=PRIOR_SIGMA):
     Episodes = f'Episode{episode}_' if episodic else ''
-    file_path = f'../{folder}/MCMC/T{training_steps}_Repeat{repeat}_{Episodes}Sto{stochastic}_M{m_z}_Gdy{greedy}_Ep{epsilon}_Stp{initial_stepsize}_Dcrs{decreasing_factor}_{time}.npy'
-    with open(file_path, 'wb') as f:
-        np.save(f, results)
+    file_path = f'../{folder}/MCMC/T{training_steps}_Repeat{repeat}_{Episodes}Sto{stochastic}_M{m_z}_Gdy{greedy}_Ep{epsilon}_Sigma{prior_sigma}_{time}.pt'
+    torch.save(results, file_path)
     print(f'{Episodes}{folder} for repeat {repeat} saved at', file_path)
 
 def plot_repeat(data, x, smooth=5, figure_path='../Figures/', labels=[], label='', show=True, save=False, xlabel='', ylabel='MSE', title=None):
