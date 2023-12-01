@@ -285,7 +285,7 @@ class MCMC_Gibbs(MCMC):
 
     
 #MCMC
-def MCMC_update(obs, posterior_samples, model, env, mode_idx=None):
+def MCMC_update(obs, posterior_samples, model, env, epsilon, mode_idx=None):
     global STEPSIZE, Model
     if BATCH_TRAINING:
         batch_indices = random.sample(range(min(len(obs._buffers['state0']), BUFFER_SIZE)), k=min(BATCH_SIZE, len(obs._buffers['state0']))) #TODO: what is this?
@@ -300,7 +300,7 @@ def MCMC_update(obs, posterior_samples, model, env, mode_idx=None):
     
     if STOCHASTIC:
         '''Stochastic'''
-        abclikelihood = PartialGaussianABCLikelihood(epsilon=EPSILON)
+        abclikelihood = PartialGaussianABCLikelihood(epsilon=epsilon)
         z_sample = generate_z(env=env, obs=obs._buffers)
         r_hat = partial(generate_samples_with_z, model=model, obs=obs._buffers, batch_indices=batch_indices)
         z_transform_func = partial(generate_z, env=env, obs=obs._buffers)
@@ -310,9 +310,9 @@ def MCMC_update(obs, posterior_samples, model, env, mode_idx=None):
     else:
         '''Determinisitc'''
         if TRANSFORM:
-            abclikelihood = TruncatedGaussianABCLikelihood(epsilon=EPSILON)
+            abclikelihood = TruncatedGaussianABCLikelihood(epsilon=epsilon)
         else:
-            abclikelihood = GaussianABCLikelihood(epsilon=EPSILON)
+            abclikelihood = GaussianABCLikelihood(epsilon=epsilon)
         r_hat = partial(generate_samples, model=model, obs=obs._buffers,  batch_indices=batch_indices)
         llh_transform_grad_fn = lambda parameter:  tabular_indicator_deterministic(para=parameter.reshape(env.n_cell + (env.action_space.n, )), model=model, obs=obs._buffers)#standard form
         Model = DeterministicSRModel(prior=prior, abclikelihood=abclikelihood, data=data, llh_transform_fn=r_hat, llh_transform_grad_fn=llh_transform_grad_fn)
@@ -387,7 +387,7 @@ def MCMC_update(obs, posterior_samples, model, env, mode_idx=None):
         # posterior_samples = mcmc.run().reshape((-1, ) + )
         return posterior_samples, accept_probs, mcmc, kernel, None, None
     
-def display_results(posterior_samples, model, accept_probs, logdensities=None, proposed_logdensities=None):
+def display_results(posterior_samples, model, accept_probs=None, logdensities=None, proposed_logdensities=None):
     display_indices = min(len(posterior_samples) // 1 + 1, 1000)
     plot_qtable(torch.mean(model.get_parameter()[:], 0))
     values = torch.round(torch.max(torch.mean(model.get_parameter()[:], 0), -1).values, decimals=2)
@@ -498,7 +498,7 @@ if __name__ == '__main__':
     EPISODES = 100
 
     N_PARTICLE = training_steps 
-    training_steps_with_burnin = int(training_steps * (1 + BURN_IN))
+    training_steps_with_burnin = training_steps#int(training_steps * (1 + BURN_IN))
     random.seed(seed)
     pyro.set_rng_seed(seed)
     np.random.seed(seed)
@@ -534,10 +534,12 @@ if __name__ == '__main__':
     
     env.reset()
     results = []
+    INITIAL_EPSILON = EPSILON
     if ONLINE_LEARNING:
         r_all_repeat = []
         samples_all_repeat = []
         for repeat in range(REPEAT_EXPERIMENT):
+            epsilon = INITIAL_EPSILON
             STEPSIZE = INITIAL_STEPSIZE
             # model = Tabular(env=env, n_particle=N_PARTICLE, prior='normal', gamma=GAMMA)
             model = Tabular(env=env, n_particle=N_PARTICLE, prior='normal', mean=PRIOR_MEAN, std=PRIOR_SIGMA, gamma=GAMMA, initial_tables=Q_star, idx=FROZEN_IDX)#For frozen all but one dimensions
@@ -549,7 +551,7 @@ if __name__ == '__main__':
                 s0, _ = env.reset()
                 para = model.sample_para(burn_in=int(training_steps * BURN_IN))
                 plot_qtable(para, title=f'Sampled Q table for episode {e}')
-                print(f'Episode {e} in repeat {repeat} with epsilon={EPSILON}')
+                print(f'Episode {e} in repeat {repeat} with epsilon={epsilon}')
                 R = 0
                 # h = 0
                 # while True: #Turn on h += 1
@@ -574,7 +576,7 @@ if __name__ == '__main__':
                             posterior_samples = TruncatedGaussianABCLikelihood.log_neg_transform(posterior_samples)
                         # posterior_samples, accept_probs = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env)[:2]
                         mode_idx = torch.argmax(mcmc.logdensities) if 'mcmc' in vars() else None
-                        posterior_samples, accept_probs, mcmc, kernel, logdensities, proposed_logdensities = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env, mode_idx=mode_idx)
+                        posterior_samples, accept_probs, mcmc, kernel, logdensities, proposed_logdensities = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env, mode_idx=mode_idx, epsilon=epsilon)
                         if TRANSFORM:
                             posterior_samples = TruncatedGaussianABCLikelihood.neg_exp_transform(posterior_samples)
                         # model.sample_random_tables(set=True)
@@ -586,20 +588,20 @@ if __name__ == '__main__':
                         print('Return', R)
                         break
                     # h += 1
-                EPSILON *= 0.95
+                epsilon *= 0.95
                 r_all_epi.append(R)
-                samples_all_ep.append(model.get_parameter())
+                samples_all_ep.append(model.get_parameter().clone().detach())
                 explore_pct = [torch.sum((model.get_parameter()[:, i, i, 0] > model.get_parameter()[:, i, i, 1])) for i in range(env.n_cell[0] - 1)]
                 explore_pct_all = torch.tensor([explore_pct[0], explore_pct[0] & explore_pct[1],  explore_pct[0] & explore_pct[1] & explore_pct[2],   explore_pct[0] & explore_pct[1] & explore_pct[2] & explore_pct[3],  explore_pct[0] & explore_pct[1] & explore_pct[2] & explore_pct[3] & explore_pct[4]]) / len(posterior_samples)
                 print('explore percentage', explore_pct_all)
                 if save:
-                    save_results(results=r_all_epi, folder='Returns', stochastic=STOCHASTIC, episode=e, training_steps=training_steps, greedy=GREEDY, epsilon=EPSILON, time=time, m_z=M_Z, repeat=repeat, episodic=True)
-                    save_results(results=samples_all_ep, folder='Samples', stochastic=STOCHASTIC, episode=e, training_steps=training_steps, greedy=GREEDY, epsilon=EPSILON, time=time, m_z=M_Z, repeat=repeat, episodic=True)
+                    save_results(results=r_all_epi, folder='Returns', stochastic=STOCHASTIC, episode=e, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat, episodic=False)
+                    save_results(results=samples_all_ep, folder='Samples', stochastic=STOCHASTIC, episode=e, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat, episodic=False)
             r_all_repeat.append(r_all_epi)
             samples_all_repeat.append(samples_all_ep)
             if save:
-                save_results(results=r_all_repeat, folder='Returns', stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=EPSILON, time=time, m_z=M_Z, repeat=repeat)        
-                save_results(results=samples_all_repeat, folder='Samples', stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=EPSILON, time=time, m_z=M_Z, repeat=repeat)
+                save_results(results=r_all_repeat, folder='Returns', stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat)        
+                save_results(results=samples_all_repeat, folder='Samples', stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat)
             plot_return_vs_episodes(r_all_epi, repeat=repeat)
         plot_return_vs_episodes_repeat(r_all_repeat)
         if show:
@@ -615,19 +617,20 @@ if __name__ == '__main__':
         traj_len_L = [0.5, 1, 2, 2.1, 2.2, 2.8]
         s_l = [1e-4, 1e-3, 1e-2, 1e-1]
         PRIOR_SIGMA_l = [0.5, 1, 2,3,4,5]
+        epsilon = EPSILON
         for repeat in range(REPEAT_EXPERIMENT):
             print('Repeat no. ', repeat)
             error_all_epsilon = []
             samples_all_stepsize = []
             H_change_all_stepsize = []
             explore_all_sigma = []
-            # for EPSILON in epsilon_lst:
+            # for epsilon in epsilon_lst:
             for PRIOR_SIGMA in PRIOR_SIGMA_l:
                 model = Tabular(env=env, n_particle=N_PARTICLE, prior='normal', mean=PRIOR_MEAN, std=PRIOR_SIGMA, gamma=GAMMA, initial_tables=Q_star, idx=FROZEN_IDX)
                 print('MCMC Stepsize', STEPSIZE)
                 error_all_percentage = []
                 for data_percentage in data_percentage_lst:
-                    print(f'Experiment with epsilon={EPSILON}, %={data_percentage}, std={PRIOR_SIGMA}')
+                    print(f'Experiment with epsilon={epsilon}, %={data_percentage}, std={PRIOR_SIGMA}')
                     env.uniform_policy(data_percentage=data_percentage)
                     obs = env.uniform_obs
                     

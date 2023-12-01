@@ -1,5 +1,6 @@
 import random
 import numpy as np
+import os
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from matplotlib.colors import Normalize
@@ -236,8 +237,11 @@ def compare_r_vs_episodes_repeat(r_1, r_2, figure_path='../Figures/', show=True,
     plt.clf()
     
 def save_results(results, folder, training_steps, greedy, epsilon, time, m_z, repeat, episode=None, stochastic=False, episodic=False, prior_sigma=PRIOR_SIGMA):
+    dir = f'../{folder}/MCMC/{time}'
+    if not os.path.exists(dir):
+        os.makedirs(dir)
     Episodes = f'Episode{episode}_' if episodic else ''
-    file_path = f'../{folder}/MCMC/T{training_steps}_Repeat{repeat}_{Episodes}Sto{stochastic}_M{m_z}_Gdy{greedy}_Ep{epsilon}_Sigma{prior_sigma}_{time}.pt'
+    file_path = f'{dir}/T{training_steps}_Repeat{repeat}_{Episodes}Sto{stochastic}_M{m_z}_Gdy{greedy}_Sigma{prior_sigma}.pt'
     torch.save(results, file_path)
     print(f'{Episodes}{folder} for repeat {repeat} saved at', file_path)
 
