@@ -38,11 +38,15 @@ def uniform_grid(low, high, bins=(10,10), include_low=1, verbose=False):
 
 class Buffer:
     def __init__(self, entry_keys, seed=SEED):
+        self.entry_keys = entry_keys
         self._buffers = {key: [] for key in entry_keys}
         self.unique_set = []
         self._unique_buffers = {key: [] for key in entry_keys}
+        
+    def init_new_data_buffer(self):
+        self.new_data_buffers = {key: [] for key in self.entry_keys}
 
-    def insert(self, items, unique=False, unique_verbose=True):
+    def insert(self, items, unique=False, unique_verbose=True, update_new_data=False):
         if set(items.keys()) != set(self._buffers.keys()):
             raise IndexError
         unique_check = list(items.values())
@@ -50,17 +54,21 @@ class Buffer:
         unique_check = str(unique_check)
         if unique_check in self.unique_set:
             if unique:
-                return 
+                return False
         else:
             self.unique_set.append(unique_check)
             for k, v in items.items():
-                self._unique_buffers[k].append(v)       
+                self._unique_buffers[k].append(v)
+                if update_new_data:
+                    self.new_data_buffers[k].append(v)     
             if unique_verbose:
                 print('New items added', unique_check)
+            
         for k, v in items.items():
             self._buffers[k].append(v)
             # if len(self._buffers[k]) > BUFFER_SIZE:
             #     self._buffers[k].pop(0)
+            return True
         
     def get_minibatch(self, batch_size):
         if batch_size == 1:
