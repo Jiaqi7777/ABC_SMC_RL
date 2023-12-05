@@ -495,7 +495,7 @@ if __name__ == '__main__':
     ADAPT_STEP_SIZE = True if WARMUP_RATIO > 0 else False
     ADAPT_MASS_MATRIX = True if WARMUP_RATIO > 0 else False
     KERNEL_NAME = 'NUTS'
-    EPISODES = 2
+    EPISODES = 100
 
     N_PARTICLE = training_steps 
     training_steps_with_burnin = training_steps#int(training_steps * (1 + BURN_IN))
@@ -534,12 +534,11 @@ if __name__ == '__main__':
     
     env.reset()
     results = []
-    INITIAL_EPSILON = EPSILON
     if ONLINE_LEARNING:
         r_all_repeat = []
         samples_all_repeat = []
         for repeat in range(REPEAT_EXPERIMENT):
-            epsilon = INITIAL_EPSILON
+            epsilon = abc_epsilon
             STEPSIZE = INITIAL_STEPSIZE
             # model = Tabular(env=env, n_particle=N_PARTICLE, prior='normal', gamma=GAMMA)
             model = Tabular(env=env, n_particle=N_PARTICLE, prior='normal', mean=PRIOR_MEAN, std=PRIOR_SIGMA, gamma=GAMMA, initial_tables=Q_star, idx=FROZEN_IDX)#For frozen all but one dimensions
@@ -591,18 +590,18 @@ if __name__ == '__main__':
                 epsilon *= 0.95
                 r_all_epi.append(R)
                 samples_all_ep.append(model.get_parameter().clone().detach())
-                explore_pct = [torch.sum((model.get_parameter()[:, i, i, 0] > model.get_parameter()[:, i, i, 1])) for i in range(env.n_cell[0] - 1)]
-                explore_pct_all = torch.tensor([explore_pct[0], explore_pct[0] & explore_pct[1],  explore_pct[0] & explore_pct[1] & explore_pct[2],   explore_pct[0] & explore_pct[1] & explore_pct[2] & explore_pct[3],  explore_pct[0] & explore_pct[1] & explore_pct[2] & explore_pct[3] & explore_pct[4]]) / len(posterior_samples)
+                explore_pct = [model.get_parameter().numpy()[:, i, i, 0] > model.get_parameter().numpy()[:, i, i, 1] for i in range(env.n_cell[0] - 1)]
+                explore_pct_all = np.sum([explore_pct[0], explore_pct[0] & explore_pct[1],  explore_pct[0] & explore_pct[1] & explore_pct[2],   explore_pct[0] & explore_pct[1] & explore_pct[2] & explore_pct[3],  explore_pct[0] & explore_pct[1] & explore_pct[2] & explore_pct[3] & explore_pct[4]], axis=-1)/len(posterior_samples) 
                 print('explore percentage', explore_pct_all)
                 if save:
-                    # save_results(results=r_all_epi, folder='Returns', stochastic=STOCHASTIC, episode=e, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat, episodic=False)
-                    # save_results(results=samples_all_ep, folder='Samples', stochastic=STOCHASTIC, episode=e, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat, episodic=False)
+                    save_results(results=r_all_epi, folder='Returns', stochastic=STOCHASTIC, episode=e, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat, episodic=False)
+                    save_results(results=samples_all_ep, folder='Samples', stochastic=STOCHASTIC, episode=e, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat, episodic=False)
                     save_results(results=obs, folder='Obs', stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat, episodic=False)
             r_all_repeat.append(r_all_epi)
             samples_all_repeat.append(samples_all_ep)
             if save:
-                # save_results(results=r_all_repeat, folder='Returns', stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat)        
-                # save_results(results=samples_all_repeat, folder='Samples', stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat)
+                save_results(results=r_all_repeat, folder='Returns', stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat)        
+                save_results(results=samples_all_repeat, folder='Samples', stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat)
                 save_results(results=obs, folder='Obs', stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat)
             plot_return_vs_episodes(r_all_epi, repeat=repeat)
         plot_return_vs_episodes_repeat(r_all_repeat)
@@ -618,9 +617,9 @@ if __name__ == '__main__':
         data_percentage_lst = np.linspace(0.1, 1, 10)[-1:]
         traj_len_L = [0.5, 1, 2, 2.1, 2.2, 2.8]
         s_l = [1e-4, 1e-3, 1e-2, 1e-1]
-        PRIOR_SIGMA_l = [0.5, 1, 2,3,4,5]
-        epsilon = EPSILON
-        for repeat in range(REPEAT_EXPERIMENT):
+        PRIOR_SIGMA_l = [0.5, 1, 2,3,4,5][4:5]
+        epsilon = abc_epsilon
+        for repeat in range(1):
             print('Repeat no. ', repeat)
             error_all_epsilon = []
             samples_all_stepsize = []
@@ -638,8 +637,7 @@ if __name__ == '__main__':
                     
                     ##############
                     #For diagnosis
-                    # with open('obs_for_diagnosis_6.pkl', 'rb') as pickle_file:
-                    #     obs = pickle.load(pickle_file)
+                    # obs = torch.load('../Obs/MCMC/094980/T200_Repeat1_StoFalse_M1200_GdyFalse_Sigma4.pt')
                     # model.set_learnable_idx(obs)
                     ##############
                         
@@ -648,7 +646,7 @@ if __name__ == '__main__':
                     # print(posterior_samples)
                     if TRANSFORM:
                         posterior_samples = TruncatedGaussianABCLikelihood.log_neg_transform(posterior_samples)
-                    posterior_samples, accept_probs, mcmc, kernel, logdensities, proposed_logdensities, = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env)
+                    posterior_samples, accept_probs, mcmc, kernel, logdensities, proposed_logdensities, = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env, epsilon=epsilon)
                     print(posterior_samples.shape)
                     # posterior_samples, accept_probs, mcmc, kernel, = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env)[:4]
                     if TRANSFORM:
@@ -665,9 +663,10 @@ if __name__ == '__main__':
                         except:
                             error_all_percentage.append(mean_squared_error(Q_star.flatten()[env.learnable_idx], torch.mean(posterior_samples[-average_over:].reshape(average_over, -1), axis=0)))
                     print('error_all_percentage', error_all_percentage)
-                explore_pct = [torch.sum((model.get_parameter()[:, 0, 0, 0] > model.get_parameter()[:, 0, 0, 1])) / len(posterior_samples), torch.sum((model.get_parameter()[:, 0, 0, 0] > model.get_parameter()[:, 0, 0, 1]) & (model.get_parameter()[:, 1, 1, 0] > model.get_parameter()[:, 1, 1, 1])) / len(posterior_samples)]
-                print('explore percentage', explore_pct)
-                explore_all_sigma.append(explore_pct)
+                explore_pct = [model.get_parameter().numpy()[:, i, i, 0] > model.get_parameter().numpy()[:, i, i, 1] for i in range(env.n_cell[0] - 1)]
+                explore_pct_all = np.sum([explore_pct[0], explore_pct[0] & explore_pct[1],  explore_pct[0] & explore_pct[1] & explore_pct[2],   explore_pct[0] & explore_pct[1] & explore_pct[2] & explore_pct[3],  explore_pct[0] & explore_pct[1] & explore_pct[2] & explore_pct[3] & explore_pct[4]], axis=-1)/len(posterior_samples) 
+                print('explore percentage', explore_pct_all, 'explore individual', np.sum(explore_pct, axis=-1)/len(posterior_samples))
+                explore_all_sigma.append(explore_pct_all)
                 # explore_all_sigma.append(torch.sum((posterior_samples[:, -2] > posterior_samples[:, 0])) / len(posterior_samples))
 
                 samples_all_stepsize.append(model.get_parameter().clone())
