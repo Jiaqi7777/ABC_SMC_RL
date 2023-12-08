@@ -42,9 +42,14 @@ class Buffer:
         self._buffers = {key: [] for key in entry_keys}
         self.unique_set = []
         self._unique_buffers = {key: [] for key in entry_keys}
+        self._new_data_buffers = {key: [] for key in entry_keys}
         
     def init_new_data_buffer(self):
-        self.new_data_buffers = {key: [] for key in self.entry_keys}
+        for k, v in self._new_data_buffers.items():
+            for vi in v:
+                self._unique_buffers[k].append(vi)
+                self._buffers[k].append(vi)
+        self._new_data_buffers = {key: [] for key in self.entry_keys}
 
     def insert(self, items, unique=False, unique_verbose=True, update_new_data=False):
         if set(items.keys()) != set(self._buffers.keys()):
@@ -52,22 +57,47 @@ class Buffer:
         unique_check = list(items.values())
         unique_check.remove(items['state1'])
         unique_check = str(unique_check)
-        if unique_check in self.unique_set:
-            if unique:
+        if unique:
+            if unique_check in self.unique_set:
                 return False
-        else:
             self.unique_set.append(unique_check)
             for k, v in items.items():
-                self._unique_buffers[k].append(v)
                 if update_new_data:
-                    self.new_data_buffers[k].append(v)     
+                    self._new_data_buffers[k].append(v) 
+                else:   
+                    self._unique_buffers[k].append(v)
+                    self._buffers[k].append(v)
             if unique_verbose:
                 print('New items added', unique_check)
-            # if len(self._buffers[k]) > BUFFER_SIZE:
-            #     self._buffers[k].pop(0)
-        for k, v in items.items():
-            self._buffers[k].append(v)
-        return True
+            return True
+        else:
+            if unique_check not in self.unique_set:
+                for k, v in items.items():
+                    self._unique_buffers[k].append(v)
+                if unique_verbose:
+                    print('New items explored', unique_check)
+            if update_new_data:
+                self._new_data_buffers[k].append(v) 
+            else:   
+                self._buffers[k].append(v)
+            return True
+        # if unique_check in self.unique_set:
+        #     if unique:
+        #         return False
+        # else:
+        #     self.unique_set.append(unique_check)
+        #     for k, v in items.items():
+        #         if update_new_data:
+        #             self._new_data_buffers[k].append(v)  
+        #         else:   
+        #             self._unique_buffers[k].append(v)
+        #     if unique_verbose:
+        #         print('New items added', unique_check)
+        #     # if len(self._buffers[k]) > BUFFER_SIZE:
+        #     #     self._buffers[k].pop(0)
+        # for k, v in items.items():
+        #     self._buffers[k].append(v)
+        # return True
         
     def get_minibatch(self, batch_size):
         if batch_size == 1:
@@ -107,7 +137,7 @@ class Tabular:
         self.mean = mean
         self.std = std
         self.n_particle = n_particle
-        self._weights = np.ones(n_particle) / n_particle
+        self._weights = torch.ones(n_particle) / n_particle
         if prior == 'normal':
             self.random_tables = torch.normal(mean=mean, std=std, size=((n_particle,) + self.bins + (self.action_size,)))
             self.tables = torch.tensor(np.repeat(initial_tables[np.newaxis, ...], n_particle, axis=0), dtype=torch.float32) if (initial_tables is not None and FROZEN) else self.random_tables
@@ -263,7 +293,7 @@ class Tabular:
             weights = self._weights
         else:
             n = len(paras)
-            weights = np.ones(n) / n
+            weights = torch.ones(n) / n
         idx = np.argmax(paras, axis=-1).T.reshape(-1)
         thp_matrix = coo_array((np.ones(n * np.prod(self.state_size)), (idx, np.array(range(n * np.prod(self.state_size))))), shape=(self.action_size, n * np.prod(self.state_size)))
         thp_matrix = thp_matrix.toarray().reshape(thp_matrix.shape[0],-1, n).swapaxes(0,1).reshape(-1, n)

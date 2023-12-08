@@ -3,7 +3,7 @@ import numpy as np
 #Env 
 ENV_NAME = 'DeepSea' #'Maze', 'GridWorld'， DeepSea
 CORRECT_MOVE_PROB = 0.5
-STOCHASTIC = True
+STOCHASTIC = False
 #ENV_NAME = 'MountainCar'
 
 #Test parameters
@@ -24,7 +24,7 @@ HORIZON = 100
 #Number of EPISODES
 EPISODES = 2
 GAMMA = 1
-REPEAT_EXPERIMENT = 3
+REPEAT_EXPERIMENT = 1
 DISCRETE = False
 BINS = (10, )
 LAST_EPISODE = 1
@@ -44,9 +44,10 @@ PRIOR = 'normal'
 LLD = 'normal'
 N_PARTICLE = 4
 MIN_ESS = 0.5
+ESS_ALPHA = 0.7
 
 #MCMC
-PRIOR_SIGMA = 4
+PRIOR_SIGMA = 2
 PRIOR_MEAN = 0
 UPDATE_FREQUENCY = 5
 INITIAL_STEPSIZE = STEPSIZE = 1e-2

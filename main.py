@@ -40,7 +40,7 @@ for t in range(horizon):
     theta = random.choice(journal.accepted_parameters)
 print(theta)
 '''
-from SMC import *
+from MCMC_Algorithms.SMC import *
 from model import *
 from MCMC_Algorithms.MCMC import *
 from Environment.MountainCar import *

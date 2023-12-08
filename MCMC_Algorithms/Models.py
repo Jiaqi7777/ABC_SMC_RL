@@ -8,7 +8,7 @@ from parameter import *
 from parameter import *
 
 def generate_samples(para, model, obs, batch_indices=None, buffer_size=BUFFER_SIZE, batch_training=BATCH_TRAINING):
-    # print(para, 'generate samples')
+    # print(para.shape, 'generate samples')
     if not batch_training:
         batch_indices = range(min(len(obs['state0']), buffer_size))
     
@@ -173,7 +173,7 @@ class GaussianABCLikelihood():
         """
         self.epsilon = epsilon
 
-    def llh(self, data, parameter=None, llh_info_dict=dict(), llh_transform_fn=None): #standard form
+    def llh(self, data, parameter=None, llh_info_dict=dict(), llh_transform_fn=None, epsilon=None): #standard form
         """return the log likelihood for the parameter and data given
         data: torch.tensor
             - the target of the ABC likelihood
@@ -189,12 +189,14 @@ class GaussianABCLikelihood():
             - llh_info_dict: dict of the form {"mean": torch.tensor}
                 - mean of the Gaussian ABC likelihood function in a dictionary
         """
-        return self.llh_(data=data, parameter=parameter, mean_fn=llh_transform_fn, llh_info_dict=llh_info_dict,)
+        return self.llh_(data=data, parameter=parameter, mean_fn=llh_transform_fn, llh_info_dict=llh_info_dict, epsilon=epsilon)
 
-    def llh_(self, data, parameter=None, mean_fn=None, llh_info_dict=dict()):
+    def llh_(self, data, parameter=None, mean_fn=None, llh_info_dict=dict(), epsilon=None):
+        if epsilon is None:
+            epsilon = self.epsilon
         """see self.llh, where mean_fn is the llh_transform_fn of self.llh"""
         mean = self.compute_mean(parameter=parameter, mean_fn=mean_fn, llh_info_dict=llh_info_dict)
-        llh = torch.distributions.normal.Normal(loc=mean, scale=self.epsilon).log_prob(data).sum(axis=-1)
+        llh = torch.distributions.normal.Normal(loc=mean, scale=epsilon).log_prob(data).sum(axis=-1)
         return llh, {"mean": mean.detach()}
     
     def compute_mean(self, parameter=None, mean_fn=None, llh_info_dict=dict()):
@@ -206,7 +208,7 @@ class GaussianABCLikelihood():
             mean = llh_info_dict["mean"]
         return mean
 
-    def llh_gradient(self, data, parameter, llh_transform_grad_fn, llh_info_dict=dict(), llh_transform_fn=None): #standard form
+    def llh_gradient(self, data, parameter, llh_transform_grad_fn, llh_info_dict=dict(), llh_transform_fn=None, epsilon=None): #standard form
         """compute the gradient of the log likelihood function with respect to the parameter
         data: see self.llh
         parameter: see self.llh
@@ -215,14 +217,16 @@ class GaussianABCLikelihood():
         llh_transform_grad_fn: function torch.tensor -> torch.tensor
             - a function that takes the parameter and output the gradient (Jacobian) of the mean of the Gaussian ABC likelihood function with respect to the parameter
         """
-        return self.llh_gradient_(data=data, parameter=parameter, mean_jacobian_fn=llh_transform_grad_fn, mean_fn=llh_transform_fn, llh_info_dict=llh_info_dict)
+        return self.llh_gradient_(data=data, parameter=parameter, mean_jacobian_fn=llh_transform_grad_fn, mean_fn=llh_transform_fn, llh_info_dict=llh_info_dict, epsilon=epsilon)
 
-    def llh_gradient_(self, data, parameter, mean_jacobian_fn=None, mean_fn=None, llh_info_dict=dict()):
+    def llh_gradient_(self, data, parameter, mean_jacobian_fn=None, mean_fn=None, llh_info_dict=dict(), epsilon=None):
+        if epsilon is None:
+            epsilon = self.epsilon
         """see self.llh_gradient, in which mean_jacobian_fn is the llh_transform_grad_fn"""
         mean = self.compute_mean(parameter=parameter, mean_fn=mean_fn, llh_info_dict=llh_info_dict)
         mean_jacobian = mean_jacobian_fn(parameter=parameter)
         
-        gradient = 1. / (self.epsilon**2) *  torch.mv(torch.t(mean_jacobian), (data - mean))
+        gradient = 1. / (epsilon**2) *  torch.mv(torch.t(mean_jacobian), (data - mean))
         return gradient, {"mean_jacobian":mean_jacobian}
     
     def llh_hessian(self, parameter, llh_transform_grad_fn=None, llh_transform_hessian_fn=None, llh_grad_info_dict=dict(), **kwargs):
@@ -386,9 +390,7 @@ class DeterministicSRModel():
     def logtarget_gradient(self, parameter, llh_info_dict=dict()):
         """compute the gradient of the log target density with respect to the parameter and return the gradient, using the explicit derivation of the gradient"""
         logprior_grad = self.prior.logprior_gradient(parameter=parameter)
-        # print(logprior_grad, 'prior gra')
         llh_grad, llh_grad_info = self.abclikelihood.llh_gradient(data=self.data, parameter=parameter, llh_info_dict=llh_info_dict, llh_transform_fn=self.llh_transform_fn, llh_transform_grad_fn=self.llh_transform_grad_fn)
-        # print(llh_grad, 'llh gradient')
         return logprior_grad + llh_grad, llh_grad_info
     
     def logtarget_auto_gradient(self, parameter):
@@ -443,7 +445,7 @@ class DeterministicSRModel():
         parameter_len: int
             - the dimension of the parameter
         """
-        prior_parameter = pyro.sample("prior_parameter", dist.MultivariateNormal(torch.zeros(parameter_len), torch.eye(parameter_len)*self.prior.sigma))
+        prior_parameter = pyro.sample("prior_parameter", dist.MultivariateNormal(torch.zeros(parameter_len), torch.eye(parameter_len)*self.prior.sigma**2))
         # print(prior_parameter, parameter_len)#, pyro.sample("test_para", dist.MultivariateNormal(torch.zeros(parameter_len), self.prior.covariance_matrix(parameter_len=parameter_len))))
         # if full_para is not None:
         #     print('Full para')
@@ -460,6 +462,52 @@ class DeterministicSRModel():
             # print(mean, 'mean')
             pyro.sample("obs", dist.MultivariateNormal(mean, self.abclikelihood.covariance_matrix(data_len=len(self.data))), obs=data)
             
+class DeterministicSRModelSMC(DeterministicSRModel):
+    def __init__(self, prior, abclikelihood, data, old_data, new_data, llh_transform_fn_old=None, llh_transform_fn_new=None, llh_transform_grad_fn_old=None, llh_transform_grad_fn_new=None, new_epsilon=None, *args):
+        super(DeterministicSRModelSMC, self).__init__(prior, abclikelihood, data, *args)
+        self.data = data
+        self.old_data = old_data
+        self.new_data = new_data
+        self.llh_transform_fn_old = llh_transform_fn_old
+        self.llh_transform_fn_new = llh_transform_fn_new
+        self.llh_transform_grad_fn_old = llh_transform_grad_fn_old
+        self.llh_transform_grad_fn_new = llh_transform_grad_fn_new
+        self.new_epsilon = new_epsilon
+        
+    def llh(self, parameter, new_epsilon=None, llh_info_dict=dict()):
+        """compute the loglikelihood given the abclikelihood and return the loglikelihood with the llh_info_dict"""
+        if new_epsilon is None:
+            new_epsilon = self.new_epsilon
+        old_llh, _ = self.abclikelihood.llh(data=self.old_data, parameter=parameter, llh_transform_fn=self.llh_transform_fn_old)
+        new_llh, _ = self.abclikelihood.llh(data=self.new_data, parameter=parameter, llh_transform_fn=self.llh_transform_fn_new, epsilon=new_epsilon)
+        return old_llh + new_llh, llh_info_dict
+    
+    def logtarget_gradient(self, parameter, new_epsilon=None, llh_info_dict=dict()):
+        """compute the gradient of the log target density with respect to the parameter and return the gradient, using the explicit derivation of the gradient"""
+        if new_epsilon is None:
+            new_epsilon = self.new_epsilon
+        logprior_grad = self.prior.logprior_gradient(parameter=parameter)
+        llh_grad_old, llh_grad_info = self.abclikelihood.llh_gradient(data=self.old_data, parameter=parameter, llh_info_dict=llh_info_dict, llh_transform_fn=self.llh_transform_fn_old, llh_transform_grad_fn=self.llh_transform_grad_fn_old)
+        llh_grad_new, llh_grad_info = self.abclikelihood.llh_gradient(data=self.new_data, parameter=parameter, llh_info_dict=llh_info_dict, llh_transform_fn=self.llh_transform_fn_new, llh_transform_grad_fn=self.llh_transform_grad_fn_new, epsilon=new_epsilon)
+        return logprior_grad + llh_grad_new + llh_grad_old, llh_grad_info
+
+    def pyro_model(self, data, parameter_len, full_para=None):
+        """the equivalent pyro model, for use in pyro MCMC functions
+        data: torch.tensor
+            - this input is required as a standard format of a pyro model
+        parameter_len: int
+            - the dimension of the parameter
+        """
+        old_data = torch.tensor(data._buffers["rewards"], dtype=torch.float32)
+        new_data = torch.tensor(data._new_data_buffers["rewards"], dtype=torch.float32)
+        data = torch.cat(old_data, new_data, dim=0)
+        prior_parameter = pyro.sample("prior_parameter", dist.MultivariateNormal(torch.zeros(parameter_len), torch.eye(parameter_len)*self.prior.sigma**2))
+        mean = self.abclikelihood.compute_mean(parameter=prior_parameter, mean_fn=self.llh_transform_fn, llh_info_dict=dict())
+        cov = self.abclikelihood.covariance_matrix(data_len=len(self.data))
+        cov[len(old_data):] = self.new_epsilon
+        pyro.sample("obs", dist.MultivariateNormal(mean, torch.diag(cov)), obs=data)
+
+
 class StochasticSModel(DeterministicSRModel):
     """the overall model of the ABC likelihood model with prior and likelihood (with stochastic state transition)"""
     def __init__(self, prior, abclikelihood, data, z_transform_fn=None, llh_transform_fn=None, llh_transform_grad_fn=None, llh_transform_hessian_fn=None, *args):
