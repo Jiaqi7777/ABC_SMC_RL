@@ -54,7 +54,7 @@ def effective_sample_size(chain):
 
 class MCMC:
     """the class to run MCMC"""
-    def __init__(self, kernel, warmup_steps=0, num_samples=MCMC_SAMPLE, initial_params=None, params_dim=None, warmup_settings=dict(target_prob=0.7, auto_init_stepsize=True), **kwargs):
+    def __init__(self, kernel, warmup_steps=0, num_samples=MCMC_SAMPLE, initial_params=None, params_dim=None, warmup_settings=dict(target_prob=0.7, auto_init_stepsize=True), silent=False, **kwargs):
         """
         kernel: a Kernel() class instance (note that a pyro kernel instance does not work)
             - the kernel instance to propose move for the MCMC and provide acceptance probability of the move
@@ -69,6 +69,7 @@ class MCMC:
         warmup_settings: dict, of the form {"target_prob": float, "auto_init_stepsize": int, ...}
             - the extra parameters to be passed into HMC.warmup
         """
+        self.silent = silent
         self.num_samples = num_samples
         self.kernel = kernel
         assert initial_params is not None or params_dim is not None, "Should either specify initial_params or params_dim"
@@ -85,7 +86,7 @@ class MCMC:
 
         self.reset_stat()
 
-    def run(self, idx=None):
+    def run(self, idx=None, return_proposed=False):
 
         self.reset_stat()
 
@@ -99,10 +100,11 @@ class MCMC:
                 print("Warmup is not implemented for the current kernel. Skip to sampling...")
 
         self.samples[0] = current_para
+        self.proposed_samples[0] = current_para
         # self.logdensities[0] = current_logtarget_density
         # self.proposed_logdensities[0] = current_logtarget_density
 
-        pbar = tqdm(range(self.num_samples))
+        pbar = tqdm(range(self.num_samples), disable=self.silent)
         for i in pbar:
             accept_prob, proposed_para, proposed_para_info_dict  = self.kernel.propose_accept(current_para=current_para,
                                                                          current_para_info_dict=current_para_info_dict, indices=idx)
@@ -116,11 +118,15 @@ class MCMC:
             pbar.set_description("Acceptance probability {}".format(np.round(self.accepted/(i+1), 2)))
 
             self.samples[i + 1] = current_para
+            self.proposed_samples[i+1] = proposed_para
             self.logdensities[i + 1] = current_para_info_dict["logdensities"]
             self.proposed_logdensities[i + 1] = proposed_para_info_dict["logdensities"]
             self.accept_prob[i + 1] = accept_prob
 
-        return self.samples
+        if return_proposed:
+            return self.samples, self.proposed_samples
+        else:
+            return self.samples
     
     def warmup(self, init_para, init_para_info_dict=dict()):
         current_para, current_para_info_dict, info = self.kernel.warmup(init_para=init_para, 
@@ -148,6 +154,7 @@ class MCMC:
     
     def reset_stat(self):
         self.samples = torch.zeros((self.num_samples+1, self.params_dim))
+        self.proposed_samples = torch.zeros((self.num_samples+1, self.params_dim))
         self.logdensities = torch.zeros(self.num_samples + 1)
         self.proposed_logdensities = torch.zeros(self.num_samples + 1)
         self.accepted = 0
