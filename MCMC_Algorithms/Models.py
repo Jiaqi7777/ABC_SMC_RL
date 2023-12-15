@@ -438,7 +438,7 @@ class DeterministicSRModel():
             return logtarget_density
         return torch.autograd.functional.hessian(fn, parameter)
 
-    def pyro_model(self, data, parameter_len, full_para=None):
+    def pyro_model(self, data, parameter_len):
         """the equivalent pyro model, for use in pyro MCMC functions
         data: torch.tensor
             - this input is required as a standard format of a pyro model
@@ -474,6 +474,9 @@ class DeterministicSRModelSMC(DeterministicSRModel):
         self.llh_transform_grad_fn_new = llh_transform_grad_fn_new
         self.new_epsilon = new_epsilon
         
+    def llh_new(self, parameter, epsilon):
+        return self.abclikelihood.llh(data=self.new_data, parameter=parameter, llh_transform_fn=self.llh_transform_fn_new, epsilon=epsilon)
+    
     def llh(self, parameter, new_epsilon=None, llh_info_dict=dict()):
         """compute the loglikelihood given the abclikelihood and return the loglikelihood with the llh_info_dict"""
         if new_epsilon is None:
@@ -491,7 +494,7 @@ class DeterministicSRModelSMC(DeterministicSRModel):
         llh_grad_new, llh_grad_info = self.abclikelihood.llh_gradient(data=self.new_data, parameter=parameter, llh_info_dict=llh_info_dict, llh_transform_fn=self.llh_transform_fn_new, llh_transform_grad_fn=self.llh_transform_grad_fn_new, epsilon=new_epsilon)
         return logprior_grad + llh_grad_new + llh_grad_old, llh_grad_info
 
-    def pyro_model(self, data, parameter_len, full_para=None):
+    def pyro_model(self, data, parameter_len):
         """the equivalent pyro model, for use in pyro MCMC functions
         data: torch.tensor
             - this input is required as a standard format of a pyro model
@@ -500,11 +503,14 @@ class DeterministicSRModelSMC(DeterministicSRModel):
         """
         old_data = torch.tensor(data._buffers["rewards"], dtype=torch.float32)
         new_data = torch.tensor(data._new_data_buffers["rewards"], dtype=torch.float32)
-        data = torch.cat(old_data, new_data, dim=0)
+        data = torch.cat((old_data, new_data), dim=0)
         prior_parameter = pyro.sample("prior_parameter", dist.MultivariateNormal(torch.zeros(parameter_len), torch.eye(parameter_len)*self.prior.sigma**2))
-        mean = self.abclikelihood.compute_mean(parameter=prior_parameter, mean_fn=self.llh_transform_fn, llh_info_dict=dict())
-        cov = self.abclikelihood.covariance_matrix(data_len=len(self.data))
+        mean_old = self.abclikelihood.compute_mean(parameter=prior_parameter, mean_fn=self.llh_transform_fn_old)
+        mean_new = self.abclikelihood.compute_mean(parameter=prior_parameter, mean_fn=self.llh_transform_fn_new)
+        mean = torch.cat((mean_old, mean_new))
+        cov = torch.diag(self.abclikelihood.covariance_matrix(data_len=len(data)))
         cov[len(old_data):] = self.new_epsilon
+        # print(mean.shape, torch.diag(cov).shape, data.shape)
         pyro.sample("obs", dist.MultivariateNormal(mean, torch.diag(cov)), obs=data)
 
 

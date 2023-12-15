@@ -341,7 +341,7 @@ class HMC(Kernel):
         use_autograd: bool
             - If True, autograd is used to compute the gradient of the target density, otherwise the manually implemented gradient function is used specified in the model
         """
-        print('HMC stepsize', stepsize)
+        # print('HMC stepsize', stepsize)
         super(HMC, self).__init__(model=model, *args, **kwargs)  
         self.traj_len = traj_len 
         self.stepsize = stepsize
@@ -509,7 +509,8 @@ class HMC(Kernel):
         t0 = 10
         kappa = 0.75
         traj_len = 2 * np.pi if self.traj_len is None else self.traj_len
-        pbar = tqdm(range(iterations))
+        MCMC_SHOW_DISABLE = True
+        pbar = range(iterations) if MCMC_SHOW_DISABLE else tqdm(range(iterations))
         for i in pbar:
             L = self.set_L(num_steps=None, traj_len=traj_len, stepsize=eps, set_L=False)
             try:
@@ -529,8 +530,8 @@ class HMC(Kernel):
             logeps = mu - (m**0.5)/gamma * H_bar
             eps = np.exp(logeps)
             logeps_bar = m**(-kappa) * logeps + (1 - m**(-kappa)) * logeps_bar
-
-            pbar.set_description("Warmup: Most recent alpha {}, with stepsize {}".format(str(np.round(accept_prob.numpy(), 3)), str(np.round(eps.numpy(), 5))))
+            if not MCMC_SHOW_DISABLE:
+                pbar.set_description("Warmup: Most recent alpha {}, with stepsize {}".format(str(np.round(accept_prob.numpy(), 3)), str(np.round(eps.numpy(), 5))))
 
         stepsize = np.exp(logeps_bar)
         if set_stepsize is True:   
@@ -677,7 +678,7 @@ class HMC_pyro(Kernel):
 class NUTS_pyro(Kernel):
     """The NUTS kernel for use in pyro"""
     def __init__(self, model, stepsize=0.5, precondition_matrix=None, adapt_step_size=False, *args, **kwargs):
-        print('NUTS stepsize', stepsize)
+        # print('NUTS stepsize', stepsize)
         super(NUTS_pyro, self).__init__(model=model, *args, **kwargs)
         self.stepsize = stepsize
         self.precondition_matrix = precondition_matrix
@@ -685,14 +686,13 @@ class NUTS_pyro(Kernel):
         self.kwargs = kwargs
         self.original = False  #flag to identify whether the kernel subclass is origin
         
-    def get_pyro_kernel(self, parameter_len, full_para=None):
+    def get_pyro_kernel(self, parameter_len):
         """return the HMC pyro kernel with input parameters specified during initialisation of the class
         parameter_len: len
             - the dimension of the sampling (parameter) space
         """
         pyro.clear_param_store()
-        self.full_para = full_para
-        pyro_model = lambda data: self.model.pyro_model(data=data, parameter_len=parameter_len, full_para=full_para)
+        pyro_model = lambda data: self.model.pyro_model(data=data, parameter_len=parameter_len)
         self.pyro_kernel =  pyro.infer.mcmc.NUTS(model=pyro_model)#, step_size=self.stepsize, adapt_step_size=self.adapt_step_size, **self.kwargs)
         return self.pyro_kernel
 

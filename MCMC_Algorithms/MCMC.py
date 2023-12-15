@@ -85,7 +85,7 @@ class MCMC:
 
         self.reset_stat()
 
-    def run(self, idx=None):
+    def run(self, idx=None, MCMC_SHOW_DISABLE=False):
 
         self.reset_stat()
 
@@ -102,7 +102,7 @@ class MCMC:
         # self.logdensities[0] = current_logtarget_density
         # self.proposed_logdensities[0] = current_logtarget_density
 
-        pbar = tqdm(range(self.num_samples))
+        pbar = range(self.num_samples) if MCMC_SHOW_DISABLE else tqdm(range(self.num_samples))
         for i in pbar:
             accept_prob, proposed_para, proposed_para_info_dict  = self.kernel.propose_accept(current_para=current_para,
                                                                          current_para_info_dict=current_para_info_dict, indices=idx)
@@ -112,8 +112,8 @@ class MCMC:
                 current_para_info_dict = proposed_para_info_dict
                 self.accepted += 1
                 self.ifaccept[i + 1] = 1
-
-            pbar.set_description("Acceptance probability {}".format(np.round(self.accepted/(i+1), 2)))
+            if not MCMC_SHOW_DISABLE:
+                pbar.set_description("Acceptance probability {}".format(np.round(self.accepted/(i+1), 2)))
 
             self.samples[i + 1] = current_para
             self.logdensities[i + 1] = current_para_info_dict["logdensities"]
@@ -165,12 +165,11 @@ class MCMC_pyro(MCMC):
         """
         super(MCMC_pyro, self).__init__(kernel=kernel, warmup_steps=warmup_steps, num_samples=num_samples, initial_params=initial_params, params_dim=params_dim, **kwargs)
         self.kernel_ = kernel
-        self.pyro_kernel = kernel.get_pyro_kernel(parameter_len=self.params_dim, full_para=torch.log(-torch.tensor(Q_star, dtype=torch.float32).reshape(-1)))
+        self.pyro_kernel = kernel.get_pyro_kernel(parameter_len=self.params_dim)
         self.pyro_mcmc = pyro.infer.mcmc.MCMC(kernel=self.pyro_kernel, num_samples=num_samples, initial_params={'prior_parameter': initial_params}, warmup_steps=warmup_steps, disable_progbar=disable_progbar, **kwargs)
         self.data = self.kernel.model.data
 
-    def run(self):
-
+    def run(self, MCMC_SHOW_DISABLE=None):
         self.reset_stat()
 
         self.pyro_mcmc.run(self.data)
@@ -213,7 +212,7 @@ class MCMC_Gibbs(MCMC):
         
         self.reset_stat()
         
-    def run(self, idx=None):
+    def run(self, idx=None, MCMC_SHOW_DISABLE=False):
         
         self.reset_stat()
         
@@ -232,7 +231,7 @@ class MCMC_Gibbs(MCMC):
             
             if self.warmup_steps > 0:
                 try: 
-                    current_para[var], current_para_info_dict[var], _ = self.warmup(var=var, init_para=current_para[var], init_para_info_dict=current_para_info_dict)
+                    current_para[var], current_para_info_dict[var], _ = self.warmup(var=var, init_para=current_para[var], init_para_info_dict=current_para_info_dict, MCMC_SHOW_DISABLE=MCMC_SHOW_DISABLE)
                 except NotImplementedError:
                     print("Warmup is not implemented for the current kernel. Skip to sampling...")
         
@@ -264,11 +263,12 @@ class MCMC_Gibbs(MCMC):
             pbar.set_description("Acceptance probability {}".format(np.round(self.accepted['para']/(i+1), 2)))
         return self.samples['para']
     
-    def warmup(self, var, init_para, init_para_info_dict=dict()):
+    def warmup(self, var, init_para, init_para_info_dict=dict(), MCMC_SHOW_DISABLE=False):
         current_para, current_para_info_dict, info = self.kernel[var].warmup(init_para=init_para, 
                                                                         init_para_info_dict=init_para_info_dict,
                                                                         iterations=self.warmup_steps, 
                                                                         set_stepsize=True,
+                                                                        MCMC_SHOW_DISABLE=MCMC_SHOW_DISABLE
                                                                         **self.warmup_settings)
 
         return current_para, current_para_info_dict, info
@@ -316,7 +316,7 @@ def get_MCMC_Model(obs, model, env, epsilon):
         Model = DeterministicSRModel(prior=prior, abclikelihood=abclikelihood, data=data, llh_transform_fn=r_hat, llh_transform_grad_fn=llh_transform_grad_fn)
 
 #MCMC
-def MCMC_update(Model, posterior_samples, env, training_steps_with_burnin, training_steps, mode_idx=None, use_precondition=False, stepsize=STEPSIZE, USE_AUTOGRAD=False):
+def MCMC_update(Model, posterior_samples, env, training_steps_with_burnin, training_steps, mode_idx=None, use_precondition=False, stepsize=STEPSIZE, USE_AUTOGRAD=False, WARMUP_RATIO=WARMUP_RATIO, MCMC_SHOW_DISABLE=MCMC_SHOW_DISABLE, ADAPT_STEP_SIZE=False, ADAPT_MASS_MATRIX=False):
     def fn(parameter):
         current_logtarget_density, _ = Model.logtarget_density(parameter=parameter, llh_info_dict=dict())
         return current_logtarget_density
@@ -325,7 +325,6 @@ def MCMC_update(Model, posterior_samples, env, training_steps_with_burnin, train
         kernel = RandomWalk(model=Model, stepsize=stepsize)
         z_kernel = Z(model=Model)
     else:
-        print("Precondition", use_precondition)
         if use_precondition:
             if TRANSFORM:
                 hessian = torch.autograd.functional.hessian(fn, TruncatedGaussianABCLikelihood.log_neg_transform(torch.tensor(Q_star[env.learnable_idx], dtype=torch.float32)).reshape(-1)) - 1e-6 * torch.eye(len(posterior_samples[0].reshape(-1)))
@@ -353,8 +352,8 @@ def MCMC_update(Model, posterior_samples, env, training_steps_with_burnin, train
             #kernel = MALA(model=Model, stepsize=stepsize, precondition_matrix=None)
             #kernel = MALA(model=Model, stepsize=stepsize, use_autograd=USE_AUTOGRAD)
             # kernel = HMC_pyro(model=Model, stepsize=stepsize, full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB, trajectory_length=TRAJECTORY_LENGTH)
-            kernel = HMC(model=Model, stepsize=stepsize, num_steps=NUM_STEPS, use_autograd=USE_AUTOGRAD, mass=MASS, traj_len=TRAJECTORY_LENGTH)
-            # kernel = NUTS_pyro(model=Model, stepsize=stepsize, full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB)
+            # kernel = HMC(model=Model, stepsize=stepsize, num_steps=NUM_STEPS, use_autograd=USE_AUTOGRAD, mass=MASS, traj_len=TRAJECTORY_LENGTH)
+            kernel = NUTS_pyro(model=Model, stepsize=stepsize, full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB)
 
         # kernel = AM(model=Model,  stepsize=stepsize)
         #kernel = mMALA(model=Model, stepsize=stepsize, use_autograd=USE_AUTOGRAD, use_autohess=False)
@@ -374,7 +373,7 @@ def MCMC_update(Model, posterior_samples, env, training_steps_with_burnin, train
             # posterior_samples = posterior_samples.reshape((len(posterior_samples), ) + submatrix_shape_ + (env.action_space.n, )) #if FROZEN else posterior_samples.reshape((len(posterior_samples), ) + env.n_cell + (env.action_space.n, ))
         else:
             mcmc = MCMC(num_samples=training_steps_with_burnin, kernel=kernel, initial_params=posterior_samples[-1].reshape(-1), warmup_steps=np.int64(np.floor(training_steps*WARMUP_RATIO)), warup_settings=dict(target_prob=TARGET_ACCEPT_PROB, auto_init_stepsize=True))
-            posterior_samples = mcmc.run()[-training_steps:]
+            posterior_samples = mcmc.run(MCMC_SHOW_DISABLE=MCMC_SHOW_DISABLE)[-training_steps:]
             # posterior_samples = posterior_samples.reshape((len(posterior_samples), ) + submatrix_shape_ + (env.action_space.n, )) #if FROZEN else posterior_samples.reshape((len(posterior_samples), ) + env.n_cell + (env.action_space.n, ))
         logdensities = mcmc.get_logdensities()
         proposed_logdensities = mcmc.get_proposed_logdensities()
@@ -387,7 +386,7 @@ def MCMC_update(Model, posterior_samples, env, training_steps_with_burnin, train
             raise NotImplementedError('pyro model for stochastic hasn\'t been implemented' )
         else:
             mcmc = MCMC_pyro(num_samples=pyro_training_steps, kernel=kernel, initial_params=posterior_samples[-1].reshape(-1), warmup_steps=np.int64(np.floor(pyro_training_steps*WARMUP_RATIO)), disable_progbar=MCMC_SHOW_DISABLE)
-        posterior_samples = mcmc.run()[-training_steps:]
+        posterior_samples = mcmc.run(MCMC_SHOW_DISABLE=MCMC_SHOW_DISABLE)[-training_steps:]
         # posterior_samples = posterior_samples.reshape((-1, ) + submatrix_shape_ + (env.action_space.n, )) #if FROZEN else posterior_samples.reshape((len(posterior_samples), ) + env.n_cell + (env.action_space.n, ))
         # posterior_samples = mcmc.run().reshape((-1, ) + )
         return posterior_samples, accept_probs, mcmc, kernel, None, None
