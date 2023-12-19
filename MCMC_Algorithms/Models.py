@@ -475,7 +475,9 @@ class DeterministicSRModelSMC(DeterministicSRModel):
         self.new_epsilon = new_epsilon
         
     def llh_new(self, parameter, epsilon):
-        return self.abclikelihood.llh(data=self.new_data, parameter=parameter, llh_transform_fn=self.llh_transform_fn_new, epsilon=epsilon)
+        data = self.old_data if len(self.new_data) == 0 else self.new_data
+        llh_transform_fn = self.llh_transform_fn_old if len(self.new_data) == 0 else self.llh_transform_fn_new
+        return self.abclikelihood.llh(data=data, parameter=parameter, llh_transform_fn=llh_transform_fn, epsilon=epsilon)
     
     def llh(self, parameter, new_epsilon=None, llh_info_dict=dict()):
         """compute the loglikelihood given the abclikelihood and return the loglikelihood with the llh_info_dict"""
@@ -509,7 +511,8 @@ class DeterministicSRModelSMC(DeterministicSRModel):
         mean_new = self.abclikelihood.compute_mean(parameter=prior_parameter, mean_fn=self.llh_transform_fn_new)
         mean = torch.cat((mean_old, mean_new))
         cov = torch.diag(self.abclikelihood.covariance_matrix(data_len=len(data)))
-        cov[len(old_data):] = self.new_epsilon
+        if self.new_epsilon is not None:
+            cov[len(old_data):] = self.new_epsilon
         # print(mean.shape, torch.diag(cov).shape, data.shape)
         pyro.sample("obs", dist.MultivariateNormal(mean, torch.diag(cov)), obs=data)
 

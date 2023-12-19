@@ -33,35 +33,38 @@ class SMC:
         self._weights = weights
         self.model.set_weights(weights)
 
-    def update(self, alpha, smc_samples):
-        epsilon = self.SMC_Model.abclikelihood.epsilon
-        epsilon_0 = self.find_epsilon_0(alpha=alpha, smc_samples=smc_samples, generate_new_weights_fn=generate_new_weights_0, epsilon_0=epsilon, a=epsilon, b=epsilon*10)
-        self.SMC_Model.new_epsilon = epsilon_0
-        self.epsilon_history.append(epsilon_0)
-        # epsilon_0 = epsilon * 2
-        print('epsilon_0 ==========', '\n', epsilon_0)
-        weights = generate_new_weights_0(epsilon=epsilon_0, weights=self._weights, Model=Model, smc_samples=smc_samples, epsilon_0=epsilon_0)
-        # print('weights 0==========', '\n', weights)
-        self.set_weights(weights)
-        self.update_history(smc_samples=model.get_parameter(), weights=weights)
-        if self.ESS(self._weights) < self.min_ess * self.n_particle:
-            print('Resampled')
+    def update(self, alpha, smc_samples, epsilon=None):
+        if epsilon is None:
+            epsilon = self.SMC_Model.abclikelihood.epsilon
+            epsilon_0 = self.find_epsilon_0(alpha=alpha, smc_samples=smc_samples, generate_weights_fn=generate_weights_0, epsilon_0=epsilon, a=epsilon, b=epsilon*10)
             self.SMC_Model.new_epsilon = epsilon_0
-            smc_samples, weights = self.resample()
-            self.update_history(smc_samples=model.get_parameter(), weights=weights)
-        pre_epsilon_0 = epsilon_0
-        while epsilon_0 > epsilon:
-            print('Solving...')
-            epsilon_0 = max(epsilon, self.find_epsilon_0(alpha=alpha, smc_samples=smc_samples, generate_new_weights_fn=generate_new_weights, epsilon_0=epsilon_0, a=epsilon_0*0.002, b=pre_epsilon_0))
-            # epsilon_0 *= 0.9
             self.epsilon_history.append(epsilon_0)
-            weights = generate_new_weights(epsilon=epsilon_0, weights=self._weights, Model=Model, smc_samples=smc_samples, epsilon_0=pre_epsilon_0)
+            # epsilon_0 = epsilon * 2
             print('epsilon_0 ==========', '\n', epsilon_0)
+            weights = generate_weights_0(epsilon=epsilon_0, weights=self._weights, Model=Model, smc_samples=smc_samples, epsilon_0=epsilon_0)
+            # print('weights 0==========', '\n', weights)
             self.set_weights(weights)
             self.update_history(smc_samples=model.get_parameter(), weights=weights)
             if self.ESS(self._weights) < self.min_ess * self.n_particle:
                 print('Resampled')
                 self.SMC_Model.new_epsilon = epsilon_0
+                smc_samples, weights = self.resample()
+                self.update_history(smc_samples=model.get_parameter(), weights=weights)
+        else:
+            epsilon_0 = self.SMC_Model.abclikelihood.epsilon
+        pre_epsilon_0 = epsilon_0
+        while epsilon_0 > epsilon:
+            print('Solving...')
+            epsilon_0 = max(epsilon, self.find_epsilon_0(alpha=alpha, smc_samples=smc_samples, generate_weights_fn=generate_weights, epsilon_0=epsilon_0, a=epsilon_0*0.002, b=pre_epsilon_0))
+            # epsilon_0 *= 0.9
+            self.epsilon_history.append(epsilon_0)
+            weights = generate_weights(epsilon=epsilon_0, weights=self._weights, Model=Model, smc_samples=smc_samples, epsilon_0=pre_epsilon_0)
+            print('epsilon_0 ==========', '\n', epsilon_0)
+            self.set_weights(weights)
+            self.update_history(smc_samples=model.get_parameter(), weights=weights)
+            self.SMC_Model.new_epsilon = epsilon_0
+            if self.ESS(self._weights) < self.min_ess * self.n_particle:
+                print('Resampled')
                 smc_samples, weights = self.resample()
                 self.update_history(smc_samples=model.get_parameter(), weights=weights)
             for j in range(self.n_particle):
@@ -109,33 +112,34 @@ class SMC:
             self.ess_history = torch.cat((self.ess_history, self.ESS(weights).unsqueeze(0)))
         # print(self.samples.shape)
 
-    def find_epsilon_0(self, alpha, smc_samples, generate_new_weights_fn, epsilon_0, a, b):
+    def find_epsilon_0(self, alpha, smc_samples, generate_weights_fn, epsilon_0, a, b):
         # Use optimization to find epsilon_0 that satisfies the ESS condition
         try:
-            result = bisect(ESS_Matching, a=a, b=b, xtol=1e-3, maxiter=2000, args=(alpha, self.SMC_Model, self._weights, smc_samples, generate_new_weights_fn, epsilon_0))
+            result = bisect(ESS_Matching, a=a, b=b, xtol=1e-3, maxiter=2000, args=(alpha, self.SMC_Model, self._weights, smc_samples, generate_weights_fn, epsilon_0))
         except:
-            return self.find_epsilon_0(alpha, smc_samples, generate_new_weights_fn, epsilon_0, a, b*2)
+            return self.find_epsilon_0(alpha, smc_samples, generate_weights_fn, epsilon_0, a, b*2)
+        # result = bisect(ESS_Matching, a=a, b=b, xtol=1e-3, maxiter=2000, args=(alpha, self.SMC_Model, self._weights, smc_samples, generate_weights_fn, epsilon_0))
         return result
         # if result.success:
         #     return result.x[0]
         # else:
         #     raise ValueError("Optimization did not converge. Check input parameters.")
 
-def generate_new_weights_0(epsilon, weights, Model, smc_samples, epsilon_0):
+def generate_weights_0(epsilon, weights, Model, smc_samples, epsilon_0):
     llh=[Model.llh_new(parameter=p, epsilon=epsilon)[0] for p in smc_samples]
     new_weights = torch.tensor([torch.log(w) + l for w, l in zip(weights, llh)])
     new_weights = torch.exp(new_weights)
     return new_weights / torch.sum(new_weights)
 
-def generate_new_weights(epsilon, weights, Model, smc_samples, epsilon_0):
+def generate_weights(epsilon, weights, Model, smc_samples, epsilon_0):
     new_weights = torch.tensor([w * torch.exp(Model.llh_new(parameter=p, epsilon=epsilon)[0] - Model.llh_new(parameter=p, epsilon=epsilon_0)[0]) for w, p in zip(weights, smc_samples)])
     return new_weights / torch.sum(new_weights)
 
-def ESS_Matching(epsilon, alpha, Model, weights, smc_samples, generate_new_weights_fn, epsilon_0):
-    new_weights = generate_new_weights_fn(epsilon=epsilon, weights=weights, Model=Model, smc_samples=smc_samples, epsilon_0=epsilon_0)
+def ESS_Matching(epsilon, alpha, Model, weights, smc_samples, generate_weights_fn, epsilon_0):
+    new_weights = generate_weights_fn(epsilon=epsilon, weights=weights, Model=Model, smc_samples=smc_samples, epsilon_0=epsilon_0)
     ess = SMC.ESS(new_weights)
     target_ess = alpha * SMC.ESS(weights)
-    # print(ess, target_ess)
+    print(ess, target_ess)
     return ess - target_ess
 
 def get_SMC_Model(obs, model, env, epsilon):
@@ -149,20 +153,6 @@ def get_SMC_Model(obs, model, env, epsilon):
     llh_transform_grad_fn_new = lambda parameter:  tabular_indicator_deterministic(para=parameter.reshape(env.n_cell + (env.action_space.n, )), model=model, obs=obs._new_data_buffers)
     Model = DeterministicSRModelSMC(prior=prior, abclikelihood=abclikelihood, data=obs, old_data=old_data, new_data=new_data, llh_transform_fn_old=r_hat_old, llh_transform_fn_new=r_hat_new, llh_transform_grad_fn_old=llh_transform_grad_fn_old, llh_transform_grad_fn_new=llh_transform_grad_fn_new)
     return Model
-
-# def SMC_update(smc, Model, obs, model, alpha, smc_samples):
-#     smc.update(obs, alpha, smc_samples)
-    # epsilon_0 = smc.find_epsilon_0(Model=Model, alpha=alpha, smc_samples=smc_samples, generate_new_weights_fn=generate_new_weights_0)
-    # print('epsilon 0==========', '\n', epsilon_0)
-    # weights = generate_new_weights_0(epsilon_0=epsilon_0, weights=smc._weights, Model=Model, smc_samples=smc_samples)
-    
-    # smc.set_weights(weights)
-    # while epsilon_0 > epsilon:
-    #     epsilon_0 = max(epsilon, smc.find_epsilon_0(Model=Model, alpha=alpha, smc_samples=smc_samples, generate_new_weights_fn=generate_new_weights))
-    #     print('epsilon 0==========', '\n', epsilon_0)
-    #     weights = generate_new_weights(epsilon_0=epsilon_0, weights=smc._weights, Model=Model, smc_samples=smc_samples)
-    #     smc.set_weights(weights)
-    # return smc
 
 def display_smc_results(smc):
     dim = smc.samples.shape
@@ -337,24 +327,27 @@ if __name__ == '__main__':
                     plot_obs(obs, env, env_name=ENV_NAME, title=f'Eploration path till ep {e}', additional_info=V_star)
                     plt.show()
                     #MCMC
-                    if TRANSFORM:
-                        smc_samples = TruncatedGaussianABCLikelihood.log_neg_transform(smc_samples)
                     # posterior_samples, accept_probs = MCMC_update(posterior_samples=smc_samples, obs=obs, model=model, env=env)[:2]
                     # mode_idx = torch.argmax(mcmc.logdensities) if 'mcmc' in vars() else None
+                    if TRANSFORM:
+                        smc_samples = TruncatedGaussianABCLikelihood.log_neg_transform(smc_samples)
                     if new_data_flag and e > 0:
                         Model = get_SMC_Model(obs=obs, model=model, env=env, epsilon=epsilon)
                         smc.SMC_Model = Model
                         smc.update(alpha, smc_samples)
-                    if TRANSFORM:
-                        smc_samples = TruncatedGaussianABCLikelihood.neg_exp_transform(smc_samples)
                     # model.sample_random_tables(set=True)
                     obs.init_new_data_buffer()
+                    Model = get_SMC_Model(obs=obs, model=model, env=env, epsilon=epsilon)
+                    epsilon *= 0.95
+                    smc.SMC_Model = Model
+                    smc.update(alpha, smc_samples, epsilon=epsilon)
+                    if TRANSFORM:
+                        smc_samples = TruncatedGaussianABCLikelihood.neg_exp_transform(smc_samples)
                 if done:
                     print("done with", h + 1, 'steps')
                     print('Return', R)
                     break
                 # h += 1
-            epsilon *= 0.95
             r_all_epi.append(R)
             samples_all_ep.append(model.get_parameter().clone().detach())
             explore_pct = [model.get_parameter().numpy()[:, i, i, 0] > model.get_parameter().numpy()[:, i, i, 1] for i in range(env.n_cell[0] - 1)]

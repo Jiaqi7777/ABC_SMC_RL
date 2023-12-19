@@ -197,6 +197,8 @@ class Tabular:
         
 
     def q_value(self, table, s, a, full=True): 
+        if len(s) == 0:
+            return torch.tensor([])
         if not full:
             table = self.fill_learnable_table(table)
         if hasattr(a, "__len__"):# multiple s, mutiple a 
@@ -219,6 +221,8 @@ class Tabular:
         return extend_table
     
     def v_value(self, table, s, full=True):
+        if len(s) == 0:
+            return torch.tensor([])
         if not full:
             table = self.fill_learnable_table(table)
         if len(table.shape) > len(s) + 1:
