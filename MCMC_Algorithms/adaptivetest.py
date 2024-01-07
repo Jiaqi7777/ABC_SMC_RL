@@ -167,8 +167,9 @@ def SMC_NUTS_move(kernel, num_moves, particles, sigma, eps, silent):
     step_size = np.zeros(n_particles)
     particles = deepcopy(particles)
 
-    for i in range(n_particles):
-        kernel_settings = dict(adapt_step_size=True, adapt_mass_matrix=False)
+    pbar = tqdm(range(n_particles))
+    for i in pbar:
+        kernel_settings = dict(adapt_step_size=True, adapt_mass_matrix=False, max_tree_depth=5)
         samples, mcmc_extra = run_mcmc_pyro(kernel=kernel, warmup_steps=50, eps=eps, sigma=sigma, num_samples=num_moves, initial_params=particles[i], kernel_settings=kernel_settings, return_extra=True, silent=silent)
         particles[i] = torch.tensor(samples[-1])
 
@@ -177,6 +178,8 @@ def SMC_NUTS_move(kernel, num_moves, particles, sigma, eps, silent):
 
         accept_prob[i] = mcmc_cls.diagnostics()['acceptance rate']["chain 0"]
         step_size[i] = kernel_out.step_size
+
+    print("step size", step_size.mean(), "accept_prob", accept_prob.mean(), "num_moves", num_moves)
 
     return particles, accept_prob, step_size
 
