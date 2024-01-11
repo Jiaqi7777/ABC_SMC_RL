@@ -144,21 +144,27 @@ def compute_ESJD(particles_ls, proposed_ls, H_change_ls, precondition_matrix, L)
     ESJD[np.isnan(ESJD)] = 0
     return ESJD
 
-def update_weight_init(model, log_weights, particles, eps):
+def update_weight_init(model, log_weights, particles, eps, return_unnorm=False):
 
     n_particles = len(particles)
     log_weights_prime = log_weights + np.array([model.logtarget_density_eps(particles[i], eps=eps)[0].numpy() for i in range(n_particles)])
     log_weights = log_weights_prime - logsumexp(log_weights_prime)
     
-    return log_weights
+    if return_unnorm is True:
+        return log_weights, log_weights_prime
+    else:
+        return log_weights
 
-def update_weight_iter(model, log_weights, particles, eps, new_eps):
+def update_weight_iter(model, log_weights, particles, eps, new_eps, return_unnorm=False):
 
     n_particles = len(particles)
     log_weights_prime = log_weights + np.array([model.logtarget_density_eps(particles[i], eps=new_eps)[0].numpy() - model.logtarget_density_eps(particles[i], eps=eps)[0].numpy() for i in range(n_particles)])
     log_weights = log_weights_prime - logsumexp(log_weights_prime)
     
-    return log_weights
+    if return_unnorm is True:
+        return log_weights, log_weights_prime
+    else:
+        return log_weights
 
 def SMC_NUTS_move(kernel, num_moves, particles, sigma, eps, silent):
 
@@ -305,6 +311,7 @@ def SMC(kernel, eps0, eps_f, n_particles, sigma, c=0.9, num_moves=100, silent=Tr
     precondition_ls = []
     accept_prob_ls = []
     ESJD_ls = []
+    weights_unnorm_ls = []
     
     model = Modeltest(eps=eps0, sigma=sigma)
 
@@ -314,6 +321,7 @@ def SMC(kernel, eps0, eps_f, n_particles, sigma, c=0.9, num_moves=100, silent=Tr
     particles = torch.distributions.normal.Normal(loc=torch.zeros(2), scale=sigma).sample((n_particles,))
     
     weights_ls.append(weights)
+    weights_unnorm_ls.append(weights)
     particles_ls.append(particles.clone().numpy())
     ess_ls.append(n_particles)
 
@@ -328,15 +336,16 @@ def SMC(kernel, eps0, eps_f, n_particles, sigma, c=0.9, num_moves=100, silent=Tr
 
     #Initial epsilon
     try:
-        eps, res = bisect(lambda eps: ESS(np.exp(update_weight_init(model=model, log_weights=log_weights, particles=particles, eps=eps))) - c*n_particles, a=1e-5, b=50, maxiter=100, disp=False, full_output=True)
+        eps, res = bisect(lambda eps: ESS(np.exp(update_weight_init(model=model, log_weights=log_weights, particles=particles, eps=eps, return_unnorm=False))) - c*n_particles, a=1e-5, b=50, maxiter=100, disp=False, full_output=True)
     except ValueError:
         eps = eps0
         print("fail to bisect")
     eps_ls.append(eps)
 
     #Reweight
-    log_weights = update_weight_init(model=model, log_weights=log_weights, particles=particles, eps=eps)
+    log_weights, log_weights_unnorm = update_weight_init(model=model, log_weights=log_weights, particles=particles, eps=eps, return_unnorm=True)
     weights = np.exp(log_weights)
+    weights_unnorm = np.exp(log_weights_unnorm)
     print("init epsilon", eps)
 
     ess = ESS(weights)
@@ -388,6 +397,7 @@ def SMC(kernel, eps0, eps_f, n_particles, sigma, c=0.9, num_moves=100, silent=Tr
         step_size_ls.append(step_size)
 
     weights_ls.append(weights)
+    weights_unnorm_ls.append(weights_unnorm)
     particles_ls.append(particles.clone().numpy())
     ess_ls.append(ess)
 
@@ -401,7 +411,7 @@ def SMC(kernel, eps0, eps_f, n_particles, sigma, c=0.9, num_moves=100, silent=Tr
         
         #Find new epsilon
         try:
-            new_eps, res = bisect(lambda new_eps: ESS(np.exp(update_weight_iter(model=model, log_weights=log_weights, particles=particles, eps=eps, new_eps=new_eps))) - c*ess, a=1e-5, b=eps, maxiter=100, disp=False, full_output=True)
+            new_eps, res = bisect(lambda new_eps: ESS(np.exp(update_weight_iter(model=model, log_weights=log_weights, particles=particles, eps=eps, new_eps=new_eps, return_unnorm=False))) - c*ess, a=1e-5, b=eps, maxiter=100, disp=False, full_output=True)
             #print(res)
         except ValueError:
             new_eps = new_eps / 2
@@ -410,8 +420,9 @@ def SMC(kernel, eps0, eps_f, n_particles, sigma, c=0.9, num_moves=100, silent=Tr
         eps_ls.append(new_eps)
         
         #Reweight
-        log_weights = update_weight_iter(model=model, log_weights=log_weights, particles=particles, eps=eps, new_eps=new_eps)
+        log_weights, log_weights_unnorm = update_weight_iter(model=model, log_weights=log_weights, particles=particles, eps=eps, new_eps=new_eps, return_unnorm=True)
         weights = np.exp(log_weights)
+        weights_unnorm = np.exp(log_weights_unnorm)
         
         ess = ESS(weights)
         print("ess,", ess)
@@ -464,6 +475,7 @@ def SMC(kernel, eps0, eps_f, n_particles, sigma, c=0.9, num_moves=100, silent=Tr
 
 
         weights_ls.append(weights)
+        weights_unnorm_ls.append(weights_unnorm)
         particles_ls.append(particles.clone().numpy())
         ess_ls.append(ess)
 
