@@ -291,7 +291,7 @@ def Pretune_adaptation(H_change, L_origin, L_resampled, step_size_origin, L_max)
     return L_max, step_size_max
 
 
-def SMC(kernel, eps0, eps_f, n_particles, sigma, c=0.9, num_moves=100, silent=True, adapt_alg="ft"):
+def SMC(kernel, eps0, eps_f, n_particles, sigma, c=0.9, num_moves=100, silent=True, adapt_alg="ft", return_full_hist=False):
 
     weights_ls = []
     particles_ls = []
@@ -316,6 +316,11 @@ def SMC(kernel, eps0, eps_f, n_particles, sigma, c=0.9, num_moves=100, silent=Tr
     weights_ls.append(weights)
     particles_ls.append(particles.clone().numpy())
     ess_ls.append(n_particles)
+
+    if return_full_hist and (adapt_alg in ["ft", "pretune"]):
+        particles_full_ls = []
+        proposed_full_ls = []
+        H_change_full_ls = []
     
 
 #     test_fn = lambda eps: ESS(np.exp(update_weight_init(model=model, log_weights=log_weights, particles=particles, eps=eps))) - c*n_particles
@@ -361,7 +366,7 @@ def SMC(kernel, eps0, eps_f, n_particles, sigma, c=0.9, num_moves=100, silent=Tr
 
     if adapt_alg in ["ft", "pretune"]:
         #MCMC move
-        particles, _, _, _, actual_num_moves, accept_prob, ESJD = SMC_MCMC_move(kernel=kernel, num_moves=num_moves, particles=particles, sigma=sigma, eps=eps, step_size=step_size, L=L, precondition_matrix=precondition_matrix, adaptive_move=True, silent=silent)
+        particles, H_change_tmp_ls, proposed_tmp_ls, particles_tmp_ls, actual_num_moves, accept_prob, ESJD = SMC_MCMC_move(kernel=kernel, num_moves=num_moves, particles=particles, sigma=sigma, eps=eps, step_size=step_size, L=L, precondition_matrix=precondition_matrix, adaptive_move=True, silent=silent)
 
         #Update stats
         step_size_ls.append(step_size)
@@ -370,6 +375,11 @@ def SMC(kernel, eps0, eps_f, n_particles, sigma, c=0.9, num_moves=100, silent=Tr
         precondition_ls.append(np.eye(2))
         accept_prob_ls.append(accept_prob)
         ESJD_ls.append(ESJD)
+
+        if return_full_hist:
+            particles_full_ls.append(np.array(particles_tmp_ls))
+            proposed_full_ls.append(np.array(proposed_tmp_ls))
+            H_change_full_ls.append(np.array(H_change_tmp_ls))
 
     elif adapt_alg == "nuts":
         particles, accept_prob, step_size = SMC_NUTS_move(kernel=kernel, num_moves=num_moves, particles=particles, sigma=sigma, eps=eps, silent=silent)
@@ -431,7 +441,7 @@ def SMC(kernel, eps0, eps_f, n_particles, sigma, c=0.9, num_moves=100, silent=Tr
         if adapt_alg in ["ft", "pretune"]:
 
             #MCMC move
-            particles, _, _, _, actual_num_moves, accept_prob, ESJD = SMC_MCMC_move(kernel=kernel, num_moves=num_moves, particles=particles, sigma=sigma, eps=eps, step_size=step_size, L=L, precondition_matrix=precondition_matrix, adaptive_move=True, silent=silent)
+            particles, H_change_tmp_ls, proposed_tmp_ls, particles_tmp_ls, actual_num_moves, accept_prob, ESJD = SMC_MCMC_move(kernel=kernel, num_moves=num_moves, particles=particles, sigma=sigma, eps=eps, step_size=step_size, L=L, precondition_matrix=precondition_matrix, adaptive_move=True, silent=silent)
 
             #stats
             step_size_ls.append(step_size)
@@ -440,6 +450,11 @@ def SMC(kernel, eps0, eps_f, n_particles, sigma, c=0.9, num_moves=100, silent=Tr
             precondition_ls.append(precondition_matrix.numpy())
             accept_prob_ls.append(accept_prob)
             ESJD_ls.append(ESJD)
+
+            if return_full_hist:
+                particles_full_ls.append(np.array(particles_tmp_ls))
+                proposed_full_ls.append(np.array(proposed_tmp_ls))
+                H_change_full_ls.append(np.array(H_change_tmp_ls))
         
         elif adapt_alg == "nuts":
             particles, accept_prob, step_size = SMC_NUTS_move(kernel=kernel, num_moves=num_moves, particles=particles, sigma=sigma, eps=eps, silent=silent)
@@ -456,6 +471,11 @@ def SMC(kernel, eps0, eps_f, n_particles, sigma, c=0.9, num_moves=100, silent=Tr
     
     if adapt_alg in ["ft", "pretune"]:
         extra_stats = {"step_size": step_size_ls, "L": L_ls, "num_moves": num_moves_ls, "precondition": precondition_ls, "accept_prob_ls": accept_prob_ls, "ESJD_ls": ESJD_ls}
+        if return_full_hist:
+            extra_stats["particles_full_ls"] = particles_full_ls
+            extra_stats["proposed_full_ls"] = proposed_full_ls
+            extra_stats["H_change_full_ls"] = H_change_full_ls
+
     elif adapt_alg == "nuts":
         extra_stats = {"step_size": step_size_ls, "accept_prob_ls": accept_prob_ls}
 
