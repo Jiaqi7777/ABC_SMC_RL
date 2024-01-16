@@ -24,7 +24,7 @@ class SMC:
             self.n_particle = params_dim
         self.min_ess = min_ess 
         self.model = model
-        self._weights = model._weights
+        self._weights = torch.log(model._weights)
         self.num_samples = num_samples
         self.SMC_Model = Model
         self.reset_stat()
@@ -85,15 +85,16 @@ class SMC:
         # self.model.set_weights(self._weights)
         
     @staticmethod
-    def ESS(weights):
-        return 1 / torch.sum(weights**2)
+    def ESS(lgweights):
+        # return 1 / torch.sum(weights**2)
+        return 1 / torch.sum(torch.exp(2 * lgweights))
         # return 1 / ( 1 + torch.var(self._weights) )
 
     def resample(self):
-        idx = random.choices(range(self.n_particle), self._weights, k=self.n_particle)
+        idx = random.choices(range(self.n_particle), torch.exp(self._weights), k=self.n_particle)
         paras = self.model.get_learnable_parameter()[idx]
         
-        weights = torch.ones(self.n_particle) / self.n_particle
+        weights = torch.log(torch.ones(self.n_particle) / self.n_particle)
         self.set_weights(weights)
         return paras, weights
         
@@ -108,7 +109,7 @@ class SMC:
         if smc_samples is not None:
             self.samples = torch.cat((self.samples, smc_samples.unsqueeze(0)))
         if weights is not None:
-            self._weights_history = torch.cat((self._weights_history, weights.unsqueeze(0)))
+            self._weights_history = torch.cat((self._weights_history, torch.exp(weights).unsqueeze(0)))
             self.ess_history = torch.cat((self.ess_history, self.ESS(weights).unsqueeze(0)))
         # print(self.samples.shape)
 
@@ -127,19 +128,24 @@ class SMC:
 
 def generate_weights_0(epsilon, weights, Model, smc_samples, epsilon_0):
     llh=[Model.llh_new(parameter=p, epsilon=epsilon)[0] for p in smc_samples]
-    new_weights = torch.tensor([torch.log(w) + l for w, l in zip(weights, llh)])
-    new_weights = torch.exp(new_weights)
-    return new_weights / torch.sum(new_weights)
+    lg_new_weights = torch.tensor([w + l for w, l in zip(weights, llh)])
+    # print(lg_new_weights)
+    return lg_new_weights - torch.logsumexp(lg_new_weights, dim=-1)
 
 def generate_weights(epsilon, weights, Model, smc_samples, epsilon_0):
-    new_weights = torch.tensor([w * torch.exp(Model.llh_new(parameter=p, epsilon=epsilon)[0] - Model.llh_new(parameter=p, epsilon=epsilon_0)[0]) for w, p in zip(weights, smc_samples)])
-    return new_weights / torch.sum(new_weights)
+    lg_new_weights = torch.tensor([w + (Model.llh_new(parameter=p, epsilon=epsilon)[0] - Model.llh_new(parameter=p, epsilon=epsilon_0)[0]) for w, p in zip(weights, smc_samples)])
+    # print(lg_new_weights)
+    return lg_new_weights - torch.logsumexp(lg_new_weights, dim=-1)
 
 def ESS_Matching(epsilon, alpha, Model, weights, smc_samples, generate_weights_fn, epsilon_0):
-    new_weights = generate_weights_fn(epsilon=epsilon, weights=weights, Model=Model, smc_samples=smc_samples, epsilon_0=epsilon_0)
-    ess = SMC.ESS(new_weights)
+    # print(epsilon, alpha, Model, weights, smc_samples, generate_weights_fn, epsilon_0)
+    lg_new_weights = generate_weights_fn(epsilon=epsilon, weights=weights, Model=Model, smc_samples=smc_samples, epsilon_0=epsilon_0)
+    ess = SMC.ESS(lg_new_weights)
     target_ess = alpha * SMC.ESS(weights)
+    # print(epsilon, epsilon_0, weights)
     print(ess, target_ess)
+    # print('is nan', torch.isnan(ess))
+    # raise ValueError('nan')
     return ess - target_ess
 
 def get_SMC_Model(obs, model, env, epsilon):
@@ -157,7 +163,7 @@ def get_SMC_Model(obs, model, env, epsilon):
 def display_smc_results(smc):
     dim = smc.samples.shape
     samples = smc.samples
-    fig,ax = plt.subplots(5, 5,figsize=(20,20))
+    fig,ax = plt.subplots(env.n_cell[0]-1, env.n_cell[1]-1, figsize=(30,30))
     for i in range(dim[2] - 1):
         for k in range(i+1):
             for j in range(dim[1]):
@@ -166,8 +172,8 @@ def display_smc_results(smc):
                 # ax[i,k].scatter(range(dim[0]), samples[:, j, i, k, 1], label=f"left {j}", alpha=smc._weights_history[:,j])
                 # ax[i,k].plot(range(dim[0]), samples[:, j, i, k, 1], linestyle='-')
                 # ax[i,k].hlines(Q_star[i, k, 0], xmin=0, xmax=len(samples), linestyle="--", label="true right",color="green")
-                ax[i,k].hlines(Q_star[i, k, 1], xmin=0, xmax=len(samples), linestyle="--", label="true left", color="purple")
-                ax[i,k].set_title([i, k])
+                ax[i,k].hlines(Q_star[i, k, 0], xmin=0, xmax=len(samples), linestyle="--", label="true left", color="purple")
+                ax[i,k].set_title([i, k, 0])
             # ax[i,k].legend()
     plt.show()
 
@@ -181,7 +187,7 @@ def display_smc_results(smc):
                 ax2[i,k].plot(range(dim[0]), samples[:, j, i, k, 1], linestyle='-', alpha=0.6)
                 # ax2[i,k].hlines(Q_star[i, k, 0], xmin=0, xmax=len(samples), linestyle="--", label="true right",color="green")
                 ax2[i,k].hlines(Q_star[i, k, 1], xmin=0, xmax=len(samples), linestyle="--", label="true left", color="purple")
-                ax2[i,k].set_title([i, k])
+                ax2[i,k].set_title([i, k, 1])
             # ax2[i,k].legend()
     plt.show()
     
@@ -260,7 +266,8 @@ if __name__ == '__main__':
     if env_name == 'Maze':
         env = Maze()
     if env_name == 'DeepSea':
-        env = DeepSea(depth=6)
+        env = DeepSea(depth=10)
+        EPISODES = env.n_cell[0] * 15
     
     S = []
     if len(env.n_cell) == 1:
@@ -295,7 +302,7 @@ if __name__ == '__main__':
         # model = Tabular(env=env, n_particle=N_PARTICLE, prior='normal', gamma=GAMMA)
         model = Tabular(env=env, n_particle=N_PARTICLE, prior='normal', mean=PRIOR_MEAN, std=PRIOR_SIGMA, gamma=GAMMA, initial_tables=Q_star, idx=FROZEN_IDX)#For frozen all but one dimensions
         smc = SMC(model=model, initial_params=model.get_parameter())
-        smc.update_history(model.get_parameter(), model._weights)
+        smc.update_history(model.get_parameter(), torch.log(model._weights))
         r_all_epi = [] 
         samples_all_ep = []
         obs = Buffer(['state0', 'state1', 'action', 'rewards', 'done'])
@@ -324,7 +331,6 @@ if __name__ == '__main__':
                 if done or ( h + 1)  % FROZEN_T == 0:
                     # model.set_learnable_idx(obs)
                     smc_samples = torch.tensor(model.get_learnable_parameter())
-                    plot_obs(obs, env, env_name=ENV_NAME, title=f'Eploration path till ep {e}', additional_info=V_star)
                     plt.show()
                     #MCMC
                     # posterior_samples, accept_probs = MCMC_update(posterior_samples=smc_samples, obs=obs, model=model, env=env)[:2]
@@ -337,6 +343,7 @@ if __name__ == '__main__':
                         smc.update(alpha, smc_samples)
                     # model.sample_random_tables(set=True)
                     obs.init_new_data_buffer()
+                    plot_obs(obs, env, env_name=ENV_NAME, title=f'Eploration path till ep {e}', additional_info=V_star)
                     Model = get_SMC_Model(obs=obs, model=model, env=env, epsilon=epsilon)
                     epsilon *= 0.95
                     smc.SMC_Model = Model
