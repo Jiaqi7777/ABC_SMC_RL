@@ -492,3 +492,168 @@ def SMC(kernel, eps0, eps_f, n_particles, sigma, c=0.9, num_moves=100, silent=Tr
         extra_stats = {"step_size": step_size_ls, "accept_prob_ls": accept_prob_ls}
 
     return particles.numpy(), weights, weights_ls, particles_ls, ess_ls, eps_ls, extra_stats
+
+
+
+
+def nu(mod, state, action):
+    
+    b1 = mod.env.learnable_idx[0] == state[0]
+    b2 = mod.env.learnable_idx[1] == state[1]
+    b3 = mod.env.learnable_idx[2] == action
+    
+    pos = np.arange(len(b1))[(b1 & b2 & b3).numpy()][0]
+    return pos
+
+def nu_inverse(mod, pos):
+    state = [0,0]
+    state[0] = int(mod.env.learnable_idx[0][pos])
+    state[1] = int(mod.env.learnable_idx[1][pos])
+    state = tuple(state)
+    action = int(mod.env.learnable_idx[2][pos])
+    return state, action
+
+def exact_solution(obs, mod, epsilon, sigma, state_q):
+    n = len(obs["state0"])
+    theta_len = len(mod.env.learnable_idx[0])
+    
+    states = list(zip(*[i.numpy() for i in mod.env.learnable_idx][:2]))
+    actions = [i.numpy() for i in mod.env.learnable_idx][2]
+    steps_results = list(zip(*[mod.env.step(action=actions[i], state=states[i]) for i in range(len(states))]))
+    next_states = steps_results[0]
+    done = steps_results[2]
+    
+    goal_states = list(set([steps_results[0][i] for i in range(len(steps_results[0])) if steps_results[2][i] is True]))
+    
+    permissible_actions_dict = dict()
+    for idx, state in enumerate(states):
+        if str(state) not in permissible_actions_dict:
+            permissible_actions_dict[str(state)] = [actions[idx]]
+        else:
+            permissible_actions_dict[str(state)].append(actions[idx])
+            
+    action_q_list = permissible_actions_dict[str(state_q)]
+    
+    unique_state1 = list(set(obs["state1"]))
+    is_ell_list_empty = np.all([state in goal_states for state in unique_state1])
+    
+    if is_ell_list_empty:
+        AprimeD_states = []
+        AprimeD = []
+        ell_list = [None]
+    else:
+        AprimeD_states, AprimeD = list(zip(*[[state, permissible_actions_dict[str(state)]] for state in unique_state1 if state not in goal_states]))
+        ell_list = np.array(np.meshgrid(*AprimeD)).T.reshape(-1,len(AprimeD_states))
+    
+    unique_state1_nongoal = AprimeD_states
+
+    #Get B_ell
+    B_ell_list = []
+    for ell in ell_list:
+        B_ell = np.zeros([n,theta_len])
+        for i in range(n):
+            for j in range(theta_len):
+                if j == nu(mod=mod, state=obs["state0"][i], action=obs["action"][i]):
+                    B_ell[i,j] += 1
+                state1 = obs["state1"][i]
+                if state1 not in goal_states:
+                    ell_idx = unique_state1_nongoal.index(state1)
+                    if j == nu(mod=mod, state=obs["state1"][i], action=ell[ell_idx]):
+                        B_ell[i,j] -= 1
+
+        B_ell_list.append(B_ell)
+
+    #Get p(r)
+    pr_vec = np.zeros(len(ell_list))
+    for idx in range(len(ell_list)):
+        B_ell = B_ell_list[idx]
+        pr_cov = sigma**2 * B_ell @ B_ell.T + epsilon**2 * np.eye(n)
+        pr_vec[idx] = multivariate_normal.pdf(r,mean=np.zeros(n),cov=pr_cov)
+
+    #Get p(theta|r)
+    pos_mean_list = []
+    pos_cov_list = []
+    
+    for idx in range(len(ell_list)):
+        B_ell = B_ell_list[idx]
+
+        pos_cov_ = B_ell.T @ np.linalg.inv(sigma**2 * B_ell @ B_ell.T + epsilon**2 * np.eye(n))
+        
+        pos_mean = np.matmul(sigma**2 * pos_cov_, obs["rewards"])
+        pos_mean_list.append(pos_mean)
+        
+        pos_cov = sigma**2 * np.eye(theta_len) - sigma**4 * pos_cov_  @ B_ell
+        
+        pos_mean_list.append(pos_mean)
+        pos_cov_list.append(pos_cov)
+    
+
+    #Get Eell transformation matrix
+    D_ell_list = []
+    D_ell_star_list = [[] for i in range(len(action_q_list))]
+
+    for ell in ell_list:
+        D_ell = []
+        D_ell_star = []
+        for state_idx, state1 in enumerate(unique_state1_nongoal):
+            for action in permissible_actions_dict[str(state1)]:
+                action_ell = ell[state_idx]
+                if not (action == action_ell):
+                    D_ell_tmp =  np.zeros(theta_len)
+                    D_ell_tmp[nu(mod=mod, state=state1, action=action)] = 1
+                    D_ell_tmp[nu(mod=mod, state=state1, action=action_ell)] = -1
+                    D_ell.append(D_ell_tmp)
+
+        for action_idx, action_q in enumerate(action_q_list):
+            D_ell_star = deepcopy(D_ell)
+            if state_q not in unique_state1_nongoal:
+                for action in permissible_actions_dict[str(state_q)]:
+                    if not (action == action_q):
+                        D_ell_star_tmp = np.zeros(theta_len)
+                        D_ell_star_tmp[nu(mod=mod, state=state_q, action=action)] = 1
+                        D_ell_star_tmp[nu(mod=mod, state=state_q, action=action_q)] = -1
+                        D_ell_star.append(D_ell_star_tmp)
+
+            else:
+                state_q_idx = unique_state1_nongoal.index(state_q)
+                if ell[state_q_idx] == action_q:
+                    pass
+                else:
+                    D_ell_star = None
+            
+            D_ell_star = np.array(D_ell_star)
+            D_ell_star_list[action_idx].append(D_ell_star)
+            
+
+        D_ell = np.array(D_ell)
+        D_ell_list.append(D_ell)
+    
+    
+    # Get pEr and pEsr
+    pEr_vec = np.zeros(len(ell_list))
+    pEstarr_list = [np.zeros(len(ell_list)) for i in range(len(action_q_list))]
+    
+    for idx in range(len(ell_list)):
+        D_ell = D_ell_list[idx]
+        if len(D_ell) == 0:
+            pEr_vec[idx] = 1
+        else:
+            pEr_mean = D_ell @ pos_mean_list[idx]
+            pEr_cov = D_ell @ pos_cov_list[idx] @ D_ell.T
+            pEr_vec[idx] = multivariate_normal.cdf(x=np.zeros(len(D_ell)), mean=pEr_mean, cov=pEr_cov)
+        
+        for action_idx in range(len(action_q_list)):
+            D_ell_star = D_ell_star_list[action_idx][idx]
+            if not (D_ell_star.shape == ()):
+                pEstarr_mean = D_ell_star @ pos_mean_list[idx]
+                pEstarr_cov = D_ell_star @ pos_cov_list[idx] @ D_ell_star.T
+                pEstarr_list[action_idx][idx] = multivariate_normal.cdf(x=np.zeros(len(D_ell_star)), mean=pEstarr_mean, cov=pEstarr_cov)
+            else:
+                pEstarr_list[action_idx][idx] = 0.
+
+    # Get final answer
+    pEstarr_denom = np.sum(pr_vec * pEr_vec)
+    pEstarr_numer = np.array([np.sum(pr_vec * pEstarr_vec) for pEstarr_vec in pEstarr_list])
+    
+    pEstarr = pEstarr_numer / pEstarr_denom
+    return pEstarr, action_q_list
