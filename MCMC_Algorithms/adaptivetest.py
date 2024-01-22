@@ -16,6 +16,7 @@ from pyro.infer.mcmc import NUTS
 from scipy.optimize import bisect
 from scipy.special import logsumexp
 from statsmodels.regression.quantile_regression import QuantReg
+from scipy.stats import norm, multivariate_normal
 from copy import deepcopy
 
 # def smoothen_max(x,y,alpha=0.1):
