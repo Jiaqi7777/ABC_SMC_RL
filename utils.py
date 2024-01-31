@@ -129,14 +129,14 @@ def plot_obs(obs, env, env_name=ENV_NAME, title=None, xlabel='s0', ylabel='s1', 
 
     ax.set_title(title)
     fig.tight_layout()
-    if show:
-        plt.show()
     if save:
         plt.savefig(f'{figure_path+title}.png')
-        plt.clf()
+        plt.close()
         print('figure saved at ', f'{figure_path+title}.png')
+    if show:
+        plt.show()
         
-def plot_qtable(q, title=None):
+def plot_qtable(q, title=None, save=False, figure_path=None):
     if title is None:
         title = 'Leanrt Mean of Q table'
     norm = Normalize(vmin=torch.min(q), vmax=torch.max(q))
@@ -147,6 +147,10 @@ def plot_qtable(q, title=None):
         cbar = plt.colorbar(im)
     
     plt.tight_layout()
+    if save:
+        plt.savefig(f'{figure_path+title}.png')
+        plt.close()
+        print('figure saved at ', f'{figure_path+title}.png')
 
 def replace_line(file_path, variable, new_value):
     with open(file_path) as f:
@@ -197,7 +201,8 @@ def plot_return_vs_episodes_repeat(r_all_episodes_repeat, figure_path='../Figure
     plt.fill_between(range(len(r_all_episodes_repeat[0])), r_mean-r_std/np.sqrt(N), r_mean+r_std/np.sqrt(N), alpha=0.2)
     plt.xlabel('episodes')
     plt.ylabel('Return')
-    plt.title(f'Return for each episodes averaging over {N} random runs')
+    title = f'Return for each episodes averaging over {N} random runs' if title == '' else title
+    plt.title(title)
     if show:
         plt.show()
     if save:
@@ -236,12 +241,13 @@ def compare_r_vs_episodes_repeat(r_1, r_2, figure_path='../Figures/', show=True,
         plt.show()
     plt.clf()
     
-def save_results(results, folder, training_steps, greedy, epsilon, time, m_z, repeat, episode=None, stochastic=False, episodic=False, prior_sigma=PRIOR_SIGMA):
-    dir = f'../{folder}/MCMC/{time}'
+def save_results(results, folder, training_steps, greedy, epsilon, time, m_z, repeat, dir=None, experiment='MCMC', episode=None, stochastic=False, episodic=False, prior_sigma=PRIOR_SIGMA):
+    # dir = f'../{folder}/{experiment}/{time}'
+    dir = dir if dir is not None else f'../{folder}/{experiment}/{time}'
     if not os.path.exists(dir):
         os.makedirs(dir)
     Episodes = f'Episode{episode}_' if episodic else ''
-    file_path = f'{dir}/T{training_steps}_Repeat{repeat}_{Episodes}Sto{stochastic}_M{m_z}_Gdy{greedy}_Sigma{prior_sigma}.pt'
+    file_path = f'{dir}{folder}_T{training_steps}_Repeat{repeat}_{Episodes}Sto{stochastic}_M{m_z}_Gdy{greedy}_Sigma{prior_sigma}.pt'
     torch.save(results, file_path)
     print(f'{Episodes}{folder} for repeat {repeat} saved at', file_path)
 

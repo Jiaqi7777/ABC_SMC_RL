@@ -116,6 +116,7 @@ class MCMC:
                 pbar.set_description("Acceptance probability {}".format(np.round(self.accepted/(i+1), 2)))
 
             self.samples[i + 1] = current_para
+            self.proposed_samples[i+1] = proposed_para
             self.logdensities[i + 1] = current_para_info_dict["logdensities"]
             self.proposed_logdensities[i + 1] = proposed_para_info_dict["logdensities"]
             self.accept_prob[i + 1] = accept_prob
@@ -149,6 +150,7 @@ class MCMC:
     def reset_stat(self):
         self.samples = torch.zeros((self.num_samples+1, self.params_dim))
         self.logdensities = torch.zeros(self.num_samples + 1)
+        self.proposed_samples = torch.zeros((self.num_samples + 1, self.params_dim))
         self.proposed_logdensities = torch.zeros(self.num_samples + 1)
         self.accepted = 0
         self.accept_prob = torch.zeros(self.num_samples + 1)
@@ -316,7 +318,7 @@ def get_MCMC_Model(obs, model, env, epsilon):
         Model = DeterministicSRModel(prior=prior, abclikelihood=abclikelihood, data=data, llh_transform_fn=r_hat, llh_transform_grad_fn=llh_transform_grad_fn)
 
 #MCMC
-def MCMC_update(Model, posterior_samples, env, training_steps_with_burnin, training_steps, mode_idx=None, use_precondition=False, stepsize=STEPSIZE, USE_AUTOGRAD=False, WARMUP_RATIO=WARMUP_RATIO, MCMC_SHOW_DISABLE=MCMC_SHOW_DISABLE, ADAPT_STEP_SIZE=False, ADAPT_MASS_MATRIX=False):
+def MCMC_update(Model, posterior_samples, env, training_steps_with_burnin, training_steps, mode_idx=None, use_precondition=False, stepsize=STEPSIZE, USE_AUTOGRAD=False, WARMUP_RATIO=WARMUP_RATIO, MCMC_SHOW_DISABLE=MCMC_SHOW_DISABLE, ADAPT_STEP_SIZE=False, ADAPT_MASS_MATRIX=False, kernel='NUTS', trajectory_length=TRAJECTORY_LENGTH, precondition_matrix=None):
     def fn(parameter):
         current_logtarget_density, _ = Model.logtarget_density(parameter=parameter, llh_info_dict=dict())
         return current_logtarget_density
@@ -326,34 +328,39 @@ def MCMC_update(Model, posterior_samples, env, training_steps_with_burnin, train
         z_kernel = Z(model=Model)
     else:
         if use_precondition:
-            if TRANSFORM:
-                hessian = torch.autograd.functional.hessian(fn, TruncatedGaussianABCLikelihood.log_neg_transform(torch.tensor(Q_star[env.learnable_idx], dtype=torch.float32)).reshape(-1)) - 1e-6 * torch.eye(len(posterior_samples[0].reshape(-1)))
-            else:
-                if mode_idx is None:
-                    hessian = torch.autograd.functional.hessian(fn, torch.tensor(Q_star[env.learnable_idx], dtype=torch.float32).reshape(-1)) - 1e-6 * torch.eye(len(posterior_samples[0].reshape(-1)))
+            if precondition_matrix is None:
+                if TRANSFORM:
+                    hessian = torch.autograd.functional.hessian(fn, TruncatedGaussianABCLikelihood.log_neg_transform(torch.tensor(Q_star[env.learnable_idx], dtype=torch.float32)).reshape(-1)) - 1e-6 * torch.eye(len(posterior_samples[0].reshape(-1)))
                 else:
-                    #diagnosis
-                    # mode_sample = torch.load('../Samples/MCMC/094980/T200_Repeat1_StoFalse_M1200_GdyFalse_Sigma4.pt')[1][27]
-                    # hessian = torch.autograd.functional.hessian(fn, mode_sample[mode_idx][env.learnable_idx].reshape(-1)) #- 1e-6 * torch.eye(len(posterior_samples[0].reshape(-1)))
-                    ###########
-                    hessian = torch.autograd.functional.hessian(fn, posterior_samples[mode_idx].reshape(-1)) #- 1e-6 * torch.eye(len(posterior_samples[0].reshape(-1)))
-                    print('Use mode from previous samples', -torch.linalg.inv(hessian))
-            # hessian = torch.autograd.functional.hessian(fn, posterior_samples[0].reshape(-1)) + 1e-6 * torch.eye(len(posterior_samples[0]).reshape(-1))
-
-            #kernel = RandomWalk(model=Model, stepsize=stepsize, covariance_matrix=-torch.linalg.inv(hessian))
-            #kernel = MALA(model=Model, stepsize=stepsize, precondition_matrix=-torch.linalg.inv(hessian))
-            #kernel = MALA(model=Model, stepsize=stepsize, use_autograd=USE_AUTOGRAD, precondition_matrix=-torch.linalg.inv(hessian))
-            # kernel = HMC(model=Model, stepsize=stepsize, use_autograd=USE_AUTOGRAD, mass=MASS, precondition_matrix=-torch.linalg.inv(hessian))
-            kernel = HMC(model=Model, stepsize=stepsize, num_steps=NUM_STEPS, use_autograd=USE_AUTOGRAD, mass=MASS, precondition_matrix=-torch.linalg.inv(hessian), traj_len=TRAJECTORY_LENGTH)
-            # kernel = NUTS_pyro(model=Model, stepsize=stepsize, full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB, precondition_matrix=-torch.linalg.inv(hessian))
+                    if mode_idx is None:
+                        hessian = torch.autograd.functional.hessian(fn, torch.tensor(Q_star[env.learnable_idx], dtype=torch.float32).reshape(-1)) - 1e-6 * torch.eye(len(posterior_samples[0].reshape(-1)))
+                    else:
+                        #diagnosis
+                        # mode_sample = torch.load('../Samples/MCMC/094980/T200_Repeat1_StoFalse_M1200_GdyFalse_Sigma4.pt')[1][27]
+                        # hessian = torch.autograd.functional.hessian(fn, mode_sample[mode_idx][env.learnable_idx].reshape(-1)) #- 1e-6 * torch.eye(len(posterior_samples[0].reshape(-1)))
+                        ###########
+                        hessian = torch.autograd.functional.hessian(fn, posterior_samples[mode_idx].reshape(-1)) #- 1e-6 * torch.eye(len(posterior_samples[0].reshape(-1)))
+                        print('Use mode from previous samples', -torch.linalg.inv(hessian))
+                # hessian = torch.autograd.functional.hessian(fn, posterior_samples[0].reshape(-1)) + 1e-6 * torch.eye(len(posterior_samples[0]).reshape(-1))
+                precondition_matrix=-torch.linalg.inv(hessian)
+            #kernel = RandomWalk(model=Model, stepsize=stepsize, covariance_matrix=precondition_matrix)
+            #kernel = MALA(model=Model, stepsize=stepsize, precondition_matrix=precondition_matrix)
+            #kernel = MALA(model=Model, stepsize=stepsize, use_autograd=USE_AUTOGRAD, precondition_matrix=precondition_matrix)
+            # kernel = HMC(model=Model, stepsize=stepsize, use_autograd=USE_AUTOGRAD, mass=MASS, precondition_matrix=precondition_matrix)
+            if kernel == 'HMC':
+                kernel = HMC(model=Model, stepsize=stepsize, num_steps=NUM_STEPS, use_autograd=USE_AUTOGRAD, mass=MASS, precondition_matrix=precondition_matrix, traj_len=trajectory_length)
+            if kernel == 'NUTS':
+                kernel = NUTS_pyro(model=Model, stepsize=stepsize, full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB, precondition_matrix=precondition_matrix)
         else:
             # kernel = RandomWalk(model=Model, stepsize=stepsize)
             #kernel = pCN(model=Model, stepsize=stepsize)
             #kernel = MALA(model=Model, stepsize=stepsize, precondition_matrix=None)
             #kernel = MALA(model=Model, stepsize=stepsize, use_autograd=USE_AUTOGRAD)
-            # kernel = HMC_pyro(model=Model, stepsize=stepsize, full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB, trajectory_length=TRAJECTORY_LENGTH)
-            # kernel = HMC(model=Model, stepsize=stepsize, num_steps=NUM_STEPS, use_autograd=USE_AUTOGRAD, mass=MASS, traj_len=TRAJECTORY_LENGTH)
-            kernel = NUTS_pyro(model=Model, stepsize=stepsize, full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB)
+            # kernel = HMC_pyro(model=Model, stepsize=stepsize, full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB, trajectory_length=trajectory_length)
+            if kernel == 'HMC':
+                kernel = HMC(model=Model, stepsize=stepsize, num_steps=NUM_STEPS, use_autograd=USE_AUTOGRAD, mass=MASS, traj_len=trajectory_length)
+            if kernel == 'NUTS':
+                kernel = NUTS_pyro(model=Model, stepsize=stepsize, full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB)
 
         # kernel = AM(model=Model,  stepsize=stepsize)
         #kernel = mMALA(model=Model, stepsize=stepsize, use_autograd=USE_AUTOGRAD, use_autohess=False)
