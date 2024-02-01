@@ -45,6 +45,7 @@ LLD = 'normal'
 N_PARTICLE = 4
 MIN_ESS = 0.5
 ESS_ALPHA = 0.7
+ADAPT_ALG = 'pretune'
 
 #MCMC
 PRIOR_SIGMA = 2

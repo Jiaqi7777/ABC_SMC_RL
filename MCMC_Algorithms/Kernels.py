@@ -352,7 +352,7 @@ class HMC(Kernel):
         self.H_change = []
     
         self.set_L(num_steps=num_steps, traj_len=traj_len, stepsize=stepsize, set_L=True)
-
+        # print(f'HMC setting, traj_len{self.traj_len}, num_steps{self.L}, stepsize{self.stepsize}')
 
     def move(self, current_para, current_gradient):
         """see self.move_, with L=self.L, stepsize=self.stepsize"""
