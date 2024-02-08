@@ -475,6 +475,7 @@ class DeterministicSRModelSMC(DeterministicSRModel):
         self.new_epsilon = new_epsilon
         
     def llh_new(self, parameter, epsilon):
+        # print('llh new')
         data = self.old_data if len(self.new_data) == 0 else self.new_data
         llh_transform_fn = self.llh_transform_fn_old if len(self.new_data) == 0 else self.llh_transform_fn_new
         return self.abclikelihood.llh(data=data, parameter=parameter, llh_transform_fn=llh_transform_fn, epsilon=epsilon)
@@ -483,7 +484,10 @@ class DeterministicSRModelSMC(DeterministicSRModel):
         """compute the loglikelihood given the abclikelihood and return the loglikelihood with the llh_info_dict"""
         if new_epsilon is None:
             new_epsilon = self.new_epsilon
-        old_llh, _ = self.abclikelihood.llh(data=self.old_data, parameter=parameter, llh_transform_fn=self.llh_transform_fn_old)
+        old_epsilon = self.new_epsilon if len(self.new_data) == 0 else self.abclikelihood.epsilon 
+        # print('old', self.abclikelihood.epsilon)
+        old_llh, _ = self.abclikelihood.llh(data=self.old_data, parameter=parameter, llh_transform_fn=self.llh_transform_fn_old, epsilon=old_epsilon)
+        # print('new', new_epsilon, self.new_data)
         new_llh, _ = self.abclikelihood.llh(data=self.new_data, parameter=parameter, llh_transform_fn=self.llh_transform_fn_new, epsilon=new_epsilon)
         return old_llh + new_llh, llh_info_dict
     
@@ -491,8 +495,9 @@ class DeterministicSRModelSMC(DeterministicSRModel):
         """compute the gradient of the log target density with respect to the parameter and return the gradient, using the explicit derivation of the gradient"""
         if new_epsilon is None:
             new_epsilon = self.new_epsilon
+        old_epsilon = self.new_epsilon if len(self.new_data) == 0 else self.abclikelihood.epsilon 
         logprior_grad = self.prior.logprior_gradient(parameter=parameter)
-        llh_grad_old, llh_grad_info = self.abclikelihood.llh_gradient(data=self.old_data, parameter=parameter, llh_info_dict=llh_info_dict, llh_transform_fn=self.llh_transform_fn_old, llh_transform_grad_fn=self.llh_transform_grad_fn_old)
+        llh_grad_old, llh_grad_info = self.abclikelihood.llh_gradient(data=self.old_data, parameter=parameter, llh_info_dict=llh_info_dict, llh_transform_fn=self.llh_transform_fn_old, llh_transform_grad_fn=self.llh_transform_grad_fn_old, epsilon=old_epsilon)
         llh_grad_new, llh_grad_info = self.abclikelihood.llh_gradient(data=self.new_data, parameter=parameter, llh_info_dict=llh_info_dict, llh_transform_fn=self.llh_transform_fn_new, llh_transform_grad_fn=self.llh_transform_grad_fn_new, epsilon=new_epsilon)
         return logprior_grad + llh_grad_new + llh_grad_old, llh_grad_info
 

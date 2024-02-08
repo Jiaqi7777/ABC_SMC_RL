@@ -10,6 +10,8 @@ from tqdm.notebook import tqdm
 from parameter import *
 from utils import *
 
+def clip(tensor):
+     return torch.clip(tensor,-1e9,1e9)
 
 class Kernel:
     """the class of all MCMC kernels"""
@@ -379,27 +381,27 @@ class HMC(Kernel):
         else:
             p0 = torch.normal(mean=torch.zeros(current_para.size()), std=self.mass)
 
-        p = p0 + stepsize * current_gradient * 0.5
+        p = clip(p0 + stepsize * current_gradient * 0.5)
         q = deepcopy(current_para)
         if full_para is None:
             for i in range(L):
                 q_move = torch.mv(self.precondition, p) if self.precondition is not None else p
-                q = q + stepsize * q_move
+                q = clip(q + stepsize * q_move)
                 if i != (L-1):
                     gradient, _ = self.gradient(parameter=q, info_dict=dict(), return_logtarget_density=False)
-                    p = p + stepsize * gradient
+                    p = clip(p + stepsize * gradient)
             proposed_gradient, proposed_logtarget_density, proposed_para_llh_info_dict, proposed_para_llh_grad_info_dict = self.gradient(parameter=q, info_dict=dict(), return_logtarget_density=True)
-            p = p + stepsize * proposed_gradient * 0.5
+            p = clip(p + stepsize * proposed_gradient * 0.5)
         else:
             for i in range(L):
                 q_move = torch.mv(self.precondition, p) if self.precondition is not None else p / self.mass
-                q = q + stepsize * q_move
+                q = clip(q + stepsize * q_move)
                 full_para[indices] = q
                 if i != (L-1):
                     gradient, _ = self.gradient(parameter=full_para, info_dict=dict(), return_logtarget_density=False)
                     p = p + stepsize * gradient[indices]
             proposed_gradient, proposed_logtarget_density, proposed_para_llh_info_dict, proposed_para_llh_grad_info_dict = self.gradient(parameter=full_para, info_dict=dict(), return_logtarget_density=True)
-            p = p + stepsize * proposed_gradient[indices] * 0.5
+            p = clip(p + stepsize * proposed_gradient[indices] * 0.5)
         p = -p
         self.momentum.append(p)
         q_info_dict = {"logdensities":proposed_logtarget_density, "gradient":proposed_gradient, "llh_info_dict":proposed_para_llh_info_dict, "llh_grad_info_dict":proposed_para_llh_grad_info_dict}
