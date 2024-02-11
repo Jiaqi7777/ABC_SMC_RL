@@ -8,7 +8,6 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from matplotlib.colors import Normalize
 import torch
 from parameter import *
-from MCMC_Algorithms.SMC import *
 
 def argmaxs(arr):
     mask = arr == arr.max()
@@ -325,30 +324,20 @@ def save_faulty_ess(epsilon_0, smc_samples, weights, generate_weights_fn):
     with open(f'../SMC/FaultyBisect/{epsilon_0}/ess_info.pkl', "wb") as ess_file:
         pickle.dump(ess_dict, ess_file)
 
-def generate_weights(epsilon, weights, Model, smc_samples, epsilon_0):
-    if hasattr(epsilon, "__len__"):
-        epsilon = epsilon[0]
-    lg_new_weights = torch.tensor([w + (Model.llh_new(parameter=p, epsilon=epsilon)[0] - Model.llh_new(parameter=p, epsilon=epsilon_0)[0]) for w, p in zip(weights, smc_samples)])
-#     print(lg_new_weights, torch.logsumexp(lg_new_weights, dim=-1))
-    return lg_new_weights - torch.logsumexp(lg_new_weights, dim=-1)
-def ess_(epsilon, alpha, Model, weights, smc_samples, generate_weights_fn, epsilon_0):
+def ess_(epsilon, Model, weights, smc_samples, generate_weights_fn, epsilon_0, ess_fn):
     new_weights = generate_weights_fn(epsilon=epsilon, weights=weights, Model=Model, smc_samples=smc_samples, epsilon_0=epsilon_0)
-#     print('new', torch.exp(new_weights))
-    ess = SMC.ESS(new_weights)
+    ess = ess_fn(new_weights)
     return ess
-# ess_simple = partial(ess_, alpha=alpha, Model=Model, weights=model._weights, smc_samples=smc_samples, generate_weights_fn=generate_weights, epsilon_0=epsilon_0)
 
-def plot_ess(e_l, ess_l, epsilon_0, i=-1, save=True):
+def plot_ess(e_l, ess_l, epsilon_0, ess, alpha, new_epsilon, i=-1, save=False):
     plt.hlines(xmin=0, xmax=e_l[i], y=1, colors='green', label='1', linestyle='--', alpha=0.5)
-    plt.hlines(xmin=e_l[0], xmax=e_l[i], y=smc.ESS(model._weights), colors='orange', label='original ess', alpha=0.4)
+    plt.hlines(xmin=e_l[0], xmax=e_l[i], y=ess, colors='orange', label='original ess', alpha=0.4)
+    plt.hlines(xmin=e_l[0], xmax=e_l[i], y=max(1, alpha * ess), colors='purple', label='target ess', alpha=0.4)
     plt.plot(e_l[:i], ess_l[:i])
-    plt.axvline(x=epsilon_0, color='red', linestyle='--', label='epsilon_0', alpha=0.2)
+    plt.axvline(x=epsilon_0, color='red', linestyle='-', label='epsilon_0', alpha=0.2)
+    plt.axvline(x=new_epsilon, color='blue', linestyle='-.', label='new epsilon', alpha=0.5)
     plt.legend()
     plt.title(f'epsilon={epsilon_0}')
     if save:
-        plt.savefig(f'../SMC/FaultyBisect/{epsilon_0}/{e_l[-1]}i{abs(i)}.png', bbox_inches='tight')
+        plt.savefig(f'../SMC/{dir}essPlot{epsilon_0}{ess_l[0]}.png', bbox_inches='tight')
     plt.show()
-# e_l = np.linspace(epsilon_0*0.5, epsilon_0*5, 100)
-# ess_l = [ess_simple(e) for e in e_l]
-# plot_ess(e_l, ess_l, ess_simple, epsilon_0)
-# plot_ess(e_l, ess_l, ess_simple, epsilon_0, i=50)

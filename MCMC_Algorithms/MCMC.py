@@ -17,8 +17,8 @@ print('system path', sys.path)
 '''module import'''
 from MCMC_Algorithms.Kernels import *
 from MCMC_Algorithms.Models import *
-from parameter import *
-from utils import *
+# from parameter import *
+# from utils import *
 
 def autocorrelation(chain):
     """
