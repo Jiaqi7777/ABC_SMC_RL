@@ -37,15 +37,19 @@ class SMC:
         self._weights = weights
         self.model.set_weights(weights)
 
-    def update(self, alpha, smc_samples, epsilon=None, error_lag=4, error_perc=1e-4, new_data_flag=False):
+    def update(self, alpha, smc_samples, epsilon=None, error_lag=4, error_perc=1e-4, new_data_flag=False, episode='', repeat=''):
+        self.episode = episode
+        self.repeat = repeat
         if epsilon is None:
             new_data_flag = True
+            self.loop = 1
             epsilon = self.SMC_Model.abclikelihood.epsilon
+            print('epsilon_0 ==========')
             epsilon_0, a, b = self.find_epsilon_0(alpha=alpha, smc_samples=smc_samples, generate_weights_fn=generate_weights_0, epsilon_0=epsilon, a=epsilon, b=epsilon*10, lower_side=False)
+            print(epsilon_0)
             self.SMC_Model.new_epsilon = epsilon_0
             # self.epsilon_history.append(epsilon_0)
             # epsilon_0 = epsilon * 2
-            print('epsilon_0 ==========', '\n', epsilon_0)
             weights = generate_weights_0(epsilon=epsilon_0, weights=self._weights, Model=Model, smc_samples=smc_samples, epsilon_0=epsilon_0)
             # print('weights0', weights)
             if torch.any(torch.isnan(weights)):
@@ -56,9 +60,9 @@ class SMC:
             if self.ESS(self._weights) < self.min_ess * self.n_particle:
                 # print('Resampled')
                 smc_samples, weights = self.resample()
-                # self.update_history(smc_samples=smc_samples, weights=weights)
-            if self.adapt_alg == 'pretune':
-                precondition_matrix, L, L_max_pretune, step_size, step_size_max_pretune = self.pretune(smc_samples)
+                self.update_history(smc_samples=smc_samples, weights=weights)
+            # if self.adapt_alg == 'pretune':
+            #     precondition_matrix, L, L_max_pretune, step_size, step_size_max_pretune = self.pretune(smc_samples)
         else:
             epsilon_0 = self.SMC_Model.abclikelihood.epsilon
         pre_epsilon_0 = epsilon_0
@@ -70,6 +74,9 @@ class SMC:
         max_iter = 100
         if not new_data_flag:
             self.epsilon_history.append(epsilon_0)
+            self.loop = 3
+        else:
+            self.loop = 2
         while counter < max_iter:
             print('Tuning down Epsilon with new data flag =', new_data_flag)
             # epsilon_0 = max(epsilon, self.find_epsilon_0(alpha=alpha, smc_samples=smc_samples, generate_weights_fn=generate_weights, epsilon_0=epsilon_0, a=epsilon_0*0.002, b=pre_epsilon_0))
@@ -95,7 +102,7 @@ class SMC:
             if self.adapt_alg == 'pretune':
                 precondition_matrix = estimate_diag_precondition(particles=smc_samples, weights=weights)
                 precondition_matrix, L, L_max_pretune, step_size, step_size_max_pretune = self.pretune(smc_samples, step_size_max_pretune=step_size_max_pretune, L_max_pretune=L_max_pretune)
-                print('pretune results', L, step_size)
+                # print('pretune results', L, step_size)
                 corr_stat = np.ones(self.params_dim)
                 print('MCMC...')
                 for m in range(training_steps_with_burnin):
@@ -134,7 +141,6 @@ class SMC:
         
     @staticmethod
     def ESS(lgweights):
-        # return 1 / torch.sum(weights**2)
         max_weight = torch.max(lgweights)
         return (torch.exp(lgweights - max_weight)).sum() ** 2 / (torch.exp(2 * (lgweights - max_weight))).sum()
         return 1 / torch.sum(torch.exp(2 * lgweights))
@@ -165,28 +171,31 @@ class SMC:
         # print(self.samples.shape)
 
     def remove_history(self, index):
-        self.samples  = self.samples[:-index]
-        self._weights_history = self._weights_history[:-index]
-        self.ess_history  = self.ess_history[:-index]
-        self.epsilon_history = self.epsilon_history[:-index]
+        self.samples  = self.samples[: - (index - 1)]
+        self._weights_history = self._weights_history[:- (index - 1)]
+        self.ess_history  = self.ess_history[: - (index - 1)]
+        self.epsilon_history = self.epsilon_history[: - index]
+        self.set_weights(self._weights_history[- 1])
+        self.model.set_parameter(self.samples[- 1])
 
     def plot_ess_fn(self, epsilon_0, smc_samples, generate_weights_fn, a, b, new_epsilon):
-        print(smc_samples[0, 0], self._weights, epsilon_0)
+        # print(smc_samples[0, 0], self._weights, epsilon_0)
         ess_partial= partial(ess_, Model=self.SMC_Model, weights=self._weights, smc_samples=smc_samples, generate_weights_fn=generate_weights_fn, epsilon_0=epsilon_0, ess_fn=self.ESS)
         e_l = np.linspace(a, b*1.5, 100)
         ess_l = [ess_partial(e) for e in e_l]
-        plot_ess(e_l, ess_l, epsilon_0, self.ESS(self._weights), alpha, new_epsilon, save=save)
+        plot_ess(e_l, ess_l, epsilon_0, self.ESS(self._weights), alpha, new_epsilon, save=save, loop_num=self.loop, episode=self.episode, repeat=self.repeat, figure_path=dir)
 
-    def find_epsilon_0(self, alpha, smc_samples, generate_weights_fn, epsilon_0, a, b, lower_side=True, method='bisect', tol=1e-5, max_epsilon=50):
-        print(a, b)
-        if b > 1e6 or (lower_side and a < 1e-5):
-            print('illegal range', a, b)
+    def find_epsilon_0(self, alpha, smc_samples, generate_weights_fn, epsilon_0, a, b, lower_side=True, method='bisect', tol=1e-7, max_epsilon=50):
+        # print(a, b)
+        b = min(b, max_epsilon)
+        if b > 1.5 * max_epsilon or (lower_side and a < 1e-7):
+            print('illegal range', a, max_epsilon)
             # raise ValueError(a, b, alpha, self.SMC_Model, self._weights, smc_samples, generate_weights_fn, epsilon_0)
             return epsilon_0, a, b
         # Use optimization to find epsilon_0 that satisfies the ESS condition
         if method == 'bisect':
             ess_simple = partial(ESS_Matching, alpha=alpha, Model=self.SMC_Model, weights=self._weights, smc_samples=smc_samples, generate_weights_fn=generate_weights_fn, epsilon_0=epsilon_0)
-            # ess_partial= partial(ess_, Model=self.SMC_Model, weights=self._weights, smc_samples=smc_samples, generate_weights_fn=generate_weights_fn, epsilon_0=epsilon_0, ess_fn=self.ESS)
+            ess_partial= partial(ess_, Model=self.SMC_Model, weights=self._weights, smc_samples=smc_samples, generate_weights_fn=generate_weights_fn, epsilon_0=epsilon_0, ess_fn=self.ESS)
             # e_l = np.linspace(a*0.5, b*1.5, 100)
             # ess_l = [ess_partial(e) for e in e_l]
             # plot_ess(e_l, ess_l, epsilon_0, self.ESS(self._weights), alpha)
@@ -198,24 +207,24 @@ class SMC:
                     return max_epsilon, a, b
             except ValueError as ve:
                 print(ve)
-                if lower_side and abs(ess_simple(b) - max(1, alpha*ess_simple(epsilon_0))) <= tol:
+                if lower_side and abs(ess_partial(b) - max(1, alpha*self.ESS(model._weights))) <= tol:
                     print('b side')
                     self.plot_ess_fn(epsilon_0, smc_samples, generate_weights_fn, a, b, new_epsilon=b)
                     return b, a, b
-                if abs(ess_simple(a) - max(1, alpha*ess_simple(epsilon_0))) <= tol:
+                if abs(ess_partial(a) - max(1, alpha*self.ESS(model._weights))) <= tol:
                     print('a side')
                     self.plot_ess_fn(epsilon_0, smc_samples, generate_weights_fn, a, b, new_epsilon=a)
                     return a, a, b
                 # raise ValueError(a, b, alpha, self.SMC_Model, self._weights, smc_samples, generate_weights_fn, epsilon_0)
                 b = b if lower_side else b * 2
                 a = a * 0.8 if lower_side else a
-                print('Bisect with new alpha', min(alpha*1.2, 1), a, b)
-                new_epsilon, a, b = self.find_epsilon_0(min(alpha*1.2, 1), smc_samples, generate_weights_fn, epsilon_0, a, b, lower_side=lower_side, method=method)
-                self.plot_ess_fn(epsilon_0, smc_samples, generate_weights_fn, a, b, new_epsilon=new_epsilon)
+                print('Bisect with new alpha', alpha, a, b)
+                new_epsilon, a, b = self.find_epsilon_0(alpha, smc_samples, generate_weights_fn, epsilon_0, a, b, lower_side=lower_side, method=method)
+                # self.plot_ess_fn(epsilon_0, smc_samples, generate_weights_fn, a, b, new_epsilon=new_epsilon)
                 return new_epsilon, a, b
             # result = bisect(ess_simple, a=a, b=b, xtol=tol, maxiter=2000)
             self.plot_ess_fn(epsilon_0, smc_samples, generate_weights_fn, a, b, new_epsilon=result)
-            # if epsilon_0 < 0.02 and not lower_side:
+            # if epsilon_0 < 0.03 and (not lower_side):
             #     dsd
             return result, a, b
         elif method == 'root':
@@ -577,7 +586,7 @@ if __name__ == '__main__':
                     if new_data_flag and e > 0:
                         Model = get_SMC_Model(obs=obs, model=model, env=env, epsilon=epsilon)
                         smc.SMC_Model = Model
-                        _, smc_samples = smc.update(alpha, smc_samples)
+                        _, smc_samples = smc.update(alpha, smc_samples, episode=e, repeat=repeat)
                         # plt.plot(smc.bellman_err_l[-1])
                         # if save:
                         #     plt.savefig(f'{dir}bellmanErrE{e}R{repeat}NewData.png', bbox_inches='tight')
@@ -588,7 +597,7 @@ if __name__ == '__main__':
                     Model = get_SMC_Model(obs=obs, model=model, env=env, epsilon=epsilon)
                     # epsilon *= 0.9 + env.n_cell[0] * 0.003
                     smc.SMC_Model = Model
-                    epsilon, smc_samples = smc.update(alpha, smc_samples, epsilon=epsilon)
+                    epsilon, smc_samples = smc.update(alpha, smc_samples, epsilon=epsilon, episode=e, repeat=repeat)
                     plot_save(smc.bellman_err_l[-1], figure_path=dir, Episode=e, repeat=repeat, save=save, title='bellmanErr')
                     if TRANSFORM:
                         smc_samples = TruncatedGaussianABCLikelihood.neg_exp_transform(smc_samples)

@@ -329,7 +329,7 @@ def ess_(epsilon, Model, weights, smc_samples, generate_weights_fn, epsilon_0, e
     ess = ess_fn(new_weights)
     return ess
 
-def plot_ess(e_l, ess_l, epsilon_0, ess, alpha, new_epsilon, i=-1, save=False):
+def plot_ess(e_l, ess_l, epsilon_0, ess, alpha, new_epsilon, i=-1, save=False, loop_num=0, episode='', repeat='', figure_path=''):
     plt.hlines(xmin=0, xmax=e_l[i], y=1, colors='green', label='1', linestyle='--', alpha=0.5)
     plt.hlines(xmin=e_l[0], xmax=e_l[i], y=ess, colors='orange', label='original ess', alpha=0.4)
     plt.hlines(xmin=e_l[0], xmax=e_l[i], y=max(1, alpha * ess), colors='purple', label='target ess', alpha=0.4)
@@ -339,5 +339,5 @@ def plot_ess(e_l, ess_l, epsilon_0, ess, alpha, new_epsilon, i=-1, save=False):
     plt.legend()
     plt.title(f'epsilon={epsilon_0}')
     if save:
-        plt.savefig(f'../SMC/{dir}essPlot{epsilon_0}{ess_l[0]}.png', bbox_inches='tight')
+        plt.savefig(f'{figure_path}essPlotE{episode}R{repeat}Loop{loop_num}Epsl{epsilon_0}.png', bbox_inches='tight')
     plt.show()
