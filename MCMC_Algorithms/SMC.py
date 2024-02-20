@@ -582,7 +582,7 @@ if __name__ == '__main__':
         for e in range(EPISODES):
             s0, _ = env.reset()
             para = model.sample_para()
-            plot_qtable(para, title=f'Sampled Q table for episode {e} repeat {repeat}', save=save, figure_path=dir)
+            plot_qtable(para, title=f'Sampled Q table for episode {e} repeat {repeat}', save=False, figure_path=dir)
             print(f'Episode {e} in repeat {repeat} with epsilon={epsilon}')
             plt.show()
             R = 0
