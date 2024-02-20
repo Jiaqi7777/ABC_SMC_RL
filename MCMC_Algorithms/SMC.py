@@ -37,9 +37,14 @@ class SMC:
         self._weights = weights
         self.model.set_weights(weights)
 
-    def update(self, alpha, smc_samples, epsilon=None, error_lag=4, error_perc=1e-4, new_data_flag=False, episode='', repeat=''):
-        self.episode = episode
+    def update(self, alpha, smc_samples, epsilon=None, error_lag=2, error_perc=3e-4, new_data_flag=False, episode='', repeat=''):
+        if self.episode != episode:
+            if episode != 0:
+                self.epsilon_history.append(self.epsilon_epi)
+            self.epsilon_epi = []
+            self.episode = episode
         self.repeat = repeat
+        L_max_pretune, step_size_max_pretune = 100, 0.1
         if epsilon is None:
             new_data_flag = True
             self.loop = 1
@@ -48,43 +53,58 @@ class SMC:
             epsilon_0, a, b = self.find_epsilon_0(alpha=alpha, smc_samples=smc_samples, generate_weights_fn=generate_weights_0, epsilon_0=epsilon, a=epsilon, b=epsilon*10, lower_side=False)
             print(epsilon_0)
             self.SMC_Model.new_epsilon = epsilon_0
-            # self.epsilon_history.append(epsilon_0)
+            self.epsilon_epi.append(epsilon_0)
             # epsilon_0 = epsilon * 2
             weights = generate_weights_0(epsilon=epsilon_0, weights=self._weights, Model=Model, smc_samples=smc_samples, epsilon_0=epsilon_0)
             # print('weights0', weights)
             if torch.any(torch.isnan(weights)):
                 print(epsilon_0, self._weights, smc_samples)
                 raise ValueError('0')
-            self.set_weights(weights)
-            self.update_history(smc_samples=smc_samples, weights=weights)
+            # self.update_history(smc_samples=smc_samples, weights=weights)
             if self.ESS(self._weights) < self.min_ess * self.n_particle:
                 # print('Resampled')
                 smc_samples, weights = self.resample()
-                self.update_history(smc_samples=smc_samples, weights=weights)
+            self.set_weights(weights)
             # if self.adapt_alg == 'pretune':
             #     precondition_matrix, L, L_max_pretune, step_size, step_size_max_pretune = self.pretune(smc_samples)
+            if self.adapt_alg == 'pretune':
+                precondition_matrix = estimate_diag_precondition(particles=smc_samples, weights=weights)
+                precondition_matrix, L, L_max_pretune, step_size, step_size_max_pretune = self.pretune(smc_samples, step_size_max_pretune=step_size_max_pretune, L_max_pretune=L_max_pretune)
+                # print('pretune results', L, step_size)
+                corr_stat = np.ones(self.params_dim)
+                print('MCMC...')
+                for m in range(training_steps_with_burnin):
+                    prev_smc_samples = smc_samples.clone()
+                    for j in range(self.n_particle):
+                        posterior_samples, accept_probs, mcmc, kernel, logdensities, proposed_logdensities, = MCMC_update(Model=self.SMC_Model, posterior_samples=[smc_samples[j]], env=env, training_steps_with_burnin=1, training_steps=1, stepsize=step_size[j], num_steps=L[j], precondition_matrix=precondition_matrix, USE_AUTOGRAD=USE_AUTOGRAD, WARMUP_RATIO=WARMUP_RATIO, MCMC_SHOW_DISABLE=MCMC_SHOW_DISABLE, ADAPT_STEP_SIZE=ADAPT_STEP_SIZE, ADAPT_MASS_MATRIX=ADAPT_MASS_MATRIX, kernel='HMC')
+                        smc_samples[j] = posterior_samples[-1]
+                    test_dec, corr_stat = test_mcmc_stop(prev_smc_samples, smc_samples, corr_stat)
+                    if test_dec:
+                        print('MCMC stopped at', m, 'moves')
+                        break
+            self.update_history(smc_samples=smc_samples, weights=weights)
         else:
             epsilon_0 = self.SMC_Model.abclikelihood.epsilon
         pre_epsilon_0 = epsilon_0
-        L_max_pretune, step_size_max_pretune = 100, 0.1
         bellman_err = [self.bellman_error(smc_samples)]
         epsilon_l = [epsilon_0]
         # while epsilon_0 > epsilon:
         counter = 0
         max_iter = 100
         if not new_data_flag:
-            self.epsilon_history.append(epsilon_0)
+            self.epsilon_epi.append(epsilon_0)
             self.loop = 3
         else:
             self.loop = 2
+        bellman_err_improve = []
         while counter < max_iter:
             print('Tuning down Epsilon with new data flag =', new_data_flag)
             # epsilon_0 = max(epsilon, self.find_epsilon_0(alpha=alpha, smc_samples=smc_samples, generate_weights_fn=generate_weights, epsilon_0=epsilon_0, a=epsilon_0*0.002, b=pre_epsilon_0))
             epsilon_0, a, b = self.find_epsilon_0(alpha=alpha, smc_samples=smc_samples, generate_weights_fn=generate_weights, epsilon_0=epsilon_0, a=epsilon_0*0.2, b=pre_epsilon_0)
             epsilon_0 = max(epsilon_0, epsilon) if new_data_flag else epsilon_0
             # epsilon_0 *= 0.9
-            if not new_data_flag:
-                self.epsilon_history.append(epsilon_0)
+            # if not new_data_flag:
+            self.epsilon_epi.append(epsilon_0)
             print('epsilon_1 ==========', '\n', epsilon_0)
             weights = generate_weights(epsilon=epsilon_0, weights=self._weights, Model=Model, smc_samples=smc_samples, epsilon_0=pre_epsilon_0)
             # print('weights1', weights)
@@ -121,22 +141,27 @@ class SMC:
                     smc_samples[j] = posterior_samples[-1]
             self.update_history(smc_samples=smc_samples, weights=weights)
             pre_epsilon_0 = epsilon_0
-            bellman_err.append(self.bellman_error(smc_samples))
-            bellman_err_improve = np.array([(e1 - e2) / e1 if e1 != 0 else 0 for e1, e2 in zip(bellman_err[:-1], bellman_err[1:])])
+            if self.loop == 3:
+                e1 = min(bellman_err)
+                current_bellman_error = self.bellman_error(smc_samples)
+                bellman_err.append(current_bellman_error)
+                bellman_err_improve.append(((e1 - current_bellman_error) / e1) > error_perc)
+                print('bellman error', bellman_err, -(current_bellman_error - e1) / e1)
+            # bellman_err_improve = np.array([(e1 - e2) / e1 if e1 != 0 else 0 for e1, e2 in zip(bellman_err[:-1], bellman_err[1:])])
             epsilon_l.append(epsilon_0)
-            print('bellman error', bellman_err_improve)
             if new_data_flag:
                 print('New data', epsilon_0, epsilon)
                 if epsilon_0 <= epsilon:
                     break
-            elif len(bellman_err_improve) >= error_lag and np.all(bellman_err_improve[-error_lag:] < error_perc):
-                self.bellman_err_l.append(bellman_err)
+            elif len(bellman_err_improve) >= error_lag and np.sum(bellman_err_improve[-error_lag:]) == 0:
                 epsilon_0 = epsilon_l[- error_lag - 1]
                 print('stopped at epsilon=', epsilon_0)
                 print('epsilon_l', epsilon_l[:- error_lag ])
                 self.remove_history(error_lag)
                 break
             counter += 1
+        if not new_data_flag:
+            self.bellman_err_l.append(bellman_err)
         return epsilon_0, smc_samples
         
     @staticmethod
@@ -155,6 +180,7 @@ class SMC:
         return paras, weights
         
     def reset_stat(self):
+        self.episode = -1
         self.samples = torch.tensor([])
         self._weights_history = torch.tensor([])
         self.ess_history = torch.tensor([])
@@ -174,7 +200,7 @@ class SMC:
         self.samples  = self.samples[: - (index - 1)]
         self._weights_history = self._weights_history[:- (index - 1)]
         self.ess_history  = self.ess_history[: - (index - 1)]
-        self.epsilon_history = self.epsilon_history[: - index]
+        self.epsilon_epi = self.epsilon_epi[: - index]
         self.set_weights(self._weights_history[- 1])
         self.model.set_parameter(self.samples[- 1])
 
@@ -384,20 +410,21 @@ def get_SMC_Model(obs, model, env, epsilon):
     Model = DeterministicSRModelSMC(prior=prior, abclikelihood=abclikelihood, data=obs, old_data=old_data, new_data=new_data, llh_transform_fn_old=r_hat_old, llh_transform_fn_new=r_hat_new, llh_transform_grad_fn_old=llh_transform_grad_fn_old, llh_transform_grad_fn_new=llh_transform_grad_fn_new)
     return Model
 
-def display_smc_results(smc, n=0, m=-1, figure_path=None, save=False, episode='', repeat=''):
+def display_smc_results(smc, n=0, figure_path=None, save=False, episode='', repeat=''):
     figure_name = f'SMCSamplesE{episode}R{repeat}'
-    samples = smc.samples[n:m]
+    len_sample = len(smc.samples)
+    samples = smc.samples[n:]
     dim = samples.shape
-    fig,ax = plt.subplots(env.n_cell[0]-1, env.n_cell[1]-1, figsize=(30,30))
+    fig,ax = plt.subplots(env.n_cell[0]-1, env.n_cell[1]-1, figsize=(dim[2]*6, dim[3]*6))
     for i in range(dim[2] - 1):
         for k in range(i+1):
             for j in range(dim[1]):
-                ax[i,k].scatter(range(dim[0]), samples[:, j, i, k, 0], alpha=smc._weights_history[n:m, j])
-                ax[i,k].plot(range(dim[0]), samples[:, j, i, k, 0], linestyle='-', alpha=0.6)
+                ax[i,k].scatter(range(n, len_sample), samples[:, j, i, k, 0], alpha=smc._weights_history[n:, j])
+                ax[i,k].plot(range(n, len_sample), samples[:, j, i, k, 0], linestyle='-', alpha=0.6)
                 # ax[i,k].scatter(range(dim[0]), samples[:, j, i, k, 1], label=f"left {j}", alpha=smc._weights_history[:,j])
                 # ax[i,k].plot(range(dim[0]), samples[:, j, i, k, 1], linestyle='-')
                 # ax[i,k].hlines(Q_star[i, k, 0], xmin=0, xmax=len(samples), linestyle="--", label="true right",color="green")
-            ax[i, k].hlines(Q_star[i, k, 0], xmin=0, xmax=len(samples), linestyle="--", label="true right", color="purple")
+            ax[i, k].hlines(Q_star[i, k, 0], xmin=n, xmax=len_sample, linestyle="--", label="true right", color="purple")
             ax[i, k].set_title([i, k, 0])
     handles, labels = ax[i,k].get_legend_handles_labels()
     ax[i, k].legend(handles, labels, bbox_to_anchor=(0.7, 1.5), loc='right')
@@ -406,16 +433,16 @@ def display_smc_results(smc, n=0, m=-1, figure_path=None, save=False, episode=''
     plt.show()
     plt.close()
 
-    fig2,ax2 = plt.subplots(env.n_cell[0]-1, env.n_cell[1]-1, figsize=(30,30))
+    fig2,ax2 = plt.subplots(env.n_cell[0]-1, env.n_cell[1]-1, figsize=(dim[2]*6, dim[3]*6))
     for i in range(dim[2] - 1):
         for k in range(i+1):
             for j in range(dim[1]):
                 # ax2[i,k].scatter(range(dim[0]), samples[:, j, i, k, 0], label=f"right {j}", alpha=smc._weights_history[:,j])
                 # ax2[i,k].plot(range(dim[0]), samples[:, j, i, k, 0], linestyle='--')
-                ax2[i,k].scatter(range(dim[0]), samples[:, j, i, k, 1], alpha=smc._weights_history[n:m, j])
-                ax2[i,k].plot(range(dim[0]), samples[:, j, i, k, 1], linestyle='-', alpha=0.6)
+                ax2[i,k].scatter(range(n, len_sample), samples[:, j, i, k, 1], alpha=smc._weights_history[n:, j])
+                ax2[i,k].plot(range(n, len_sample), samples[:, j, i, k, 1], linestyle='-', alpha=0.6)
                 # ax2[i,k].hlines(Q_star[i, k, 0], xmin=0, xmax=len(samples), linestyle="--", label="true right",color="green")
-            ax2[i,k].hlines(Q_star[i, k, 1], xmin=0, xmax=len(samples), linestyle="--", label="true left", color="purple")
+            ax2[i,k].hlines(Q_star[i, k, 1], xmin=n, xmax=len_sample, linestyle="--", label="true left", color="purple")
             ax2[i,k].set_title([i, k, 1])
     handles, labels = ax2[i,k].get_legend_handles_labels()
     ax2[i, k].legend(handles, labels, bbox_to_anchor=(0.7, 1.5), loc='right')
@@ -486,7 +513,7 @@ if __name__ == '__main__':
     KERNEL_NAME = 'NUTS'
     EPISODES = 100
 
-    N_PARTICLE = 10
+    N_PARTICLE = 20
     training_steps_with_burnin = training_steps#int(training_steps * (1 + BURN_IN))
     random.seed(seed)
     pyro.set_rng_seed(seed)
@@ -510,8 +537,8 @@ if __name__ == '__main__':
     if env_name == 'Maze':
         env = Maze()
     if env_name == 'DeepSea':
-        env = DeepSea(depth=5)
-        EPISODES = 1000#env.n_cell[0] * 100
+        env = DeepSea(depth=15)
+        EPISODES = 2000#env.n_cell[0] * 100
     
     S = []
     if len(env.n_cell) == 1:
@@ -595,23 +622,24 @@ if __name__ == '__main__':
                     obs.init_new_data_buffer()
                     plot_obs(obs, env, env_name=ENV_NAME, title=f'Eploration path till ep {e} repeat {repeat}', additional_info=V_star, figure_path=dir, save=save)
                     Model = get_SMC_Model(obs=obs, model=model, env=env, epsilon=epsilon)
-                    # epsilon *= 0.9 + env.n_cell[0] * 0.003
                     smc.SMC_Model = Model
-                    epsilon, smc_samples = smc.update(alpha, smc_samples, epsilon=epsilon, episode=e, repeat=repeat)
-                    plot_save(smc.bellman_err_l[-1], figure_path=dir, Episode=e, repeat=repeat, save=save, title='bellmanErr')
+                    # epsilon *= 0.9 + env.n_cell[0] * 0.003
+                    # _, smc_samples = smc.update(alpha, smc_samples, epsilon=epsilon, episode=e, repeat=repeat)
+                    epsilon, smc_samples = smc.update(alpha, smc_samples, epsilon=epsilon, episode=e, repeat=repeat, error_lag=ERROR_LAG, error_perc=ERROR_PERCENTAGE)
+                    plot_save(smc.bellman_err_l[-1], figure_path=dir, episode=e, repeat=repeat, save=save, title='bellmanErr')
                     if TRANSFORM:
                         smc_samples = TruncatedGaussianABCLikelihood.neg_exp_transform(smc_samples)
-                    display_smc_results(smc, n=0, episode=e, repeat=repeat, save=save, figure_path=dir)
+                    display_smc_results(smc, n=pre_sample_size, episode=e, repeat=repeat, save=save, figure_path=dir)
                 if done:
                     print("done with", h + 1, 'steps')
                     print('Return', R)
                     break
                 # h += 1
             r_all_epi.append(R)
-            samples_all_ep.append(model.get_parameter().clone().detach())
+            samples_all_ep.append(smc.samples)
             explore_pct = [model.get_parameter().numpy()[:, i, i, 0] > model.get_parameter().numpy()[:, i, i, 1] for i in range(env.n_cell[0] - 1)]
             explore_pct_all = np.sum([np.logical_and.reduce(explore_pct[:i + 1], axis=0) for i in range(len(explore_pct))], axis=1) / len(smc_samples)
-            plot_save(smc.epsilon_history, figure_path=dir, repeat=repeat, save=save, title='Epsilon')
+            plot_save(smc.epsilon_epi, figure_path=dir, episode=e, repeat=repeat, save=save, title='Epsilon')
             plot_save(smc.ess_history[:], figure_path=dir, repeat=repeat, save=save, title='ESS')
             print('explore percentage', explore_pct_all)
             if save:

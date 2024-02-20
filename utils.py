@@ -310,12 +310,13 @@ def plot_block_accpt_prob(mcmc, block_accept, smooth=None, save=False, show=True
         plt.savefig(f'{figure_path+title}.png', bbox_inches='tight')
         print('figure saved at ', f'{figure_path+title}.png')
         
-def plot_save(data, title='', figure_path='', save=False, Episode='', repeat=''):
+def plot_save(data, title='', figure_path='', save=False, episode='', repeat=''):
     plt.plot(data)
     plt.title(title)
     if save:
-        plt.savefig(f'{figure_path}{title}E{Episode}R{repeat}.png', bbox_inches='tight')
+        plt.savefig(f'{figure_path}{title}E{episode}R{repeat}.png', bbox_inches='tight')
     plt.show()
+    plt.close()
 
 def save_faulty_ess(epsilon_0, smc_samples, weights, generate_weights_fn):
     ess_dict = {"smc_samples": smc_samples, "weights": weights, "epsilon_0": epsilon_0, 'generate_weights_fn':generate_weights_fn}
@@ -341,3 +342,4 @@ def plot_ess(e_l, ess_l, epsilon_0, ess, alpha, new_epsilon, i=-1, save=False, l
     if save:
         plt.savefig(f'{figure_path}essPlotE{episode}R{repeat}Loop{loop_num}Epsl{epsilon_0}.png', bbox_inches='tight')
     plt.show()
+    plt.close()
