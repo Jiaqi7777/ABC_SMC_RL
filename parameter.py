@@ -80,8 +80,8 @@ EPSILON = 0.01
 M_Z = 1200
 ERROR_LAG = 2
 ERROR_PERCENTAGE = 1e-3
-STOPPING_CRITERIA = 'natural_reduce'
-# STOPPING_CRITERIA = 'fixed_reduce'
+# STOPPING_CRITERIA = 'natural_reduce'
+STOPPING_CRITERIA = 'fixed_reduce'
 
 #Results
 SAVE = False

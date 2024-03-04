@@ -311,10 +311,10 @@ def plot_block_accpt_prob(mcmc, block_accept, smooth=None, save=False, show=True
         print('figure saved at ', f'{figure_path+title}.png')
         
 def plot_save(data, title='', figure_path='', save=False, episode='', repeat=''):
-    plt.plot(data)
+    plt.plot(data, '-o')
     plt.title(f'{title} Episode{episode} Repeat{repeat}')
     if save:
-        plt.savefig(f'{figure_path}{title}E{episode}R{repeat}.png', bbox_inches='tight')
+        plt.savefig(f'{figure_path}E{episode}R{repeat}{title}.png', bbox_inches='tight')
     plt.show()
     plt.close()
 
