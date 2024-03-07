@@ -45,7 +45,7 @@ class SMC:
             self.epsilon_epi = []
             self.mcmc_steps_epi = []
             self.episode = episode
-        self.repeat = repeat
+            self.repeat = repeat
         L_max_pretune, step_size_max_pretune = 100, 0.1
         if epsilon is None:
             new_data_flag = True
@@ -212,9 +212,8 @@ class SMC:
         self.samples  = self.samples[: - (index - 1)]
         self._weights_history = self._weights_history[:- (index - 1)]
         self.ess_history  = self.ess_history[: - (index - 1)]
-        self.epsilon_epi = self.epsilon_epi[: - index]
         self.epsilon_all_history = self.epsilon_all_history[: - index]
-        self.set_weights(self._weights_history[- 1])
+        self.set_weights(torch.log(self._weights_history[- 1]))
         self.model.set_parameter(self.samples[- 1])
 
     def plot_ess_fn(self, epsilon_0, smc_samples, generate_weights_fn, a, b, new_epsilon):
@@ -302,6 +301,7 @@ class SMC:
         return precondition_matrix, L, L_max_pretune, step_size, step_size_max_pretune
         
     def bellman_error(self, parameters):
+        # print('self weights', self._weights)
         return -np.sum([self.SMC_Model.llh_new(parameter=p, epsilon=1)[0] for p in parameters] * np.exp(self._weights).numpy())
     
 def particles_stat(particles):
@@ -614,6 +614,8 @@ if __name__ == '__main__':
                 new_data_flag = (obs.insert({'state0': s0, 'state1': s1, 'action': int(action), 'rewards': r, 'done': done}, unique=UNIQUE_OBS, update_new_data=True) or new_data_flag)
                 s0 = s1
                 if done or ( h + 1)  % FROZEN_T == 0:
+                    if new_data_flag:
+                        plot_obs(obs, env, env_name=ENV_NAME, title=f'E{e}R{repeat}Exploration', additional_info=V_star, figure_path=dir, save=save)
                     # model.set_learnable_idx(obs)
                     smc_samples = torch.tensor(model.get_learnable_parameter())
                     #MCMC
@@ -632,8 +634,6 @@ if __name__ == '__main__':
                         # plt.show()
                     # model.sample_random_tables(set=True)
                     obs.init_new_data_buffer()
-                    if new_data_flag:
-                        plot_obs(obs, env, env_name=ENV_NAME, title=f'E{e}R{repeat}Eploration', additional_info=V_star, figure_path=dir, save=save)
                     Model = get_SMC_Model(obs=obs, model=model, env=env, epsilon=epsilon)
                     smc.SMC_Model = Model
                     
@@ -644,7 +644,6 @@ if __name__ == '__main__':
                     
                     #Natural decreasing
                     elif STOPPING_CRITERIA == 'natural_reduce':
-                        print('smc_samples', smc_samples[0, :2])
                         epsilon, smc_samples = smc.update(alpha, smc_samples, epsilon=epsilon, episode=e, repeat=repeat, error_lag=ERROR_LAG, error_perc=ERROR_PERCENTAGE)
                         plot_save(smc.bellman_err_l[e], figure_path=dir, episode=e, repeat=repeat, save=save, title='bellmanErr')
                     
@@ -660,7 +659,7 @@ if __name__ == '__main__':
             samples_all_ep.append(smc_samples)
             explore_pct = [model.get_parameter().numpy()[:, i, i, 0] > model.get_parameter().numpy()[:, i, i, 1] for i in range(env.n_cell[0] - 1)]
             explore_pct_all = np.sum([np.logical_and.reduce(explore_pct[:i + 1], axis=0) for i in range(len(explore_pct))], axis=1) / len(smc_samples)
-            plot_save(smc.epsilon_epi, figure_path=dir, episode=e, repeat=repeat, save=save, title=f'Epsilon{smc.epsilon_epi[-1]}')
+            plot_save(smc.epsilon_epi, figure_path=dir, episode=e, repeat=repeat, save=save, title=f'Epsilon{smc.epsilon_all_history[-1]}')
             plot_save(smc.epsilon_all_history[:], figure_path=dir, repeat=repeat, save=save, title=f'Epsilon')
             plot_save(smc.mcmc_steps_epi[:], figure_path=dir, episode=e, repeat=repeat, save=save, title=f'MCMCSteps')
             # plot_save(smc.ess_history[:], figure_path=dir, repeat=repeat, save=save, title='ESS')

@@ -284,8 +284,11 @@ class Tabular:
             new_para = new_para.reshape(shape)
             self.tables[(slice(None),  *self.env.learnable_idx) ] = new_para
     
-    def set_weights(self, new_weights):
-        self._weights = new_weights
+    def set_weights(self, new_weights, log=False):
+        if log:
+            self._weights = torch.exp(new_weights)
+        else:
+            self._weights = new_weights
 
     def optimal_parameter(self):
         return self.get_parameter()[np.argmax(self._weights)]

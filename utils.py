@@ -103,10 +103,10 @@ def plot_3d(X, Y, Z, title=None, xlabel='s0', ylabel='s1', zlabel='Value', show=
 def plot_obs(obs, env, env_name=ENV_NAME, title=None, xlabel='s0', ylabel='s1', zlabel='Path', show=SHOW, additional_info=[], save=False, figure_path = '../Figures/MCMC/'):
     print('plot obs......')
     action_dim = env.action_space.n
-    arrows = {2: (1, 0), 0: (-1, 0), 1: (0,1), 3: (0, -1)} if action_dim == 4 else {0: (1, 1), 1: (1, -1)}#{0: (0, 1), 1: (0, -1)}
-    if env_name == 'DeepSea':
-        arrows = {0: (1, 1), 1: (1, -1)}
-    scale = 0.25
+    # arrows = {2: (1, 0), 0: (-1, 0), 1: (0,1), 3: (0, -1)} if action_dim == 4 else {0: (1, 1), 1: (1, -1)}#{0: (0, 1), 1: (0, -1)}
+    # if env_name == 'DeepSea':
+    #     arrows = {0: (1, 1), 1: (1, -1)}
+    # scale = 0.25
     size = 1
     fig, ax = plt.subplots(figsize=(env.n_cell[0] * size, env.n_cell[1] * size))
     if additional_info != []:
@@ -121,13 +121,16 @@ def plot_obs(obs, env, env_name=ENV_NAME, title=None, xlabel='s0', ylabel='s1', 
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
     cmap = plt.get_cmap('twilight')
-    e = 0
-    for s0, s1, a, r, d in np.array(list(obs._buffers.values())).T:
-        ax.plot(s0[1], s0[0], marker='o', markersize=8, color=cmap(e))
-        ax.arrow(s0[1], s0[0], s1[1]-s0[1], s1[0]-s0[0], head_width=0.2, fc=cmap(e), ec=cmap(e))
-        if d:
-            e+=0.1
-            e = e % EPISODES
+    b = 0
+    if len(obs._buffers['done']) != 0:
+        for s0, s1, _, _, _ in np.array(list(obs._buffers.values())).T:
+            ax.plot(s0[1], s0[0], marker='o', markersize=8, color=cmap(b))
+            ax.arrow(s0[1], s0[0], s1[1]-s0[1], s1[0]-s0[0], head_width=0.2, fc=cmap(b), ec=cmap(b))
+    b = 0.7
+    if len(obs._new_data_buffers['done']) != 0:
+        for s0, s1, _, _, _ in np.array(list(obs._new_data_buffers.values())).T:
+            ax.plot(s0[1], s0[0], marker='o', markersize=8, color=cmap(b))
+            ax.arrow(s0[1], s0[0], s1[1]-s0[1], s1[0]-s0[0], head_width=0.2, fc=cmap(b), ec=cmap(b))
 
     ax.set_title(title)
     fig.tight_layout()
