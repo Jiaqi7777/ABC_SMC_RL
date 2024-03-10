@@ -3,6 +3,8 @@ from scipy.optimize import bisect
 from scipy.optimize import root
 import sys
 import os
+import matplotlib
+matplotlib.use('MacOSX')
 from statsmodels.regression.quantile_regression import QuantReg
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 sys.path.append('/scratch/Rabbit/work/ABC_SMC_RL/')
@@ -70,8 +72,8 @@ class SMC:
             # if self.adapt_alg == 'pretune':
             #     precondition_matrix, L, L_max_pretune, step_size, step_size_max_pretune = self.pretune(smc_samples)
             if self.adapt_alg == 'pretune':
-                precondition_matrix = estimate_diag_precondition(particles=smc_samples, weights=weights)
-                precondition_matrix, L, L_max_pretune, step_size, step_size_max_pretune = self.pretune(smc_samples, step_size_max_pretune=step_size_max_pretune, L_max_pretune=L_max_pretune)
+                precondition_matrix = torch.tensor(np.eye(self.params_dim)).float()
+                L, L_max_pretune, step_size, step_size_max_pretune = self.pretune(smc_samples, step_size_max_pretune=step_size_max_pretune, L_max_pretune=L_max_pretune, precondition_matrix=precondition_matrix)
                 # print('pretune results', L, step_size)
                 corr_stat = np.ones(self.params_dim)
                 # print('MCMC...')
@@ -101,7 +103,7 @@ class SMC:
         else:
             self.loop = 2
         bellman_err_improve = []
-        print('Tuning down Epsilon with new data flag =', new_data_flag)
+        print('Tuning down Epsilon with new data flag =', new_data_flag, 'target', epsilon)
         while True:
             # epsilon_0 > epsilon:
         # while counter < max_iter:
@@ -113,6 +115,7 @@ class SMC:
             if not new_data_flag:
                 self.epsilon_all_history.append(epsilon_0)
             print('epsilon_1', epsilon_0)
+            sys.stdout.flush()
             weights = generate_weights(epsilon=epsilon_0, weights=self._weights, Model=Model, smc_samples=smc_samples, epsilon_0=pre_epsilon_0)
             # print('weights1', weights)
             if torch.any(torch.isnan(weights)):
@@ -128,7 +131,7 @@ class SMC:
                 # self.update_history(smc_samples=smc_samples, weights=weights)
             if self.adapt_alg == 'pretune':
                 precondition_matrix = estimate_diag_precondition(particles=smc_samples, weights=weights)
-                precondition_matrix, L, L_max_pretune, step_size, step_size_max_pretune = self.pretune(smc_samples, step_size_max_pretune=step_size_max_pretune, L_max_pretune=L_max_pretune)
+                L, L_max_pretune, step_size, step_size_max_pretune = self.pretune(smc_samples, step_size_max_pretune=step_size_max_pretune, L_max_pretune=L_max_pretune, precondition_matrix=precondition_matrix)
                 # print('pretune results', L, step_size)
                 corr_stat = np.ones(self.params_dim)
                 # print('MCMC...')
@@ -143,6 +146,29 @@ class SMC:
                         break
                 if not new_data_flag:
                     self.mcmc_steps_epi.append(m)
+                    if m == training_steps_with_burnin - 1 and self.adapt_alg == 'pretune' and not test_mcmc_stop(prev_smc_samples, smc_samples, corr_stat, thresh=0.3)[0]:
+                        print('epsilon too small', epsilon_0)
+                        epsilon_0 = min(2*epsilon_0, self.find_epsilon_0(alpha=compromise_alpha, smc_samples=smc_samples, generate_weights_fn=generate_weights, epsilon_0=epsilon_0, a=epsilon_0, b=epsilon_0*5, lower_side=False, show=True)[0])
+                        self.epsilon_epi.append(epsilon_0)
+                        self.epsilon_all_history.append(epsilon_0)
+                        print('increased epsilon', epsilon_0)
+                        weights = generate_weights(epsilon=epsilon_0, weights=self._weights, Model=Model, smc_samples=smc_samples, epsilon_0=pre_epsilon_0)
+                        if self.ESS(weights) < self.min_ess * self.n_particle:
+                            smc_samples, weights = self.resample()
+                        self.set_weights(weights)
+                        precondition_matrix = estimate_diag_precondition(particles=smc_samples, weights=weights)
+                        L, L_max_pretune, step_size, step_size_max_pretune = self.pretune(smc_samples, step_size_max_pretune=step_size_max_pretune, L_max_pretune=L_max_pretune, precondition_matrix=precondition_matrix)
+                        corr_stat = np.ones(self.params_dim)
+                        for m in range(training_steps_with_burnin):
+                            prev_smc_samples = smc_samples.clone()
+                            for j in range(self.n_particle):
+                                posterior_samples, accept_probs, mcmc, kernel, logdensities, proposed_logdensities, = MCMC_update(Model=self.SMC_Model, posterior_samples=[smc_samples[j]], env=env, training_steps_with_burnin=1, training_steps=1, stepsize=step_size[j], num_steps=L[j], precondition_matrix=precondition_matrix, USE_AUTOGRAD=USE_AUTOGRAD, WARMUP_RATIO=WARMUP_RATIO, MCMC_SHOW_DISABLE=MCMC_SHOW_DISABLE, ADAPT_STEP_SIZE=ADAPT_STEP_SIZE, ADAPT_MASS_MATRIX=ADAPT_MASS_MATRIX, kernel='HMC')
+                                smc_samples[j] = posterior_samples[-1]
+                            test_dec, corr_stat = test_mcmc_stop(prev_smc_samples, smc_samples, corr_stat)
+                            if test_dec:
+                                break
+                        self.update_history(smc_samples=smc_samples, weights=weights)
+                        break
             if self.adapt_alg == 'NUTS':
                 for j in range(self.n_particle):
                     posterior_samples, accept_probs, mcmc, kernel, logdensities, proposed_logdensities, = MCMC_update(Model=self.SMC_Model, posterior_samples=[smc_samples[j]], env=env, training_steps_with_burnin=training_steps_with_burnin, training_steps=training_steps, USE_AUTOGRAD=USE_AUTOGRAD, WARMUP_RATIO=WARMUP_RATIO, MCMC_SHOW_DISABLE=MCMC_SHOW_DISABLE, ADAPT_STEP_SIZE=ADAPT_STEP_SIZE, ADAPT_MASS_MATRIX=ADAPT_MASS_MATRIX)
@@ -155,7 +181,7 @@ class SMC:
                 current_bellman_error = self.bellman_error(smc_samples)
                 bellman_err.append(current_bellman_error)
                 bellman_err_improve.append(((e1 - current_bellman_error) / e1) > error_perc)
-                print('bellman error', bellman_err, -(current_bellman_error - e1) / e1)
+                print('bellman error', bellman_err, - (current_bellman_error - e1) / e1)
             # bellman_err_improve = np.array([(e1 - e2) / e1 if e1 != 0 else 0 for e1, e2 in zip(bellman_err[:-1], bellman_err[1:])])
             epsilon_l.append(epsilon_0)
             if new_data_flag or STOPPING_CRITERIA == 'fixed_reduce':
@@ -216,15 +242,17 @@ class SMC:
         self.set_weights(torch.log(self._weights_history[- 1]))
         self.model.set_parameter(self.samples[- 1])
 
-    def plot_ess_fn(self, epsilon_0, smc_samples, generate_weights_fn, a, b, new_epsilon):
+    def plot_ess_fn(self, epsilon_0, smc_samples, generate_weights_fn, a, b, new_epsilon, alpha, show=False):
         # print(smc_samples[0, 0], self._weights, epsilon_0)
         ess_partial= partial(ess_, Model=self.SMC_Model, weights=self._weights, smc_samples=smc_samples, generate_weights_fn=generate_weights_fn, epsilon_0=epsilon_0, ess_fn=self.ESS)
         e_l = np.linspace(a, b*1.5, 100)
         ess_l = [ess_partial(e) for e in e_l]
-        plot_ess(e_l, ess_l, epsilon_0, self.ESS(self._weights), alpha, new_epsilon, save=save, loop_num=self.loop, episode=self.episode, repeat=self.repeat, figure_path=dir)
+        plot_ess(e_l, ess_l, epsilon_0, self.ESS(self._weights), alpha, new_epsilon, save=show, loop_num=self.loop, episode=self.episode, repeat=self.repeat, figure_path=dircty, show=False)
 
-    def find_epsilon_0(self, alpha, smc_samples, generate_weights_fn, epsilon_0, a, b, lower_side=True, method='bisect', tol=1e-7, max_epsilon=50):
-        # print(a, b)
+    def find_epsilon_0(self, alpha, smc_samples, generate_weights_fn, epsilon_0, a, b, lower_side=True, method='bisect', tol=1e-7, max_epsilon=50, show=False):
+        if show:
+            print(a, b)
+            sys.stdout.flush()
         b = min(b, max_epsilon)
         if b > 1.5 * max_epsilon or (lower_side and a < 1e-7):
             print('illegal range', a, max_epsilon)
@@ -240,28 +268,31 @@ class SMC:
             try:
                 result = bisect(ess_simple, a=a, b=b, xtol=tol, maxiter=2000)
                 if result > max_epsilon:
-                    # self.plot_ess_fn(epsilon_0, smc_samples, generate_weights_fn, a, b, new_epsilon=epsilon_0)
+                    self.plot_ess_fn(epsilon_0, smc_samples, generate_weights_fn, a, b, new_epsilon=epsilon_0, show=show, alpha=alpha)
                     print('original epsilon')
                     return max_epsilon, a, b
             except ValueError as ve:
                 # print(ve)
-                if lower_side and abs(ess_partial(b) - max(1, alpha*self.ESS(model._weights))) <= tol:
+                if lower_side and abs(ess_partial(b) - max(1, alpha*self.ESS(self._weights))) <= tol:
                     # print('b side')
-                    # self.plot_ess_fn(epsilon_0, smc_samples, generate_weights_fn, a, b, new_epsilon=b)
+                    self.plot_ess_fn(epsilon_0, smc_samples, generate_weights_fn, a, b, new_epsilon=b, show=show, alpha=alpha)
                     return b, a, b
-                if abs(ess_partial(a) - max(1, alpha*self.ESS(model._weights))) <= tol:
+                if abs(ess_partial(a) - max(1, alpha*self.ESS(self._weights))) <= tol:
                     # print('a side')
-                    # self.plot_ess_fn(epsilon_0, smc_samples, generate_weights_fn, a, b, new_epsilon=a)
+                    self.plot_ess_fn(epsilon_0, smc_samples, generate_weights_fn, a, b, new_epsilon=a, show=show, alpha=alpha)
                     return a, a, b
                 # raise ValueError(a, b, alpha, self.SMC_Model, self._weights, smc_samples, generate_weights_fn, epsilon_0)
                 b = b if lower_side else b * 2
                 a = a * 0.8 if lower_side else a
                 # print('Bisect with new alpha', alpha, a, b)
                 new_epsilon, a, b = self.find_epsilon_0(alpha, smc_samples, generate_weights_fn, epsilon_0, a, b, lower_side=lower_side, method=method)
-                # self.plot_ess_fn(epsilon_0, smc_samples, generate_weights_fn, a, b, new_epsilon=new_epsilon)
+                self.plot_ess_fn(epsilon_0, smc_samples, generate_weights_fn, a, b, new_epsilon=new_epsilon, show=show, alpha=alpha)
                 return new_epsilon, a, b
+            except RecursionError as re:
+                print(re ,a, b, alpha, self.SMC_Model, self._weights, smc_samples, generate_weights_fn, epsilon_0)
+                return epsilon_0, a, b
             # result = bisect(ess_simple, a=a, b=b, xtol=tol, maxiter=2000)
-            # self.plot_ess_fn(epsilon_0, smc_samples, generate_weights_fn, a, b, new_epsilon=result)
+            self.plot_ess_fn(epsilon_0, smc_samples, generate_weights_fn, a, b, new_epsilon=result, show=show, alpha=alpha)
             # if epsilon_0 < 0.03 and (not lower_side):
             #     dsd
             return result, a, b
@@ -283,8 +314,7 @@ class SMC:
         else:
             raise NotImplementedError('No method implemented for method', method)
     
-    def pretune(self, smc_samples, step_size_max_pretune=0.1, L_max_pretune=99):
-        precondition_matrix = torch.tensor(np.eye(self.params_dim)).float()
+    def pretune(self, smc_samples, precondition_matrix, step_size_max_pretune=0.1, L_max_pretune=99):
         H_change = torch.zeros(self.n_particle)
         step_size_pretune = torch.rand(self.n_particle) * step_size_max_pretune
         L_pretune = torch.randint(1, L_max_pretune + 1, size=(self.n_particle, ))
@@ -298,7 +328,7 @@ class SMC:
         ESJD_pretune = compute_ESJD(particles_ls=smc_samples, proposed_ls=proposed_samples, H_change_ls=[H_change], precondition_matrix=precondition_matrix, L=L_pretune)
         L, step_size = resample_L_stepsize(ESJD=ESJD_pretune, L=L_pretune, step_size=step_size_pretune)
         L_max_pretune, step_size_max_pretune = Pretune_adaptation(H_change=H_change, L_origin=L_pretune, L_resampled=L, step_size_origin=step_size_pretune, L_max=L_max_pretune)
-        return precondition_matrix, L, L_max_pretune, step_size, step_size_max_pretune
+        return L, L_max_pretune, step_size, step_size_max_pretune
         
     def bellman_error(self, parameters):
         # print('self weights', self._weights)
@@ -307,13 +337,13 @@ class SMC:
 def particles_stat(particles):
     return particles + particles ** 2        
 
-def test_mcmc_stop(prev_smc_samples, smc_samples, prev_corr_array):
+def test_mcmc_stop(prev_smc_samples, smc_samples, prev_corr_array, thresh=0.1):
     dim = len(prev_smc_samples[0])
     prev_smc_samples_stat = particles_stat(prev_smc_samples)
     smc_samples_stat = particles_stat(smc_samples)
     corr_array = torch.tensor([np.corrcoef(prev_smc_samples_stat[:, i], smc_samples_stat[:,i])[1, 0] for i in range(dim)])
     corr_array = corr_array * prev_corr_array
-    decision = True if torch.mean((corr_array > 0.1).float()) <= 0.1 else False
+    decision = True if torch.mean((corr_array > thresh).float()) <= 0.1 else False
     return decision, corr_array
 
 def estimate_diag_precondition(particles, weights):
@@ -423,7 +453,7 @@ def get_SMC_Model(obs, model, env, epsilon):
     Model = DeterministicSRModelSMC(prior=prior, abclikelihood=abclikelihood, data=obs, old_data=old_data, new_data=new_data, llh_transform_fn_old=r_hat_old, llh_transform_fn_new=r_hat_new, llh_transform_grad_fn_old=llh_transform_grad_fn_old, llh_transform_grad_fn_new=llh_transform_grad_fn_new)
     return Model
 
-def display_smc_results(smc, n=0, figure_path=None, save=False, episode='', repeat=''):
+def display_smc_results(smc, n=0, figure_path=None, save=False, episode='', repeat='', show=False):
     figure_name = f'E{episode}R{repeat}SMCSamples'
     len_sample = len(smc.samples)
     samples = smc.samples[n:]
@@ -443,7 +473,8 @@ def display_smc_results(smc, n=0, figure_path=None, save=False, episode='', repe
     ax[i, k].legend(handles, labels, bbox_to_anchor=(0.7, 1.5), loc='right')
     if save:
         plt.savefig(f'{figure_path+figure_name}0.png', bbox_inches='tight')
-    plt.show()
+    if show:
+        plt.show()
     plt.close()
 
     fig2, ax2 = plt.subplots(env.n_cell[0]-1, env.n_cell[1]-1, figsize=(dim[2]*6, dim[3]*6))
@@ -461,7 +492,8 @@ def display_smc_results(smc, n=0, figure_path=None, save=False, episode='', repe
     ax2[i, k].legend(handles, labels, bbox_to_anchor=(0.7, 1.5), loc='right')
     if save:
         plt.savefig(f'{figure_path+figure_name}1.png', bbox_inches='tight')
-    plt.show()
+    if show:
+        plt.show()
     plt.close()
     
 if __name__ == '__main__':
@@ -481,7 +513,7 @@ if __name__ == '__main__':
     
     parser = argparse.ArgumentParser()
     parser.add_argument('-T', '--training_step', default=MCMC_T, type=int)
-    parser.add_argument('-t', '--time', default=datetime.datetime.now().strftime("%f"))
+    parser.add_argument('-t', '--time', default=datetime.datetime.now().strftime("%Y%m%d_%H%M"))
     parser.add_argument('-s', '--save', default=SAVE)
     parser.add_argument('-p', '--show', default=SHOW)
     parser.add_argument('-e', '--epsilon', default=EPSILON, type=float)
@@ -526,7 +558,7 @@ if __name__ == '__main__':
     KERNEL_NAME = 'NUTS'
     EPISODES = 100
 
-    N_PARTICLE = 20
+    N_PARTICLE = 10
     training_steps_with_burnin = training_steps#int(training_steps * (1 + BURN_IN))
     random.seed(seed)
     pyro.set_rng_seed(seed)
@@ -534,12 +566,12 @@ if __name__ == '__main__':
     torch.manual_seed(seed)
     
     if save:
-        dir = f'../SMC/{time}/'
-        if not os.path.exists(dir):
-            os.makedirs(dir)
+        dircty = f'../SMC/{time}/'
+        if not os.path.exists(dircty):
+            os.makedirs(dircty)
             with open('../parameter.py', 'r') as para_file:
                 parameters = para_file.read()
-            with open(f'{dir}para.txt', 'w') as para_txt:
+            with open(f'{dircty}para.txt', 'w') as para_txt:
                 para_txt.write(parameters)
                 for key, value in vars(args).items():
                     para_txt.write(f"{key}: {value}\n")
@@ -550,7 +582,7 @@ if __name__ == '__main__':
     if env_name == 'Maze':
         env = Maze()
     if env_name == 'DeepSea':
-        env = DeepSea(depth=15)
+        env = DeepSea(depth=8)
         EPISODES = 2000#env.n_cell[0] * 100
     
     S = []
@@ -575,6 +607,7 @@ if __name__ == '__main__':
     
     #SMC initialization
     alpha = ESS_ALPHA
+    compromise_alpha = COMPROMISE_ALPHA
     
     env.reset()
     results = []
@@ -595,7 +628,7 @@ if __name__ == '__main__':
         for e in range(EPISODES):
             s0, _ = env.reset()
             para = model.sample_para()
-            # plot_qtable(para, title=f'Sampled Q table for episode {e} repeat {repeat}', save=save, figure_path=dir)
+            # plot_qtable(para, title=f'Sampled Q table for episode {e} repeat {repeat}', save=save, figure_path=dircty)
             print(f'Episode {e} in repeat {repeat} with epsilon={epsilon}')
             R = 0
             # h = 0
@@ -615,7 +648,7 @@ if __name__ == '__main__':
                 s0 = s1
                 if done or ( h + 1)  % FROZEN_T == 0:
                     if new_data_flag:
-                        plot_obs(obs, env, env_name=ENV_NAME, title=f'E{e}R{repeat}Exploration', additional_info=V_star, figure_path=dir, save=save)
+                        plot_obs(obs, env, env_name=ENV_NAME, title=f'ExplorationE{e}R{repeat}', additional_info=V_star, figure_path=dircty, save=save, show=show)
                     # model.set_learnable_idx(obs)
                     smc_samples = torch.tensor(model.get_learnable_parameter())
                     #MCMC
@@ -630,7 +663,7 @@ if __name__ == '__main__':
                         _, smc_samples = smc.update(alpha, smc_samples, episode=e, repeat=repeat)
                         # plt.plot(smc.bellman_err_l[-1])
                         # if save:
-                        #     plt.savefig(f'{dir}bellmanErrE{e}R{repeat}NewData.png', bbox_inches='tight')
+                        #     plt.savefig(f'{dircty}bellmanErrE{e}R{repeat}NewData.png', bbox_inches='tight')
                         # plt.show()
                     # model.sample_random_tables(set=True)
                     obs.init_new_data_buffer()
@@ -645,11 +678,13 @@ if __name__ == '__main__':
                     #Natural decreasing
                     elif STOPPING_CRITERIA == 'natural_reduce':
                         epsilon, smc_samples = smc.update(alpha, smc_samples, epsilon=epsilon, episode=e, repeat=repeat, error_lag=ERROR_LAG, error_perc=ERROR_PERCENTAGE)
-                        plot_save(smc.bellman_err_l[e], figure_path=dir, episode=e, repeat=repeat, save=save, title='bellmanErr')
+                        plot_save(smc.bellman_err_l[e], figure_path=dircty, episode=e, repeat=repeat, save=save, title='bellmanErr', show=show)
                     
                     if TRANSFORM:
                         smc_samples = TruncatedGaussianABCLikelihood.neg_exp_transform(smc_samples)
-                    display_smc_results(smc, n=pre_sample_size, episode=e, repeat=repeat, save=save, figure_path=dir)
+                    if len(smc.samples) - pre_sample_size <=2:
+                        pre_sample_size -= min(pre_sample_size, 10)
+                    display_smc_results(smc, n=pre_sample_size, episode=e, repeat=repeat, save=save, figure_path=dircty, show=show)
                 if done:
                     print("done with", h + 1, 'steps')
                     print('Return', R)
@@ -659,15 +694,15 @@ if __name__ == '__main__':
             samples_all_ep.append(smc_samples)
             explore_pct = [model.get_parameter().numpy()[:, i, i, 0] > model.get_parameter().numpy()[:, i, i, 1] for i in range(env.n_cell[0] - 1)]
             explore_pct_all = np.sum([np.logical_and.reduce(explore_pct[:i + 1], axis=0) for i in range(len(explore_pct))], axis=1) / len(smc_samples)
-            plot_save(smc.epsilon_epi, figure_path=dir, episode=e, repeat=repeat, save=save, title=f'Epsilon{smc.epsilon_all_history[-1]}')
-            plot_save(smc.epsilon_all_history[:], figure_path=dir, repeat=repeat, save=save, title=f'Epsilon')
-            plot_save(smc.mcmc_steps_epi[:], figure_path=dir, episode=e, repeat=repeat, save=save, title=f'MCMCSteps')
-            # plot_save(smc.ess_history[:], figure_path=dir, repeat=repeat, save=save, title='ESS')
+            plot_save(smc.epsilon_epi, figure_path=dircty, episode=e, repeat=repeat, save=save, title=f'Epsilon{smc.epsilon_all_history[-1]}', show=show)
+            plot_save(smc.epsilon_all_history[:], figure_path=dircty, repeat=repeat, save=save, title=f'Epsilon', show=show)
+            plot_save(smc.mcmc_steps_epi[:], figure_path=dircty, episode=e, repeat=repeat, save=save, title=f'MCMCSteps', show=show)
+            # plot_save(smc.ess_history[:], figure_path=dircty, repeat=repeat, save=save, title='ESS')
             print('explore percentage', explore_pct_all)
             if save:
-                save_results(results=r_all_epi, folder='Returns', dir=dir, stochastic=STOCHASTIC, episode=e, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat, episodic=False)
-                save_results(results=smc.samples, folder='Samples', dir=dir, stochastic=STOCHASTIC, episode=e, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat, episodic=False)
-                save_results(results=obs, folder='Obs', dir=dir, stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat)
+                save_results(results=r_all_epi, folder='Returns', dir=dircty, stochastic=STOCHASTIC, episode=e, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat, episodic=False)
+                save_results(results=smc.samples, folder='Samples', dir=dircty, stochastic=STOCHASTIC, episode=e, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat, episodic=False)
+                save_results(results=obs, folder='Obs', dir=dircty, stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat)
             if len(obs._buffers['state0']) >= smc.params_dim:
                 print('============================', '\n', f'Finished with {e} Episodes')
                 break
@@ -675,11 +710,11 @@ if __name__ == '__main__':
         smc_all_repeat.append(smc)
         samples_all_repeat.append(samples_all_ep)
         if save:
-            save_results(results=r_all_repeat, folder='Returns', dir=dir, stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat)        
-            save_results(results=samples_all_repeat, folder='Samples', dir=dir, stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat)
-            save_results(results=obs, folder='Obs', dir=dir, stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat)
-        plot_return_vs_episodes(r_all_epi, repeat=repeat, save=save, figure_path=dir)
-        display_smc_results(smc, save=save, figure_path=dir)
-    # plot_return_vs_episodes_repeat(r_all_repeat, save=save, figure_path=dir)
+            save_results(results=r_all_repeat, folder='Returns', dir=dircty, stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat)        
+            save_results(results=samples_all_repeat, folder='Samples', dir=dircty, stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat)
+            save_results(results=obs, folder='Obs', dir=dircty, stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat)
+        plot_return_vs_episodes(r_all_epi, repeat=repeat, save=save, figure_path=dircty, show=show)
+        display_smc_results(smc, save=save, figure_path=dircty, show=show)
+    # plot_return_vs_episodes_repeat(r_all_repeat, save=save, figure_path=dircty)
     if show:
         plt.show()

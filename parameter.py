@@ -45,6 +45,7 @@ LLD = 'normal'
 N_PARTICLE = 4
 MIN_ESS = 0.5
 ESS_ALPHA = 0.7
+COMPROMISE_ALPHA = 0.8
 ADAPT_ALG = 'pretune'
 
 #MCMC
@@ -79,10 +80,10 @@ OBSERVE_DATA_END = 100
 EPSILON = 0.01
 M_Z = 1200
 ERROR_LAG = 2
-ERROR_PERCENTAGE = 5e-3
+ERROR_PERCENTAGE = 1e-4
 STOPPING_CRITERIA = 'natural_reduce'
 # STOPPING_CRITERIA = 'fixed_reduce'
 
 #Results
 SAVE = False
-SHOW = True
+SHOW = False

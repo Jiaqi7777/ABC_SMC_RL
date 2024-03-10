@@ -93,7 +93,6 @@ def plot_3d(X, Y, Z, title=None, xlabel='s0', ylabel='s1', zlabel='Value', show=
     ax.set_zlabel(zlabel)
     ax.view_init(60, 35)
     plt.title(title)
-    plt.show()
     if show:
         plt.show()
     plt.savefig(f'{figure_path+title}.png')
@@ -184,7 +183,7 @@ def plot_return_for_epsiodes(r_all_episodes, figure_path='../Figures/', show=SHO
         plt.show()
     plt.clf()
     
-def plot_return_vs_episodes(r_all_episodes, repeat, smooth=1, figure_path='../Figures/', show=SHOW, save=False):
+def plot_return_vs_episodes(r_all_episodes, repeat, smooth=1, figure_path='../Figures/', show=False, save=False):
     r_all_episodes = np.convolve(np.array(r_all_episodes), np.ones(smooth)/smooth, mode='valid')
     plt.plot(r_all_episodes)
     plt.xlabel('episodes')
@@ -313,12 +312,13 @@ def plot_block_accpt_prob(mcmc, block_accept, smooth=None, save=False, show=True
         plt.savefig(f'{figure_path+title}.png', bbox_inches='tight')
         print('figure saved at ', f'{figure_path+title}.png')
         
-def plot_save(data, title='', figure_path='', save=False, episode='', repeat=''):
+def plot_save(data, title='', figure_path='', save=False, episode='', repeat='', show=False):
     plt.plot(data, '-o')
     plt.title(f'{title} Episode{episode} Repeat{repeat}')
     if save:
         plt.savefig(f'{figure_path}E{episode}R{repeat}{title}.png', bbox_inches='tight')
-    plt.show()
+    if show:
+        plt.show()
     plt.close()
 
 def save_faulty_ess(epsilon_0, smc_samples, weights, generate_weights_fn):
@@ -333,7 +333,7 @@ def ess_(epsilon, Model, weights, smc_samples, generate_weights_fn, epsilon_0, e
     ess = ess_fn(new_weights)
     return ess
 
-def plot_ess(e_l, ess_l, epsilon_0, ess, alpha, new_epsilon, i=-1, save=False, loop_num=0, episode='', repeat='', figure_path=''):
+def plot_ess(e_l, ess_l, epsilon_0, ess, alpha, new_epsilon, i=-1, save=False, loop_num=0, episode='', repeat='', figure_path='', show=False):
     plt.hlines(xmin=0, xmax=e_l[i], y=1, colors='green', label='1', linestyle='--', alpha=0.5)
     plt.hlines(xmin=e_l[0], xmax=e_l[i], y=ess, colors='orange', label='original ess', alpha=0.4)
     plt.hlines(xmin=e_l[0], xmax=e_l[i], y=max(1, alpha * ess), colors='purple', label='target ess', alpha=0.4)
@@ -344,5 +344,6 @@ def plot_ess(e_l, ess_l, epsilon_0, ess, alpha, new_epsilon, i=-1, save=False, l
     plt.title(f'epsilon={epsilon_0}')
     if save:
         plt.savefig(f'{figure_path}essPlotE{episode}R{repeat}Loop{loop_num}Epsl{epsilon_0}.png', bbox_inches='tight')
-    plt.show()
+    if show:
+        plt.show()
     plt.close()
