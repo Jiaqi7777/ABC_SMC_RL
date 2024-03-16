@@ -343,7 +343,7 @@ def plot_ess(e_l, ess_l, epsilon_0, ess, alpha, new_epsilon, i=-1, save=False, l
     plt.legend()
     plt.title(f'epsilon={epsilon_0}')
     if save:
-        plt.savefig(f'{figure_path}essPlotE{episode}R{repeat}Loop{loop_num}Epsl{epsilon_0}.png', bbox_inches='tight')
+        plt.savefig(f'{figure_path}E{episode}R{repeat}essPlotLoop{loop_num}Epsl{epsilon_0}.png', bbox_inches='tight')
     if show:
         plt.show()
     plt.close()

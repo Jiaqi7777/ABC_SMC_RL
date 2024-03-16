@@ -3,8 +3,8 @@ from scipy.optimize import bisect
 from scipy.optimize import root
 import sys
 import os
-import matplotlib
-matplotlib.use('MacOSX')
+# import matplotlib
+# matplotlib.use('MacOSX')
 from statsmodels.regression.quantile_regression import QuantReg
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 sys.path.append('/scratch/Rabbit/work/ABC_SMC_RL/')
@@ -146,28 +146,32 @@ class SMC:
                         break
                 if not new_data_flag:
                     self.mcmc_steps_epi.append(m)
-                    if m == training_steps_with_burnin - 1 and self.adapt_alg == 'pretune' and not test_mcmc_stop(prev_smc_samples, smc_samples, corr_stat, thresh=0.3)[0]:
-                        print('epsilon too small', epsilon_0)
-                        epsilon_0 = min(2*epsilon_0, self.find_epsilon_0(alpha=compromise_alpha, smc_samples=smc_samples, generate_weights_fn=generate_weights, epsilon_0=epsilon_0, a=epsilon_0, b=epsilon_0*5, lower_side=False, show=True)[0])
-                        self.epsilon_epi.append(epsilon_0)
-                        self.epsilon_all_history.append(epsilon_0)
-                        print('increased epsilon', epsilon_0)
-                        weights = generate_weights(epsilon=epsilon_0, weights=self._weights, Model=Model, smc_samples=smc_samples, epsilon_0=pre_epsilon_0)
-                        if self.ESS(weights) < self.min_ess * self.n_particle:
-                            smc_samples, weights = self.resample()
-                        self.set_weights(weights)
-                        precondition_matrix = estimate_diag_precondition(particles=smc_samples, weights=weights)
-                        L, L_max_pretune, step_size, step_size_max_pretune = self.pretune(smc_samples, step_size_max_pretune=step_size_max_pretune, L_max_pretune=L_max_pretune, precondition_matrix=precondition_matrix)
-                        corr_stat = np.ones(self.params_dim)
-                        for m in range(training_steps_with_burnin):
-                            prev_smc_samples = smc_samples.clone()
-                            for j in range(self.n_particle):
-                                posterior_samples, accept_probs, mcmc, kernel, logdensities, proposed_logdensities, = MCMC_update(Model=self.SMC_Model, posterior_samples=[smc_samples[j]], env=env, training_steps_with_burnin=1, training_steps=1, stepsize=step_size[j], num_steps=L[j], precondition_matrix=precondition_matrix, USE_AUTOGRAD=USE_AUTOGRAD, WARMUP_RATIO=WARMUP_RATIO, MCMC_SHOW_DISABLE=MCMC_SHOW_DISABLE, ADAPT_STEP_SIZE=ADAPT_STEP_SIZE, ADAPT_MASS_MATRIX=ADAPT_MASS_MATRIX, kernel='HMC')
-                                smc_samples[j] = posterior_samples[-1]
-                            test_dec, corr_stat = test_mcmc_stop(prev_smc_samples, smc_samples, corr_stat)
-                            if test_dec:
-                                break
-                        self.update_history(smc_samples=smc_samples, weights=weights)
+                    if m == training_steps_with_burnin - 1 and self.adapt_alg == 'pretune':
+                        cunt=0
+                        while not test_mcmc_stop(prev_smc_samples, smc_samples, corr_stat, thresh=0.3)[0] and cunt<10:
+                            print('epsilon too small', epsilon_0)
+                            epsilon_0 = min(2*epsilon_0, self.find_epsilon_0(alpha=compromise_alpha, smc_samples=smc_samples, generate_weights_fn=generate_weights, epsilon_0=epsilon_0, a=epsilon_0, b=epsilon_0*5, lower_side=False, show=True)[0])
+                            self.epsilon_epi.append(epsilon_0)
+                            self.epsilon_all_history.append(epsilon_0)
+                            print('increased epsilon', epsilon_0)
+                            weights = generate_weights(epsilon=epsilon_0, weights=self._weights, Model=Model, smc_samples=smc_samples, epsilon_0=pre_epsilon_0)
+                            if self.ESS(weights) < self.min_ess * self.n_particle:
+                                smc_samples, weights = self.resample()
+                            self.set_weights(weights)
+                            precondition_matrix = estimate_diag_precondition(particles=smc_samples, weights=weights)
+                            L, L_max_pretune, step_size, step_size_max_pretune = self.pretune(smc_samples, step_size_max_pretune=step_size_max_pretune, L_max_pretune=L_max_pretune, precondition_matrix=precondition_matrix)
+                            corr_stat = np.ones(self.params_dim)
+                            for m in range(training_steps_with_burnin):
+                                prev_smc_samples = smc_samples.clone()
+                                for j in range(self.n_particle):
+                                    posterior_samples, accept_probs, mcmc, kernel, logdensities, proposed_logdensities, = MCMC_update(Model=self.SMC_Model, posterior_samples=[smc_samples[j]], env=env, training_steps_with_burnin=1, training_steps=1, stepsize=step_size[j], num_steps=L[j], precondition_matrix=precondition_matrix, USE_AUTOGRAD=USE_AUTOGRAD, WARMUP_RATIO=WARMUP_RATIO, MCMC_SHOW_DISABLE=MCMC_SHOW_DISABLE, ADAPT_STEP_SIZE=ADAPT_STEP_SIZE, ADAPT_MASS_MATRIX=ADAPT_MASS_MATRIX, kernel='HMC')
+                                    smc_samples[j] = posterior_samples[-1]
+                                test_dec, corr_stat = test_mcmc_stop(prev_smc_samples, smc_samples, corr_stat)
+                                if test_dec:
+                                    print('Increase epsilon and MCMC stopped at', m, 'moves')
+                                    break
+                            self.update_history(smc_samples=smc_samples, weights=weights)
+                            cunt += 1
                         break
             if self.adapt_alg == 'NUTS':
                 for j in range(self.n_particle):
@@ -268,31 +272,31 @@ class SMC:
             try:
                 result = bisect(ess_simple, a=a, b=b, xtol=tol, maxiter=2000)
                 if result > max_epsilon:
-                    self.plot_ess_fn(epsilon_0, smc_samples, generate_weights_fn, a, b, new_epsilon=epsilon_0, show=show, alpha=alpha)
+                    # self.plot_ess_fn(epsilon_0, smc_samples, generate_weights_fn, a, b, new_epsilon=epsilon_0, show=show, alpha=alpha)
                     print('original epsilon')
                     return max_epsilon, a, b
             except ValueError as ve:
                 # print(ve)
                 if lower_side and abs(ess_partial(b) - max(1, alpha*self.ESS(self._weights))) <= tol:
                     # print('b side')
-                    self.plot_ess_fn(epsilon_0, smc_samples, generate_weights_fn, a, b, new_epsilon=b, show=show, alpha=alpha)
+                    # self.plot_ess_fn(epsilon_0, smc_samples, generate_weights_fn, a, b, new_epsilon=b, show=show, alpha=alpha)
                     return b, a, b
                 if abs(ess_partial(a) - max(1, alpha*self.ESS(self._weights))) <= tol:
                     # print('a side')
-                    self.plot_ess_fn(epsilon_0, smc_samples, generate_weights_fn, a, b, new_epsilon=a, show=show, alpha=alpha)
+                    # self.plot_ess_fn(epsilon_0, smc_samples, generate_weights_fn, a, b, new_epsilon=a, show=show, alpha=alpha)
                     return a, a, b
                 # raise ValueError(a, b, alpha, self.SMC_Model, self._weights, smc_samples, generate_weights_fn, epsilon_0)
                 b = b if lower_side else b * 2
                 a = a * 0.8 if lower_side else a
                 # print('Bisect with new alpha', alpha, a, b)
                 new_epsilon, a, b = self.find_epsilon_0(alpha, smc_samples, generate_weights_fn, epsilon_0, a, b, lower_side=lower_side, method=method)
-                self.plot_ess_fn(epsilon_0, smc_samples, generate_weights_fn, a, b, new_epsilon=new_epsilon, show=show, alpha=alpha)
+                # self.plot_ess_fn(epsilon_0, smc_samples, generate_weights_fn, a, b, new_epsilon=new_epsilon, show=show, alpha=alpha)
                 return new_epsilon, a, b
             except RecursionError as re:
                 print(re ,a, b, alpha, self.SMC_Model, self._weights, smc_samples, generate_weights_fn, epsilon_0)
                 return epsilon_0, a, b
             # result = bisect(ess_simple, a=a, b=b, xtol=tol, maxiter=2000)
-            self.plot_ess_fn(epsilon_0, smc_samples, generate_weights_fn, a, b, new_epsilon=result, show=show, alpha=alpha)
+            # self.plot_ess_fn(epsilon_0, smc_samples, generate_weights_fn, a, b, new_epsilon=result, show=show, alpha=alpha)
             # if epsilon_0 < 0.03 and (not lower_side):
             #     dsd
             return result, a, b
@@ -552,6 +556,7 @@ if __name__ == '__main__':
     warmup_steps = int(training_steps * WARMUP_RATIO)
     TRANSFORM = args.transform
     use_precondition = args.precondition
+    dircty=''
     
     ADAPT_STEP_SIZE = True if WARMUP_RATIO > 0 else False
     ADAPT_MASS_MATRIX = True if WARMUP_RATIO > 0 else False
@@ -582,7 +587,7 @@ if __name__ == '__main__':
     if env_name == 'Maze':
         env = Maze()
     if env_name == 'DeepSea':
-        env = DeepSea(depth=8)
+        env = DeepSea(depth=15)
         EPISODES = 2000#env.n_cell[0] * 100
     
     S = []
@@ -703,9 +708,9 @@ if __name__ == '__main__':
                 save_results(results=r_all_epi, folder='Returns', dir=dircty, stochastic=STOCHASTIC, episode=e, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat, episodic=False)
                 save_results(results=smc.samples, folder='Samples', dir=dircty, stochastic=STOCHASTIC, episode=e, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat, episodic=False)
                 save_results(results=obs, folder='Obs', dir=dircty, stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat)
-            if len(obs._buffers['state0']) >= smc.params_dim:
-                print('============================', '\n', f'Finished with {e} Episodes')
-                break
+            # if len(obs._buffers['state0']) >= smc.params_dim:
+            #     print('============================', '\n', f'Finished with {e} Episodes')
+            #     break
         r_all_repeat.append(r_all_epi)
         smc_all_repeat.append(smc)
         samples_all_repeat.append(samples_all_ep)
