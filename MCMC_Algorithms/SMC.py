@@ -77,12 +77,14 @@ class SMC:
                 # print('pretune results', L, step_size)
                 corr_stat = np.ones(self.params_dim)
                 # print('MCMC...')
+                initial_samples = smc_samples.clone()
                 for m in range(training_steps_with_burnin):
                     prev_smc_samples = smc_samples.clone()
                     for j in range(self.n_particle):
                         posterior_samples, accept_probs, mcmc, kernel, logdensities, proposed_logdensities, = MCMC_update(Model=self.SMC_Model, posterior_samples=[smc_samples[j]], env=env, training_steps_with_burnin=1, training_steps=1, stepsize=step_size[j], num_steps=L[j], precondition_matrix=precondition_matrix, USE_AUTOGRAD=USE_AUTOGRAD, WARMUP_RATIO=WARMUP_RATIO, MCMC_SHOW_DISABLE=MCMC_SHOW_DISABLE, ADAPT_STEP_SIZE=ADAPT_STEP_SIZE, ADAPT_MASS_MATRIX=ADAPT_MASS_MATRIX, kernel='HMC')
                         smc_samples[j] = posterior_samples[-1]
-                    test_dec, corr_stat = test_mcmc_stop(prev_smc_samples, smc_samples, corr_stat)
+                    test_dec, corr_stat = mcmc_stop(initial_samples, smc_samples)
+                    # test_dec, corr_stat = test_mcmc_stop(prev_smc_samples, smc_samples, corr_stat)
                     if test_dec:
                         print('MCMC stopped at', m, 'moves')
                         break
@@ -134,19 +136,21 @@ class SMC:
                 L, L_max_pretune, step_size, step_size_max_pretune = self.pretune(smc_samples, step_size_max_pretune=step_size_max_pretune, L_max_pretune=L_max_pretune, precondition_matrix=precondition_matrix)
                 # print('pretune results', L, step_size)
                 corr_stat = np.ones(self.params_dim)
+                initial_samples = smc_samples.clone()
                 # print('MCMC...')
                 for m in range(training_steps_with_burnin):
                     prev_smc_samples = smc_samples.clone()
                     for j in range(self.n_particle):
                         posterior_samples, accept_probs, mcmc, kernel, logdensities, proposed_logdensities, = MCMC_update(Model=self.SMC_Model, posterior_samples=[smc_samples[j]], env=env, training_steps_with_burnin=1, training_steps=1, stepsize=step_size[j], num_steps=L[j], precondition_matrix=precondition_matrix, USE_AUTOGRAD=USE_AUTOGRAD, WARMUP_RATIO=WARMUP_RATIO, MCMC_SHOW_DISABLE=MCMC_SHOW_DISABLE, ADAPT_STEP_SIZE=ADAPT_STEP_SIZE, ADAPT_MASS_MATRIX=ADAPT_MASS_MATRIX, kernel='HMC')
                         smc_samples[j] = posterior_samples[-1]
-                    test_dec, corr_stat = test_mcmc_stop(prev_smc_samples, smc_samples, corr_stat)
+                    test_dec, corr_stat = mcmc_stop(initial_samples, smc_samples)
+                    # test_dec, corr_stat = test_mcmc_stop(prev_smc_samples, smc_samples, corr_stat)
                     if test_dec:
                         # print('MCMC stopped at', m, 'moves')
                         break
                 if not new_data_flag:
                     self.mcmc_steps_epi.append(m)
-                    if m == training_steps_with_burnin - 1 and self.adapt_alg == 'pretune':
+                    if m == training_steps_with_burnin - 1 and self.adapt_alg == 'pretune' and STOPPING_CRITERIA == 'natural_reduce':
                         cunt=0
                         while not test_mcmc_stop(prev_smc_samples, smc_samples, corr_stat, thresh=0.3)[0] and cunt<10:
                             print('epsilon too small', epsilon_0)
@@ -161,12 +165,14 @@ class SMC:
                             precondition_matrix = estimate_diag_precondition(particles=smc_samples, weights=weights)
                             L, L_max_pretune, step_size, step_size_max_pretune = self.pretune(smc_samples, step_size_max_pretune=step_size_max_pretune, L_max_pretune=L_max_pretune, precondition_matrix=precondition_matrix)
                             corr_stat = np.ones(self.params_dim)
+                            initial_samples = smc_samples.clone()
                             for m in range(training_steps_with_burnin):
                                 prev_smc_samples = smc_samples.clone()
                                 for j in range(self.n_particle):
                                     posterior_samples, accept_probs, mcmc, kernel, logdensities, proposed_logdensities, = MCMC_update(Model=self.SMC_Model, posterior_samples=[smc_samples[j]], env=env, training_steps_with_burnin=1, training_steps=1, stepsize=step_size[j], num_steps=L[j], precondition_matrix=precondition_matrix, USE_AUTOGRAD=USE_AUTOGRAD, WARMUP_RATIO=WARMUP_RATIO, MCMC_SHOW_DISABLE=MCMC_SHOW_DISABLE, ADAPT_STEP_SIZE=ADAPT_STEP_SIZE, ADAPT_MASS_MATRIX=ADAPT_MASS_MATRIX, kernel='HMC')
                                     smc_samples[j] = posterior_samples[-1]
-                                test_dec, corr_stat = test_mcmc_stop(prev_smc_samples, smc_samples, corr_stat)
+                                test_dec, corr_stat = mcmc_stop(initial_samples, smc_samples)
+                                # test_dec, corr_stat = test_mcmc_stop(prev_smc_samples, smc_samples, corr_stat)
                                 if test_dec:
                                     print('Increase epsilon and MCMC stopped at', m, 'moves')
                                     break
@@ -347,6 +353,13 @@ def test_mcmc_stop(prev_smc_samples, smc_samples, prev_corr_array, thresh=0.1):
     smc_samples_stat = particles_stat(smc_samples)
     corr_array = torch.tensor([np.corrcoef(prev_smc_samples_stat[:, i], smc_samples_stat[:,i])[1, 0] for i in range(dim)])
     corr_array = corr_array * prev_corr_array
+    decision = True if torch.mean((corr_array > thresh).float()) <= 0.1 else False
+    return decision, corr_array
+
+def mcmc_stop(initial_samples, smc_samples, thresh=0.1):
+    # initial_samples: torch.tensor of shape Nxd, where N is the number of particles and d is the dimensions of the parameters space, smc_samples: torch.tensor, the same shape as the initial_samples
+    dim = len(initial_samples[0])
+    corr_array = torch.tensor([np.corrcoef(initial_samples[:, i], smc_samples[:, i])[1, 0] for i in range(dim)]) 
     decision = True if torch.mean((corr_array > thresh).float()) <= 0.1 else False
     return decision, corr_array
 
@@ -587,8 +600,8 @@ if __name__ == '__main__':
     if env_name == 'Maze':
         env = Maze()
     if env_name == 'DeepSea':
-        env = DeepSea(depth=15)
-        EPISODES = 2000#env.n_cell[0] * 100
+        env = DeepSea(depth=5)
+        EPISODES = 753#env.n_cell[0] * 100
     
     S = []
     if len(env.n_cell) == 1:
@@ -699,17 +712,17 @@ if __name__ == '__main__':
             samples_all_ep.append(smc_samples)
             explore_pct = [model.get_parameter().numpy()[:, i, i, 0] > model.get_parameter().numpy()[:, i, i, 1] for i in range(env.n_cell[0] - 1)]
             explore_pct_all = np.sum([np.logical_and.reduce(explore_pct[:i + 1], axis=0) for i in range(len(explore_pct))], axis=1) / len(smc_samples)
-            plot_save(smc.epsilon_epi, figure_path=dircty, episode=e, repeat=repeat, save=save, title=f'Epsilon{smc.epsilon_all_history[-1]}', show=show)
+            # plot_save(smc.epsilon_epi, figure_path=dircty, episode=e, repeat=repeat, save=save, title=f'Epsilon{smc.epsilon_all_history[-1]}', show=show)
             plot_save(smc.epsilon_all_history[:], figure_path=dircty, repeat=repeat, save=save, title=f'Epsilon', show=show)
-            plot_save(smc.mcmc_steps_epi[:], figure_path=dircty, episode=e, repeat=repeat, save=save, title=f'MCMCSteps', show=show)
+            # plot_save(smc.mcmc_steps_epi[:], figure_path=dircty, episode=e, repeat=repeat, save=save, title=f'MCMCSteps', show=show)
             # plot_save(smc.ess_history[:], figure_path=dircty, repeat=repeat, save=save, title='ESS')
             print('explore percentage', explore_pct_all)
             if save:
                 save_results(results=r_all_epi, folder='Returns', dir=dircty, stochastic=STOCHASTIC, episode=e, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat, episodic=False)
                 save_results(results=smc.samples, folder='Samples', dir=dircty, stochastic=STOCHASTIC, episode=e, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat, episodic=False)
                 save_results(results=obs, folder='Obs', dir=dircty, stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat)
-            # if len(obs._buffers['state0']) >= smc.params_dim:
-            #     print('============================', '\n', f'Finished with {e} Episodes')
+            if len(obs._buffers['state0']) >= smc.params_dim:
+                print('============================', '\n', f'Finished exploration with {e} Episodes')
             #     break
         r_all_repeat.append(r_all_epi)
         smc_all_repeat.append(smc)
