@@ -26,7 +26,7 @@ class DeepSea:
         self.observation_space_low = (0, 0)
         self.action_space = spaces.Discrete(2)
         self.action_size = self.action_space.n
-        self.R =  np.round(np.array([-1, 1]) / ( 2 * depth ), 2)
+        self.R =  np.round(np.array([-1, 1]) / ( 100 * depth ), 2)
         print('goal: ', goal_position)
         print('start: ', starting_position)
         print('World Scale: ', f'{n_cell[0]}x{n_cell[1]}')
