@@ -51,8 +51,8 @@ class SMC:
                 posterior_samples, accept_probs, mcmc, kernel, logdensities, proposed_logdensities, = MCMC_update(Model=self.SMC_Model, posterior_samples=[smc_samples[j]], env=env, training_steps_with_burnin=1, training_steps=1, stepsize=step_size[j], num_steps=L[j], precondition_matrix=precondition_matrix, USE_AUTOGRAD=USE_AUTOGRAD, WARMUP_RATIO=WARMUP_RATIO, MCMC_SHOW_DISABLE=MCMC_SHOW_DISABLE, ADAPT_STEP_SIZE=ADAPT_STEP_SIZE, ADAPT_MASS_MATRIX=ADAPT_MASS_MATRIX, kernel='HMC')
                 smc_samples[j] = posterior_samples[-1]
             mcmc_samples = torch.cat((mcmc_samples, smc_samples.unsqueeze(0)))
-            test_dec, corr_stat = mcmc_stop(mcmc_samples, smc_samples, save=save, show=show, figure_path=dircty, figure_name=f'E{self.episode}R{repeat}loop{self.loop}Epsln{epsilon_0}Steps{m}', corr_stat_all=corr_stat_all)
-            # test_dec, corr_stat = test_mcmc_stop(mcmc_samples, smc_samples, corr_stat, save=save, show=show, figure_path=dircty, figure_name=f'E{self.episode}R{repeat}loop{self.loop}Epsln{epsilon_0}Steps{m}', corr_stat_all=corr_stat_all)
+            # test_dec, corr_stat = mcmc_stop(mcmc_samples, smc_samples, save=save, show=show, figure_path=dircty, figure_name=f'E{self.episode}R{repeat}loop{self.loop}Epsln{epsilon_0}Steps{m}', corr_stat_all=corr_stat_all)
+            test_dec, corr_stat = test_mcmc_stop(mcmc_samples, smc_samples, corr_stat, save=save, show=show, figure_path=dircty, figure_name=f'E{self.episode}R{repeat}loop{self.loop}Epsln{epsilon_0}Steps{m}', corr_stat_all=corr_stat_all)
             corr_stat_all = torch.cat((corr_stat_all, torch.tensor(corr_stat).unsqueeze(0)))
             if test_dec:
                 print('MCMC stopped at', m, 'moves')
@@ -148,8 +148,8 @@ class SMC:
                     if m == training_steps_with_burnin - 1 and self.adapt_alg == 'pretune' and STOPPING_CRITERIA == 'natural_reduce':
                         maximum_epsilon = epsilon_0 * 10
                         self.loop = 4
-                        # while not test_mcmc_stop(mcmc_samples, smc_samples, corr_stat, thresh=0.3)[0] and epsilon_0 < maximum_epsilon:
-                        while not mcmc_stop(mcmc_samples, smc_samples)[0] and epsilon_0 < maximum_epsilon:
+                        while not test_mcmc_stop(mcmc_samples, smc_samples, corr_stat, thresh=3*CORR_THRESHOLD_PRODUCT)[0] and epsilon_0 < maximum_epsilon:
+                        # while not mcmc_stop(mcmc_samples, smc_samples, thresh=1.2*CORR_THRESHOLD)[0] and epsilon_0 < maximum_epsilon:
                             print('epsilon too small', epsilon_0)
                             epsilon_0 = self.find_epsilon_0(alpha=compromise_alpha, smc_samples=smc_samples, generate_weights_fn=generate_weights, epsilon_0=epsilon_0, a=epsilon_0, b=epsilon_0*5, max_epsilon=2*epsilon_0, lower_side=False, show=show)[0]
                             self.epsilon_epi.append(epsilon_0)
@@ -334,7 +334,7 @@ class SMC:
 def particles_stat(particles):
     return particles + particles ** 2        
 
-def test_mcmc_stop(mcmc_samples, smc_samples, prev_corr_array, thresh=0.1, save=False, show=False, figure_path='', figure_name='', corr_stat_all=None):
+def test_mcmc_stop(mcmc_samples, smc_samples, prev_corr_array, thresh=CORR_THRESHOLD_PRODUCT, save=False, show=False, figure_path='', figure_name='', corr_stat_all=None):
     sample_dim = mcmc_samples.shape
     prev_smc_samples = mcmc_samples[-2]
     dim = len(prev_smc_samples[0])
@@ -353,6 +353,16 @@ def test_mcmc_stop(mcmc_samples, smc_samples, prev_corr_array, thresh=0.1, save=
         fig, ax = plt.subplots(n, m, figsize=(20, 20))
         for i in range(n):
             for j in range(m):
+                ax[i, j].plot(mcmc_samples[:, :, m*i+j].numpy())
+                ax[i, j].set_title(env.names[m*i+j])
+        if show:
+            plt.show()
+        if save:
+            plt.savefig(f'{figure_path}{figure_name}traj.png', bbox_inches='tight')
+        plt.close()
+        fig, ax = plt.subplots(n, m, figsize=(20, 20))
+        for i in range(n):
+            for j in range(m):
                 # ax[i, j].plot(mcmc_samples[:, :, m*i+j].numpy())
                 ax[i, j].plot(corr_stat_all[:, m*i+j].numpy())
                 ax[i, j].axhline(thresh, 0, sample_dim[0], color='r', linestyle='-.')
@@ -360,11 +370,25 @@ def test_mcmc_stop(mcmc_samples, smc_samples, prev_corr_array, thresh=0.1, save=
         if show:
             plt.show()
         if save:
-            plt.savefig(f'{figure_path}statsstop{figure_name}.png', bbox_inches='tight')
+            plt.savefig(f'{figure_path}{figure_name}statsstop.png', bbox_inches='tight')
+        plt.close()
+        mcmc_samples_stat = particles_stat(mcmc_samples[0])
+        corr_array_all = torch.abs(torch.tensor([[np.corrcoef(mcmc_samples_stat[:, i], particles_stat(mcmc_samples[t])[:, i])[1, 0] for t in range(sample_dim[0])] for i in range(sample_dim[2])])) #dxT
+        fig, ax = plt.subplots(n, m, figsize=(20, 20))
+        for i in range(n):
+            for j in range(m):
+                # ax[i, j].plot(mcmc_samples[:, :, m*i+j].numpy())
+                ax[i, j].plot(corr_array_all[m*i+j].numpy())
+                ax[i, j].axhline(CORR_THRESHOLD, 0, sample_dim[0], color='r', linestyle='-.')
+                ax[i, j].set_title(env.names[m*i+j])
+        if show:
+            plt.show()
+        if save:
+            plt.savefig(f'{figure_path}{figure_name}corrstop.png', bbox_inches='tight')
         plt.close()
     return decision, corr_array
 
-def mcmc_stop(mcmc_samples, smc_samples, thresh=0.5, save=False, show=False, figure_path='', figure_name='', corr_stat_all=None):
+def mcmc_stop(mcmc_samples, smc_samples, thresh=CORR_THRESHOLD, save=False, show=False, figure_path='', figure_name='', corr_stat_all=None):
     # mcmc_samples: torch.tensor of shape TxNxd, where N is the number of particles and d is the dimensions of the parameters space, smc_samples: torch.tensor of shape Nxd
     sample_dim = mcmc_samples.shape
     mcmc_samples_stat = particles_stat(mcmc_samples[0])
@@ -748,9 +772,9 @@ if __name__ == '__main__':
                 save_results(results=r_all_epi, folder='Returns', dir=dircty, stochastic=STOCHASTIC, episode=e, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat, episodic=False)
                 save_results(results=smc.samples, folder='Samples', dir=dircty, stochastic=STOCHASTIC, episode=e, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat, episodic=False)
                 save_results(results=obs, folder='Obs', dir=dircty, stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat)
-            if len(obs._buffers['state0']) >= smc.params_dim:
+            if len(obs._buffers['state0']) == smc.params_dim:
                 print('============================', '\n', f'Finished exploration with {e} Episodes')
-                break
+                # break
         r_all_repeat.append(r_all_epi)
         smc_all_repeat.append(smc)
         samples_all_repeat.append(samples_all_ep)

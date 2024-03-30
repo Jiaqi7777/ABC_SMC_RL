@@ -45,7 +45,7 @@ LLD = 'normal'
 N_PARTICLE = 4
 MIN_ESS = 0.5
 ESS_ALPHA = 0.7
-COMPROMISE_ALPHA = 0.8
+COMPROMISE_ALPHA = 0.9
 ADAPT_ALG = 'pretune'
 
 #MCMC
@@ -70,6 +70,8 @@ FROZEN = False
 FROZEN_NO = [0, 1] if FROZEN else None
 FROZEN_IDX = [(0, 0, 0), (0, 0, 1)] if FROZEN else None
 TRANSFORM = False
+CORR_THRESHOLD = 0.5
+CORR_THRESHOLD_PRODUCT = 0.1
 
 #Plot
 PLOT_THRESHOLD = 2#percentile
