@@ -42,33 +42,36 @@ class SMC:
         self._weights = weights
         self.model.set_weights(weights)
     
-    @profile
+    # @profile
     def adaptvie_mcmc_move(self, epsilon_0, smc_samples, step_size_max_pretune, L_max_pretune, precondition_matrix):
         L, L_max_pretune, step_size, step_size_max_pretune = self.pretune(smc_samples, step_size_max_pretune=step_size_max_pretune, L_max_pretune=L_max_pretune, precondition_matrix=precondition_matrix)
         corr_stat = np.ones(self.params_dim)
         corr_stat_all = torch.tensor(corr_stat).unsqueeze(0).clone()
         gelman_rubin_all = torch.tensor([])
-        # print('MCMC...')
+        accept_probs_all = torch.tensor([])
         mcmc_samples = smc_samples.unsqueeze(0).clone()
         for m in range(training_steps_with_burnin):
-            # prev_smc_samples = smc_samples.clone()
+            accept_probs_particle = torch.zeros(self.n_particle)
             for j in range(self.n_particle):
                 posterior_samples, accept_probs, mcmc, kernel, logdensities, proposed_logdensities, = MCMC_update(Model=self.SMC_Model, posterior_samples=[smc_samples[j]], env=env, training_steps_with_burnin=1, training_steps=1, stepsize=step_size[j], num_steps=L[j], precondition_matrix=precondition_matrix, USE_AUTOGRAD=USE_AUTOGRAD, WARMUP_RATIO=WARMUP_RATIO, MCMC_SHOW_DISABLE=MCMC_SHOW_DISABLE, ADAPT_STEP_SIZE=ADAPT_STEP_SIZE, ADAPT_MASS_MATRIX=ADAPT_MASS_MATRIX, kernel='HMC')
                 smc_samples[j] = posterior_samples[-1]
+                accept_probs_particle[j] = accept_probs[-1]
+            accept_probs_all = torch.cat((accept_probs_all, accept_probs_particle.unsqueeze(0)))
             mcmc_samples = torch.cat((mcmc_samples, smc_samples.unsqueeze(0)))
             # try:
             #     step_size_max_pretune = step_size_max_pretune.numpy()
             # except:
             #     pass
             # test_dec, corr_stat = mcmc_stop(mcmc_samples, smc_samples, weights=self._weights, save=save, show=show, figure_path=dircty, figure_name=f'E{self.episode}R{repeat}loop{self.loop}Epsln{epsilon_0}Steps{m}', corr_stat_all=corr_stat_all)
-            test_dec, gb = gelman_rubin(mcmc_samples, smc_samples, corr_stat, weights=self._weights, thresh=GELMAN_RUBIN, save=save, show=show, figure_path=dircty, figure_name=f'E{self.episode}R{repeat}loop{self.loop}Epsln{epsilon_0}Steps{m}', corr_stat_all=corr_stat_all, gelman_rubin_all=gelman_rubin_all)
+            test_dec, gb = gelman_rubin(mcmc_samples, smc_samples, corr_stat, weights=self._weights, thresh=GELMAN_RUBIN, save=save, show=show, figure_path=dircty, figure_name=f'E{self.episode}R{repeat}loop{self.loop}Epsln{epsilon_0}StpMax{step_size_max_pretune}Steps{m}', corr_stat_all=corr_stat_all, gelman_rubin_all=gelman_rubin_all)
             # test_dec, corr_stat = test_mcmc_stop(mcmc_samples, smc_samples, corr_stat, weights=self._weights, save=save, show=show, figure_path=dircty, figure_name=f'E{self.episode}R{repeat}loop{self.loop}Epsln{epsilon_0}Steps{m}', corr_stat_all=corr_stat_all)
             # corr_stat_all = torch.cat((corr_stat_all, torch.tensor(corr_stat).unsqueeze(0)))
             gelman_rubin_all = torch.cat((gelman_rubin_all, torch.tensor(gb).unsqueeze(0)))
             if test_dec:
                 print('MCMC stopped at', m, 'moves')
                 break
-        print('pretune results, stepsize_max, L_max=', step_size_max_pretune, L_max_pretune, step_size, L)
+        print('averaged accept prob', torch.mean(accept_probs_all, dim=0))
+        # print('pretune results, stepsize_max, L_max=', step_size_max_pretune, L_max_pretune, step_size, L)
         return smc_samples, mcmc_samples, corr_stat, m, L_max_pretune, step_size_max_pretune
     
     def check_and_resample(self, smc_samples, weights):
@@ -165,7 +168,7 @@ class SMC:
                         # while not test_mcmc_stop(mcmc_samples, smc_samples, corr_stat, weights=self._weights, thresh=3*CORR_THRESHOLD_PRODUCT)[0] and epsilon_0 < maximum_epsilon:
                         # while not mcmc_stop(mcmc_samples, smc_samples, weights=self._weights, thresh=1.2*CORR_THRESHOLD)[0] and epsilon_0 < maximum_epsilon:
                             print('epsilon too small', epsilon_0)
-                            epsilon_0 = self.find_epsilon_0(alpha=compromise_alpha, smc_samples=smc_samples, generate_weights_fn=generate_weights, epsilon_0=epsilon_0, a=epsilon_0, b=epsilon_0*5, max_epsilon=1.5*epsilon_0, lower_side=False, show=show)[0]
+                            epsilon_0 = self.find_epsilon_0(alpha=compromise_alpha, smc_samples=smc_samples, generate_weights_fn=generate_weights, epsilon_0=epsilon_0, a=epsilon_0, b=epsilon_0*5, max_epsilon=2*epsilon_0, lower_side=False, show=show)[0]
                             self.epsilon_epi.append(epsilon_0)
                             self.epsilon_all_history.append(epsilon_0)
                             print('increased epsilon', epsilon_0)
@@ -261,7 +264,8 @@ class SMC:
         if show:
             print(a, b, alpha)
             sys.stdout.flush()
-        if b > max_epsilon or (lower_side and a < 1e-7):
+        if b > 2 * max_epsilon or (lower_side and a < 1e-7):
+            print(a, b, alpha)
             # self.plot_ess_fn(epsilon_0, smc_samples, generate_weights_fn, a, b, new_epsilon=epsilon_0, show=show, alpha=alpha)
             print('max epsilon')
             return max_epsilon, a, b
@@ -329,6 +333,7 @@ class SMC:
     def pretune(self, smc_samples, precondition_matrix, step_size_max_pretune=0.1, L_max_pretune=99):
         H_change = torch.zeros(self.n_particle)
         step_size_pretune = torch.rand(self.n_particle) * step_size_max_pretune
+        print('pretune, max_step_size', step_size_max_pretune, step_size_pretune)
         L_pretune = torch.randint(1, L_max_pretune + 1, size=(self.n_particle, ))
         proposed_samples = []
         for j in range(self.n_particle):
@@ -465,13 +470,13 @@ def gelman_rubin(mcmc_samples, smc_samples, prev_corr_array, weights=None, thres
     # Calculate the potential scale reduction factor (R-hat)
     gelman_rubin = np.sqrt(var_estimate / within_chain_variance)
     decision = True if np.mean(gelman_rubin > thresh) <= 0.4 and sample_dim[0]>=0.1 * training_steps_with_burnin else False
-    if len(mcmc_samples) == training_steps_with_burnin and not decision:
+    if plot and len(mcmc_samples) == training_steps_with_burnin and not decision:
         # print(gelman_rubin, thresh, np.mean(gelman_rubin > thresh),  sample_dim[0], 0.1 * training_steps_with_burnin)
         figure_name = f'Fail{figure_name}'
         # corr_array = torch.tensor([weightedcorrs(np.array([prev_smc_samples_stat[:, i].numpy(), smc_samples_stat[:, i].numpy()]).T, np.exp(weights).numpy())['R'][0, 1] for i in range(sample_dim[2])])
         # corr_array = corr_array * prev_corr_array
-        n = 2
-        idx = np.where(gelman_rubin > thresh)[0][:6]
+        n = 3
+        idx = np.where(gelman_rubin > thresh)[0][-9:]
         m = max(1, len(idx) // n)
         # if corr_stat_all is not None and decision or len(mcmc_samples) == training_steps_with_burnin and gelman_rubin_all is not None:
         if False:
@@ -595,7 +600,7 @@ def Pretune_adaptation(H_change, L_origin, L_resampled, step_size_origin, L_max)
         L_max = max(0, L_max - 5)
 
     #stepsize
-    step_size_max = quantile_regression(target=0.9, H_change=H_change, step_size=step_size_origin)
+    step_size_max = quantile_regression(target=0.5, H_change=H_change, step_size=step_size_origin)
 
     return L_max, step_size_max
 
@@ -641,7 +646,7 @@ def get_SMC_Model(obs, model, env, epsilon):
 def display_smc_results(smc, n=0, figure_path=None, save=False, episode='', repeat='', show=False):
     figure_name = f'E{episode}R{repeat}SMCSamples'
     len_sample = len(smc.samples)
-    subsample_int = 10
+    subsample_int = 2
     samples = smc.samples[n::subsample_int]
     dim = samples.shape
     means = torch.mean(samples, dim=1)
@@ -652,7 +657,7 @@ def display_smc_results(smc, n=0, figure_path=None, save=False, episode='', repe
         fig, ax = plt.subplots(env.n_cell[0]-1, env.n_cell[1]-1, figsize=(dim[2]*4, dim[3]*4))
         for i in range(dim[2] - 1):
             for k in range(i+1):
-                ax[i, k].set_ylim(-4, 4)
+                ax[i, k].set_ylim(-PRIOR_SIGMA, PRIOR_SIGMA)
                 ax[i, k].plot(range(n, len_sample)[::subsample_int], means[:, i, k, a], label='mean')
                 ax[i, k].fill_between(range(n, len_sample)[::subsample_int], lwbd[:, i, k, a], upbd[:, i, k, a], alpha=0.5, label='std')
                 # for j in range(dim[1]):
@@ -661,7 +666,7 @@ def display_smc_results(smc, n=0, figure_path=None, save=False, episode='', repe
                     # ax[i,k].scatter(range(dim[0]), samples[:, j, i, k, 1], label=f"left {j}", alpha=smc._weights_history[:,j])
                     # ax[i,k].plot(range(dim[0]), samples[:, j, i, k, 1], linestyle='-')
                     # ax[i,k].hlines(Q_star[i, k, 0], xmin=0, xmax=len(samples), linestyle="--", label="true right",color="green")
-                ax[i, k].hlines(Q_star[i, k, a], xmin=n, xmax=len_sample-1, linestyle="--", label="true right", color="purple")
+                ax[i, k].hlines(Q_star[i, k, a], xmin=n, xmax=len_sample-2, linestyle="--", label="true right", color="purple")
                 ax[i, k].set_title([i, k, a])
         handles, labels = ax[i,k].get_legend_handles_labels()
         ax[i, k].legend(handles, labels, bbox_to_anchor=(0.7, 1.5), loc='right')
@@ -742,12 +747,12 @@ if __name__ == '__main__':
     torch.manual_seed(seed)
     
     if save:
-        dircty = f'../SMC/{time}/'
-        if not os.path.exists(dircty):
-            os.makedirs(dircty)
+        dircty_top = f'../SMC/{time}/'
+        if not os.path.exists(dircty_top):
+            os.makedirs(dircty_top)
             with open('../parameter.py', 'r') as para_file:
                 parameters = para_file.read()
-            with open(f'{dircty}para.txt', 'w') as para_txt:
+            with open(f'{dircty_top}para.txt', 'w') as para_txt:
                 para_txt.write(parameters)
                 for key, value in vars(args).items():
                     para_txt.write(f"{key}: {value}\n")
@@ -758,8 +763,8 @@ if __name__ == '__main__':
     if env_name == 'Maze':
         env = Maze()
     if env_name == 'DeepSea':
-        env = DeepSea(depth=50)
-        EPISODES = 10000#env.n_cell[0] * 100
+        env = DeepSea(depth=15)
+        EPISODES = 500#env.n_cell[0] * 100
     
     S = []
     if len(env.n_cell) == 1:
@@ -790,7 +795,13 @@ if __name__ == '__main__':
     r_all_repeat = []
     samples_all_repeat = []
     smc_all_repeat = []
+    dircty = ''
+    
     for repeat in range(REPEAT_EXPERIMENT):
+        if save:
+            dircty = f'{dircty_top}R{repeat}/'
+            if not os.path.exists(dircty):
+                os.makedirs(dircty)
         epsilon = abc_epsilon
         STEPSIZE = INITIAL_STEPSIZE
         # model = Tabular(env=env, n_particle=N_PARTICLE, prior='normal', gamma=GAMMA)
@@ -825,7 +836,7 @@ if __name__ == '__main__':
                 s0 = s1
                 if done or ( h + 1)  % FROZEN_T == 0:
                     if new_data_flag:
-                        plot_obs(obs, env, env_name=ENV_NAME, title=f'ExplorationE{e}R{repeat}', additional_info=V_star, figure_path=dircty, save=save, show=show)
+                        plot_obs(obs, env, env_name=ENV_NAME, title=f'ExplorationE{e}', additional_info=V_star, figure_path=dircty, save=save, show=show)
                     # model.set_learnable_idx(obs)
                     smc_samples = torch.tensor(model.get_learnable_parameter())
                     #MCMC
@@ -840,7 +851,7 @@ if __name__ == '__main__':
                         _, smc_samples = smc.update(alpha, smc_samples, episode=e, repeat=repeat)
                         # plt.plot(smc.bellman_err_l[-1])
                         # if save:
-                        #     plt.savefig(f'{dircty}bellmanErrE{e}R{repeat}NewData.png', bbox_inches='tight')
+                        #     plt.savefig(f'{dircty}bellmanErrE{e}NewData.png', bbox_inches='tight')
                         # plt.show()
                     # model.sample_random_tables(set=True)
                     obs.init_new_data_buffer()
@@ -868,7 +879,7 @@ if __name__ == '__main__':
                     break
                 # h += 1
             r_all_epi.append(R)
-            samples_all_ep.append(smc_samples)
+            # samples_all_ep.append(smc_samples)
             explore_pct = [model.get_parameter().numpy()[:, i, i, 0] > model.get_parameter().numpy()[:, i, i, 1] for i in range(env.n_cell[0] - 1)]
             explore_pct_all = np.sum([np.logical_and.reduce(explore_pct[:i + 1], axis=0) for i in range(len(explore_pct))], axis=1) / len(smc_samples)
             # plot_save(smc.epsilon_epi, figure_path=dircty, episode=e, repeat=repeat, save=save, title=f'Epsilon{smc.epsilon_all_history[-1]}', show=show)
@@ -883,16 +894,16 @@ if __name__ == '__main__':
                 save_results(results=obs, folder='Obs', dir=dircty, stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat)
             if len(obs._buffers['state0']) == smc.params_dim:
                 print('============================', '\n', f'Finished exploration with {e} Episodes')
-                break
+                # break
         r_all_repeat.append(r_all_epi)
-        smc_all_repeat.append(smc)
-        samples_all_repeat.append(samples_all_ep)
-        if save:
-            save_results(results=r_all_repeat, folder='Returns', dir=dircty, stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat)        
-            save_results(results=samples_all_repeat, folder='Samples', dir=dircty, stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat)
-            save_results(results=obs, folder='Obs', dir=dircty, stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat)
+        # smc_all_repeat.append(smc)
+        # samples_all_repeat.append(samples_all_ep)
+        # if save:
+            # save_results(results=r_all_repeat, folder='Returns', dir=dircty, stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat)        
+            # save_results(results=samples_all_repeat, folder='Samples', dir=dircty, stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat)
+            # save_results(results=obs, folder='Obs', dir=dircty, stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat)
         plot_return_vs_episodes(r_all_epi, repeat=repeat, save=save, figure_path=dircty, show=show)
         # display_smc_results(smc, save=save, figure_path=dircty, show=show)
-    # plot_return_vs_episodes_repeat(r_all_repeat, save=save, figure_path=dircty)
+    plot_return_vs_episodes_repeat(r_all_repeat, save=save, figure_path=dircty)
     if show:
         plt.show()
