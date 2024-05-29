@@ -105,14 +105,14 @@ def QLearningWithData(Q, obs, gamma=0.95, training_steps=100, alpha=0.2):
     for _ in range(training_steps):
         for data in zip(obs['state0'], obs['state1'], obs['action'], obs['rewards'], obs['done']):
             s0, s1, a, r, done = data
-            Q[s0][a] += alpha * (r + gamma * max(Q[s1]) - Q[s0][a])
+            Q[s0][a] = alpha / (1-alpha) * (r + gamma * max(Q[s1]) - Q[s0][a]) + (1-alpha) * Q[s0][a]
             
-    V = np.max(Q, axis=-1)
-    print('Value', np.round(V, 2))
-    pi = np.argmax(Q, axis=-1)
-    print('Policy:', pi)
+    # V = np.max(Q, axis=-1)
+    # print('Value', np.round(V, 2))
+    # pi = np.argmax(Q, axis=-1)
+    # print('Policy:', pi)
     # print(np.round(Q,3))
-    return pi, Q, V
+    return Q
     
 if __name__ == '__main__':
     from Environment.GridWorld import *

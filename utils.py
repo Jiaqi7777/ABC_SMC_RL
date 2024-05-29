@@ -197,12 +197,16 @@ def plot_return_vs_episodes(r_all_episodes, repeat, smooth=1, figure_path='../Fi
         plt.show()
     plt.clf()
     
-def plot_return_vs_episodes_repeat(r_all_episodes_repeat, figure_path='../Figures/', show=SHOW, title='', save=False):
+def plot_return_vs_episodes_repeat(r_all_episodes_repeat, figure_path='../Figures/', show=SHOW, title='', save=False, smooth=1):
     N = len(r_all_episodes_repeat)
-    r_mean = np.mean(r_all_episodes_repeat, axis=0)
-    r_std = np.std(r_all_episodes_repeat, axis=0)
+    smooth_L = len(r_all_episodes_repeat[0]) - smooth + 1
+    r_all_episodes_repeat_smooth = np.zeros((N, smooth_L))
+    for i in range(N):
+        r_all_episodes_repeat_smooth[i] = np.convolve(np.array(r_all_episodes_repeat[i]), np.ones(smooth)/smooth, mode='valid')
+    r_mean = np.mean(r_all_episodes_repeat_smooth, axis=0)
+    r_std = np.std(r_all_episodes_repeat_smooth, axis=0)
     plt.plot(r_mean, label = f'Mean of the return')
-    plt.fill_between(range(len(r_all_episodes_repeat[0])), r_mean-r_std/np.sqrt(N), r_mean+r_std/np.sqrt(N), alpha=0.2)
+    plt.fill_between(range(len(r_all_episodes_repeat_smooth[0])), r_mean-r_std/np.sqrt(N), r_mean+r_std/np.sqrt(N), alpha=0.2)
     plt.xlabel('episodes')
     plt.ylabel('Return')
     title = f'Return for each episodes averaging over {N} random runs' if title == '' else title
