@@ -115,7 +115,7 @@ class Buffer:
         return len(list(self._buffers.values())[0])
 
 class Tabular:
-    def __init__(self, env, n_particle, prior='normal', discrete=False, gamma=0.95, std=0.1, mean=0, verbose=True, bins=(10,), initial_tables=None, idx=None):
+    def __init__(self, env, n_particle, prior='normal', discrete=False, gamma=0.95, std=0.1, mean=0, verbose=True, bins=(10,), initial_tables=None, initial_weights=None, idx=None):
         self.env = env
         self.discrete = discrete
         self.obs_size = env.observation_space.shape
@@ -137,10 +137,10 @@ class Tabular:
         self.mean = mean
         self.std = std
         self.n_particle = n_particle
-        self._weights = torch.ones(n_particle) / n_particle
+        self._weights = initial_weights
         if prior == 'normal':
             self.random_tables = torch.normal(mean=mean, std=std, size=((n_particle,) + self.bins + (self.action_size,)))
-            self.tables = torch.tensor(np.repeat(initial_tables[np.newaxis, ...], n_particle, axis=0), dtype=torch.float32) if (initial_tables is not None and FROZEN) else self.random_tables
+            self.tables = torch.tensor(np.repeat(initial_tables[np.newaxis, ...], n_particle, axis=0), dtype=torch.float32) if (initial_tables is not None) else self.random_tables
             #diagnosis
             # self.tables = torch.load('../Samples/MCMC/094980/T200_Repeat1_StoFalse_M1200_GdyFalse_Sigma4.pt')[-1][27]
             if idx is not None:

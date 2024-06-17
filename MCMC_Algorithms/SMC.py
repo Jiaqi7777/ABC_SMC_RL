@@ -178,6 +178,16 @@ class SMC:
                             smc_samples, mcmc_samples, corr_stat, m, L_max_pretune, step_size_max_pretune = self.adaptvie_mcmc_move(epsilon_0, smc_samples, step_size_max_pretune, L_max_pretune, precondition_matrix)
                             smc_samples, weights = self.check_and_resample(smc_samples, weights)
                             self.update_history(smc_samples=smc_samples, weights=weights)
+                            if not gelman_rubin(mcmc_samples, smc_samples, thresh=GELMAN_RUBIN*1.5, prev_corr_array=corr_stat, weights=self._weights)[0]:
+                                print('MCMC not working, retry with epsilon', epsilon_0)
+                                self.epsilon_epi.append(epsilon_0)
+                                self.epsilon_all_history.append(epsilon_0)
+                                weights = generate_weights(epsilon=epsilon_0, weights=self._weights, Model=Model, smc_samples=smc_samples, epsilon_0=pre_epsilon_0)
+                                self.set_weights(weights)
+                                precondition_matrix = estimate_diag_precondition(particles=smc_samples, weights=weights)
+                                smc_samples, mcmc_samples, corr_stat, m, L_max_pretune, step_size_max_pretune = self.adaptvie_mcmc_move(epsilon_0, smc_samples, step_size_max_pretune, L_max_pretune, precondition_matrix)
+                                smc_samples, weights = self.check_and_resample(smc_samples, weights)
+                                self.update_history(smc_samples=smc_samples, weights=weights)
                         break
             if self.adapt_alg == 'NUTS':
                 for j in range(self.n_particle):
@@ -260,19 +270,23 @@ class SMC:
         ess_l = [ess_partial(e) for e in e_l]
         plot_ess(e_l, ess_l, epsilon_0, self.ESS(self._weights), alpha, new_epsilon, save=save, loop_num=self.loop, episode=self.episode, repeat=self.repeat, figure_path=dircty, show=show)
 
-    def find_epsilon_0(self, alpha, smc_samples, generate_weights_fn, epsilon_0, a, b, lower_side=True, method='bisect', tol=1e-7, max_epsilon=20, show=False, max_alpha=5):
+    def find_epsilon_0(self, alpha, smc_samples, generate_weights_fn, epsilon_0, a, b, lower_side=True, method='bisect', tol=1e-7, max_epsilon=PRIOR_SIGMA, min_epsilon=1e-3, show=False, max_alpha=5):
         if show:
             print(a, b, alpha)
             sys.stdout.flush()
-        if b > 2 * max_epsilon or (lower_side and a < 1e-7):
+        if b > 2 * max_epsilon:
             print(a, b, alpha)
             # self.plot_ess_fn(epsilon_0, smc_samples, generate_weights_fn, a, b, new_epsilon=epsilon_0, show=show, alpha=alpha)
             print('max epsilon')
             return max_epsilon, a, b
-            print('illegal range', a, max_epsilon, alpha, a, max_epsilon*0.9)
-            new_epsilon, a, b = self.find_epsilon_0(alpha*1.05, smc_samples, generate_weights_fn, epsilon_0, a, max_epsilon*0.9, lower_side=lower_side, method=method, show=show)
-            # raise ValueError(a, b, alpha, self.SMC_Model, self._weights, smc_samples, generate_weights_fn, epsilon_0)
-            return max_epsilon, a, b
+        if a < min_epsilon/2:
+            return epsilon_0, a, b
+            # print('illegal range', a, max_epsilon, alpha, a, max_epsilon*0.9)
+            # if alpha >= max_alpha:
+            #     return max_epsilon, a, b
+            # new_epsilon, a, b = self.find_epsilon_0(alpha*1.05, smc_samples, generate_weights_fn, epsilon_0, a, max_epsilon*0.9, lower_side=lower_side, method=method, show=show)
+            # # raise ValueError(a, b, alpha, self.SMC_Model, self._weights, smc_samples, generate_weights_fn, epsilon_0)
+            # return max_epsilon, a, b
         # Use optimization to find epsilon_0 that satisfies the ESS condition
         if method == 'bisect':
             ess_simple = partial(ESS_Matching, alpha=alpha, Model=self.SMC_Model, weights=self._weights, smc_samples=smc_samples, generate_weights_fn=generate_weights_fn, epsilon_0=epsilon_0)
@@ -311,6 +325,7 @@ class SMC:
             # self.plot_ess_fn(epsilon_0, smc_samples, generate_weights_fn, a, b, new_epsilon=result, show=show, alpha=alpha)
             # if epsilon_0 < 0.03 and (not lower_side):
             #     dsd
+            result = max(result, min_epsilon)
             return result, a, b
         elif method == 'root':
             try:
@@ -710,10 +725,10 @@ if __name__ == '__main__':
     parser.add_argument('--warmup', default=WARMUP_RATIO, type=float)
     parser.add_argument('--transform', default=TRANSFORM)
     parser.add_argument('--precondition', default=False, action='store_true', help='Bool type')
+    parser.add_argument('--load', default=False, action='store_true', help='Bool type')
+    parser.add_argument('--load_path', type=str, default='')
     args = parser.parse_args()
     print(args)
-    time = args.time
-    print('time:', time)
     training_steps = args.training_step
     save = args.save
     show = args.show
@@ -732,6 +747,8 @@ if __name__ == '__main__':
     warmup_steps = int(training_steps * WARMUP_RATIO)
     TRANSFORM = args.transform
     use_precondition = args.precondition
+    load = args.load
+    load_path = args.load_path
     dircty=''
     
     ADAPT_STEP_SIZE = True if WARMUP_RATIO > 0 else False
@@ -746,17 +763,6 @@ if __name__ == '__main__':
     np.random.seed(seed)
     torch.manual_seed(seed)
     
-    if save:
-        dircty_top = f'../SMC/{time}/'
-        if not os.path.exists(dircty_top):
-            os.makedirs(dircty_top)
-            with open('../parameter.py', 'r') as para_file:
-                parameters = para_file.read()
-            with open(f'{dircty_top}para.txt', 'w') as para_txt:
-                para_txt.write(parameters)
-                for key, value in vars(args).items():
-                    para_txt.write(f"{key}: {value}\n")
-    
     if env_name == 'GridWorld':
         env = GridWorld((1,2), obstacles=False, stochastic=STOCHASTIC)
         # env.plot_env()
@@ -764,7 +770,7 @@ if __name__ == '__main__':
         env = Maze()
     if env_name == 'DeepSea':
         env = DeepSea(depth=15)
-        EPISODES = 500#env.n_cell[0] * 100
+        EPISODES = 1000#env.n_cell[0] * 100
     
     S = []
     if len(env.n_cell) == 1:
@@ -797,22 +803,46 @@ if __name__ == '__main__':
     smc_all_repeat = []
     dircty = ''
     
+    time = load_path if load else args.time
+    if save:
+        dircty_top = f'../SMC/{time}/'
+        if not os.path.exists(dircty_top):
+            os.makedirs(dircty_top)
+            with open('../parameter.py', 'r') as para_file:
+                parameters = para_file.read()
+            with open(f'{dircty_top}para.txt', 'w') as para_txt:
+                para_txt.write(parameters)
+                for key, value in vars(args).items():
+                    para_txt.write(f"{key}: {value}\n")
+    
     for repeat in range(REPEAT_EXPERIMENT):
+        if load:
+            initial_tables = torch.load(f'../SMC/{load_path}/R{repeat}/Samples_T100_Repeat0_StoFalse_M1200_GdyFalse_Sigma4.pt')
+            initial_weights = torch.load(f'../SMC/{load_path}/R{repeat}/Weights_T100_Repeat0_StoFalse_M1200_GdyFalse_Sigma4.pt')
+            initial_obs = torch.load(f'../SMC/{load_path}/R{repeat}/Obs_T100_Repeat0_StoFalse_M1200_GdyFalse_Sigma4.pt')
+            initial_episode = 501
+            initial_epsilon = 0.22563551403442378#torch.load(f'{load_path}/Epsilon_T100_Repeat0_StoFalse_M1200_GdyFalse_Sigma4.pt')[-1]
+        else:
+            initial_tables = None
+            initial_weights = torch.ones(N_PARTICLE) / N_PARTICLE
+            initial_obs = Buffer(['state0', 'state1', 'action', 'rewards', 'done'])
+            initial_episode = 0
+            initial_epsilon = abc_epsilon
         if save:
             dircty = f'{dircty_top}R{repeat}/'
             if not os.path.exists(dircty):
                 os.makedirs(dircty)
-        epsilon = abc_epsilon
+        epsilon = initial_epsilon
         STEPSIZE = INITIAL_STEPSIZE
         # model = Tabular(env=env, n_particle=N_PARTICLE, prior='normal', gamma=GAMMA)
-        model = Tabular(env=env, n_particle=N_PARTICLE, prior='normal', mean=PRIOR_MEAN, std=PRIOR_SIGMA, gamma=GAMMA, initial_tables=Q_star, idx=FROZEN_IDX)#For frozen all but one dimensions
+        model = Tabular(env=env, n_particle=N_PARTICLE, prior='normal', mean=PRIOR_MEAN, std=PRIOR_SIGMA, gamma=GAMMA, initial_tables=initial_tables, initial_weights=initial_weights, idx=FROZEN_IDX)#For frozen all but one dimensions
         smc = SMC(model=model, initial_params=model.get_learnable_parameter())
         smc.update_history(model.get_learnable_parameter(), torch.log(model._weights))
         r_all_epi = [] 
         samples_all_ep = []
-        obs = Buffer(['state0', 'state1', 'action', 'rewards', 'done'])
+        obs = initial_obs
         s0, _ = env.reset()
-        for e in range(EPISODES):
+        for e in range(initial_episode, EPISODES):
             # objgraph.show_most_common_types()
             s0, _ = env.reset()
             para = model.sample_para()
@@ -892,7 +922,8 @@ if __name__ == '__main__':
                 save_results(results=smc.samples, folder='Samples', dir=dircty, stochastic=STOCHASTIC, episode=e, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat, episodic=False)
                 save_results(results=smc._weights_history, folder='Weights', dir=dircty, stochastic=STOCHASTIC, episode=e, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat, episodic=False)
                 save_results(results=obs, folder='Obs', dir=dircty, stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat)
-            if len(obs._buffers['state0']) == smc.params_dim:
+                save_results(results=smc.epsilon_all_history, folder='Epsilon', dir=dircty, stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat)
+            if len(obs._buffers['state0']) == smc.params_dim and new_data_flag:
                 print('============================', '\n', f'Finished exploration with {e} Episodes')
                 # break
         r_all_repeat.append(r_all_epi)

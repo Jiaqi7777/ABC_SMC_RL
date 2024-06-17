@@ -2,7 +2,7 @@ def epsilon_greedy(Q, s, epsilon=0.1):
     if np.random.rand() < epsilon:
         return np.random.choice(len(Q[s]))
     else:
-        return np.argmax(Q[s])
+        return np.random.choice(np.where(Q[s] == Q[s].max())[0])
 
 if __name__ == '__main__':
     # from tqdm import tqdm
@@ -27,11 +27,14 @@ if __name__ == '__main__':
     parser.add_argument('-s', '--save', default=SAVE)
     parser.add_argument('-p', '--show', default=SHOW)
     parser.add_argument('--seed', default=SEED, type=int)
+    parser.add_argument('-eg', '--epsilon_greedy', default=EG_EPSILON, type=float)
     parser.add_argument('--Env', default=ENV_NAME)
     args = parser.parse_args()
+    time = args.time
     save = args.save
     show = args.show
     seed = args.seed
+    epsilon = args.epsilon_greedy
     training_steps = args.training_step
     env_name = args.Env
     random.seed(seed)
@@ -45,13 +48,13 @@ if __name__ == '__main__':
             os.makedirs(dircty_top)
 
     if env_name == 'GridWorld':
-        env = GridWorld((1,2), obstacles=False, stochastic=STOCHASTIC)
+        env = GridWorld((1, 2), obstacles=False, stochastic=STOCHASTIC)
         # env.plot_env()
     if env_name == 'Maze':
         env = Maze()
     if env_name == 'DeepSea':
-        env = DeepSea(depth=15)
-        EPISODES = 500#env.n_cell[0] * 100
+        env = DeepSea(depth=10)
+        EPISODES = 1000000#env.n_cell[0] * 100
     
     S = []
     if len(env.n_cell) == 1:
@@ -81,7 +84,6 @@ if __name__ == '__main__':
     samples_all_repeat = []
     smc_all_repeat = []
     dircty = ''
-    
     for repeat in range(REPEAT_EXPERIMENT):
         if save:
             dircty = f'{dircty_top}R{repeat}/'
@@ -96,32 +98,28 @@ if __name__ == '__main__':
         for e in range(EPISODES):
             s0, _ = env.reset()
             # plot_qtable(para, title=f'Sampled Q table for episode {e} repeat {repeat}', save=save, figure_path=dircty)
-            print(f'Episode {e} in repeat {repeat}')
+            # print(f'Episode {e} in repeat {repeat}')
             R = 0
             # h = 0
             # while True: #Turn on h += 1
             new_data_flag = False
             for h in range(HORIZON):
-                action = epsilon_greedy(Q, s0, epsilon=EG_EPSILON)
+                action = epsilon_greedy(Q, s0, epsilon=epsilon)
                 s1, r, done, *info = env.step(action)
                 R += r
                 new_data_flag = (obs.insert({'state0': s0, 'state1': s1, 'action': int(action), 'rewards': r, 'done': done}, unique=UNIQUE_OBS, update_new_data=True) or new_data_flag)
                 s0 = s1
                 if done:
                     if new_data_flag:
+                        print(f'Episode {e} in repeat {repeat}')
                         plot_obs(obs, env, env_name=ENV_NAME, title=f'ExplorationE{e}', additional_info=V_star, figure_path=dircty, save=save, show=show)
                     obs.init_new_data_buffer()
-                    Q = QLearningWithData(Q, obs._buffers, training_steps=training_steps)
+                    Q = QLearningWithData(Q, obs._buffers, training_steps=training_steps, gamma=1, alpha=1)
                     # print("done with", h + 1, 'steps')
-                    print('Return', R)
+                    # print('Return', R)
                     break
             r_all_epi.append(R)
 
-            # if save:
-            #     save_results(results=r_all_epi, folder='Returns', dir=dircty, stochastic=STOCHASTIC, episode=e, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat, episodic=False)
-            #     save_results(results=smc.samples, folder='Samples', dir=dircty, stochastic=STOCHASTIC, episode=e, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat, episodic=False)
-            #     save_results(results=smc._weights_history, folder='Weights', dir=dircty, stochastic=STOCHASTIC, episode=e, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat, episodic=False)
-            #     save_results(results=obs, folder='Obs', dir=dircty, stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat)
             if len(obs._buffers['state0']) == len(env.learnable_no):
                 print('============================', '\n', f'Finished exploration with {e} Episodes')
                 # break
@@ -132,8 +130,10 @@ if __name__ == '__main__':
             # save_results(results=r_all_repeat, folder='Returns', dir=dircty, stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat)        
             # save_results(results=samples_all_repeat, folder='Samples', dir=dircty, stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat)
             # save_results(results=obs, folder='Obs', dir=dircty, stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat)
+        plot_obs(obs, env, env_name=ENV_NAME, title=f'ExplorationE{e}', additional_info=V_star, figure_path=dircty, save=save, show=show)
         plot_return_vs_episodes(r_all_epi, repeat=repeat, save=save, figure_path=dircty, show=show)
         # display_smc_results(smc, save=save, figure_path=dircty, show=show)
-    plot_return_vs_episodes_repeat(r_all_repeat, save=save, figure_path=dircty, show=show)
+    plot_return_vs_episodes_repeat(r_all_repeat, save=save, figure_path=dircty, show=show, smooth=10)
+    torch.save(r_all_repeat, f'../EpsilonGreedy/Return_{time}_depth{env.n_cell[0]}_epsilon{epsilon}.pt')
     if show:
         plt.show()

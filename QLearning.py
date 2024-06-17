@@ -3,10 +3,12 @@ from utils import *
 import torch
 import matplotlib
 import matplotlib.pyplot as plt
+from copy import deepcopy
 '''module import'''
 from parameter import *
 
 def DynamicProgramming(Q, A, S, env, show=False, gamma=1):
+    Q = deepcopy(Q)
     for s in S[::-1]:
         for a in A:
             pre_q = Q[s + (a,) ]
@@ -100,12 +102,22 @@ def OnlineQLearning(Q, env, n_episodes=10, horizon=50, gamma=0.95, epsilon=0.4, 
     print(np.round(Q,3))
     return pi, Q, V, return_all_episodes_qlearning, regret_all_episodes_qlearning
 
-def QLearningWithData(Q, obs, gamma=0.95, training_steps=100, alpha=0.2):
+def QLearningWithData(Q, obs, gamma=0.95, training_steps=100, alpha=0.5, thresh=1e-5):
+    delta = thresh + 1e-4
     # data = zip(obs['state0'], obs['state1'], obs['action'], obs['rewards'], obs['done'])
-    for _ in range(training_steps):
+    for k in range(training_steps):
+        delta = thresh*0.9
         for data in zip(obs['state0'], obs['state1'], obs['action'], obs['rewards'], obs['done']):
             s0, s1, a, r, done = data
-            Q[s0][a] = alpha / (1-alpha) * (r + gamma * max(Q[s1]) - Q[s0][a]) + (1-alpha) * Q[s0][a]
+            pre_q = deepcopy(Q[s0 + (a,) ])
+            if done:
+                new_q = Q[s0 + (a,) ] = r
+            else:
+                new_q = Q[s0 + (a,) ] = alpha * (r + gamma * max(Q[s1])) + (1 - alpha) * pre_q
+            delta = max(delta, abs(pre_q - new_q))
+        if delta < thresh:
+            # print('Converged with loop ', k)
+            break
             
     # V = np.max(Q, axis=-1)
     # print('Value', np.round(V, 2))
@@ -138,8 +150,8 @@ if __name__ == '__main__':
         for i in range(env.n_cell[0]):
             for j in range(env.n_cell[1]):
                 S.append((i,j)) 
-    V = np.ones(env.n_cell)/env.observation_space.n
-    Q = np.ones(shape=(env.n_cell + (env.action_space.n, )))/env.observation_space.n / env.action_space.n
+    V = np.zeros(env.n_cell)/env.observation_space.n
+    Q = np.zeros(shape=(env.n_cell + (env.action_space.n, )))/env.observation_space.n / env.action_space.n
     print('Q table with shape', Q.shape)
     return_all_repeat_qlearning = []
     regret_all_repeat_qlearning = []
