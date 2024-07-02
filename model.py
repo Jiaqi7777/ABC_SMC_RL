@@ -140,7 +140,8 @@ class Tabular:
         self._weights = initial_weights
         if prior == 'normal':
             self.random_tables = torch.normal(mean=mean, std=std, size=((n_particle,) + self.bins + (self.action_size,)))
-            self.tables = torch.tensor(np.repeat(initial_tables[np.newaxis, ...], n_particle, axis=0), dtype=torch.float32) if (initial_tables is not None) else self.random_tables
+            self.tables = initial_tables if (initial_tables is not None) else self.random_tables
+            # self.tables = torch.tensor(np.repeat(initial_tables[np.newaxis, ...], n_particle, axis=0), dtype=torch.float32) if (initial_tables is not None) else self.random_tables
             #diagnosis
             # self.tables = torch.load('../Samples/MCMC/094980/T200_Repeat1_StoFalse_M1200_GdyFalse_Sigma4.pt')[-1][27]
             if idx is not None:

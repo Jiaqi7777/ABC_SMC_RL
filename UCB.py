@@ -1,13 +1,35 @@
-def epsilon_greedy(Q, s, epsilon=0.1, print_flag=False):
-    # if print_flag:
-    #     print(Q[s])
-    if np.random.rand() < epsilon:
-        # print('random')
-        return np.random.choice(len(Q[s]))
-    else:
-        # print('greedy')
-        return np.random.choice(np.where(Q[s] == Q[s].max())[0])
+import numpy as np
+import math
+from parameter import *
 
+class UCB_EpisodicRL:
+    def __init__(self, env, horizon=HORIZON, c=1.0, alpha=0.2, gamma=1):
+        self.horizon = horizon
+        self.c = c
+        self.alpha = alpha
+        self.gamma = gamma
+        self.state_n = env.n_cell
+        self.action_n = env.action_space.n
+        self.observation_n = env.observation_space.n
+        self.reset()
+        
+    def reset(self):
+        self.Q = np.zeros(shape=(self.state_n + (self.action_n, ))) / self.observation_n / self.action_n  # Value estimates
+        self.N = np.zeros(shape=(self.state_n + (self.action_n, ))) / self.observation_n / self.action_n  # Action counts
+        
+    def select_action(self, state):
+        # UCB action selection
+        total_counts = np.sum(self.N[state])
+        ucb_values = self.Q[state] + self.c * np.sqrt(np.log(total_counts + 1) / (self.N[state] + 1e-5))
+        return np.random.choice(np.where(ucb_values == ucb_values.max())[0])
+    
+    def update(self, s0, s1, action, reward):
+        # Update value estimates and counts
+        self.N[s0 + (action,)] += 1
+        td_error = reward + self.gamma * np.max(self.Q[s1]) - self.Q[s0 + (action,)]
+        self.Q[s0 + (action,)] += self.alpha * td_error
+        
+                
 if __name__ == '__main__':
     # from tqdm import tqdm
     from tqdm import tqdm
@@ -30,20 +52,21 @@ if __name__ == '__main__':
     parser.add_argument('-s', '--save', default=SAVE)
     parser.add_argument('-p', '--show', default=SHOW)
     parser.add_argument('--seed', default=SEED, type=int)
-    parser.add_argument('-eg', '--epsilon_greedy', default=EG_EPSILON, type=float)
+    parser.add_argument('-c', '--c_ucb', default=1, type=float)
     parser.add_argument('--Env', default=ENV_NAME)
     args = parser.parse_args()
     time = args.time
     save = args.save
     show = args.show
     seed = args.seed
-    epsilon = args.epsilon_greedy
+    c = args.c_ucb
     training_steps = args.training_step
     env_name = args.Env
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     
+    dircty=''
 
     if env_name == 'GridWorld':
         env = GridWorld((1, 2), obstacles=False, stochastic=STOCHASTIC)
@@ -51,11 +74,10 @@ if __name__ == '__main__':
     if env_name == 'Maze':
         env = Maze()
     if env_name == 'DeepSea':
-        env = DeepSea(depth=6)
-        EPISODES = 1000000#env.n_cell[0] * 100
-    dircty=''
+        env = DeepSea(depth=20)
+        EPISODES = 3000000#env.n_cell[0] * 100
     if save:
-        dircty_top = f'../EG/{env.n_cell[0]}/{epsilon}/{time}/'
+        dircty_top = f'../UCB/{env.n_cell[0]}/c{c}/{time}/'
         if not os.path.exists(dircty_top):
             os.makedirs(dircty_top)
     
@@ -71,10 +93,10 @@ if __name__ == '__main__':
             for i in range(env.n_cell[0]):
                 for j in range(env.n_cell[1]):
                     S.append((i, j)) 
-    Q = np.zeros(shape=(env.n_cell + (env.action_space.n, ))) / env.observation_space.n / env.action_space.n
+    Q_dp = np.zeros(shape=(env.n_cell + (env.action_space.n, ))) / env.observation_space.n / env.action_space.n
     A = range(env.action_space.n)
     # pi_star, Q_star, V_star = OfflineQLearning(Q, A, S, env, gamma=GAMMA, show=show, thresh=1e-3, alpha=1)
-    pi_star, Q_star, V_star = DynamicProgramming(Q, A, S, env, gamma=GAMMA, show=show)
+    pi_star, Q_star, V_star = DynamicProgramming(Q_dp, A, S, env, gamma=GAMMA, show=show)
     dim = env.observation_space.n * env.action_space.n
     # Q = np.random.normal(loc=PRIOR_MEAN, scale=PRIOR_SIGMA, size=(env.n_cell + (env.action_space.n, )))
     # if env.not_learnable_idx:
@@ -88,12 +110,12 @@ if __name__ == '__main__':
     results = []
     r_all_repeat = []
     Q_all_repeat = []
+    N_all_repeat = []
     samples_all_repeat = []
     smc_all_repeat = []
     dircty = ''
     for repeat in range(REPEAT_EXPERIMENT_NAIVE):
-        Q = np.zeros(shape=(env.n_cell + (env.action_space.n, ))) / env.observation_space.n / env.action_space.n
-        print_flag = False
+        agent = UCB_EpisodicRL(env=env, c=c)
         if save:
             dircty = f'{dircty_top}R{repeat}/'
             if not os.path.exists(dircty):
@@ -113,8 +135,9 @@ if __name__ == '__main__':
             # while True: #Turn on h += 1
             new_data_flag = False
             for h in range(HORIZON):
-                action = epsilon_greedy(Q, s0, epsilon=epsilon, print_flag=print_flag)
+                action = agent.select_action(s0)
                 s1, r, done, *info = env.step(action)
+                agent.update(s0, s1, action, r)
                 R += r
                 new_data_flag = (obs.insert({'state0': s0, 'state1': s1, 'action': int(action), 'rewards': r, 'done': done}, unique=UNIQUE_OBS, update_new_data=True) or new_data_flag)
                 s0 = s1
@@ -122,10 +145,9 @@ if __name__ == '__main__':
                     if new_data_flag:
                         print(f'Episode {e} in repeat {repeat}')
                         plot_obs(obs, env, env_name=ENV_NAME, title=f'ExplorationE{e}', additional_info=V_star, figure_path=dircty, save=save, show=show)
+                        # print('Return', R)
                     obs.init_new_data_buffer()
-                    Q = QLearningWithData(Q, obs._buffers, training_steps=training_steps, gamma=1, alpha=1)
                     # print("done with", h + 1, 'steps')
-                    # print('Return', R)
                     break
             r_all_epi.append(R)
 
@@ -133,19 +155,16 @@ if __name__ == '__main__':
                 print('============================', '\n', f'Finished exploration with {e} Episodes')
                 # break
         r_all_repeat.append(r_all_epi)
-        Q_all_repeat.append(Q)
+        Q_all_repeat.append(agent.Q)
+        N_all_repeat.append(agent.N)
         if save:
             torch.save(r_all_repeat, f'{dircty_top}Return.pt')
             torch.save(Q_all_repeat, f'{dircty_top}Q.pt')
-        # smc_all_repeat.append(smc)
-        # samples_all_repeat.append(samples_all_ep)
-        # if save:
-            # save_results(results=r_all_repeat, folder='Returns', dir=dircty, stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat)        
-            # save_results(results=samples_all_repeat, folder='Samples', dir=dircty, stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat)
-            # save_results(results=obs, folder='Obs', dir=dircty, stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat)
+            torch.save(N_all_repeat, f'{dircty_top}N.pt')
+
         plot_obs(obs, env, env_name=ENV_NAME, title=f'ExplorationE{e}', additional_info=V_star, figure_path=dircty, save=save, show=show)
         plot_return_vs_episodes(r_all_epi, repeat=repeat, save=save, figure_path=dircty, show=show)
-        # display_smc_results(smc, save=save, figure_path=dircty, show=show)
+
     plot_return_vs_episodes_repeat(r_all_repeat, save=save, figure_path=dircty, show=show, smooth=10)
     if show:
         plt.show()

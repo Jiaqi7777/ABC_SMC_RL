@@ -199,6 +199,7 @@ def plot_return_vs_episodes(r_all_episodes, repeat, smooth=1, figure_path='../Fi
     
 def plot_return_vs_episodes_repeat(r_all_episodes_repeat, figure_path='../Figures/', show=SHOW, title='', save=False, smooth=1):
     N = len(r_all_episodes_repeat)
+    smooth = min(smooth, len(r_all_episodes_repeat[0]))
     smooth_L = len(r_all_episodes_repeat[0]) - smooth + 1
     r_all_episodes_repeat_smooth = np.zeros((N, smooth_L))
     for i in range(N):
@@ -211,11 +212,11 @@ def plot_return_vs_episodes_repeat(r_all_episodes_repeat, figure_path='../Figure
     plt.ylabel('Return')
     title = f'Return for each episodes averaging over {N} random runs' if title == '' else title
     plt.title(title)
-    if show:
-        plt.show()
     if save:
         plt.savefig(f'{figure_path+title}.png')
         print('figure saved at ', f'{figure_path+title}.png')
+    if show:
+        plt.show()
     plt.clf()
     
 def get_outliers(data, threshold=5):
@@ -249,13 +250,14 @@ def compare_r_vs_episodes_repeat(r_1, r_2, figure_path='../Figures/', show=True,
         plt.show()
     plt.clf()
     
-def save_results(results, folder, training_steps, greedy, epsilon, time, m_z, repeat, dir=None, experiment='MCMC', episode=None, stochastic=False, episodic=False, prior_sigma=PRIOR_SIGMA):
+def save_results(results, folder, training_steps, greedy, epsilon, time, m_z, dir=None, experiment='MCMC', episode=None, repeat=None, stochastic=False, episodic=False, prior_sigma=PRIOR_SIGMA):
     # dir = f'../{folder}/{experiment}/{time}'
     dir = dir if dir is not None else f'../{folder}/{experiment}/{time}'
     if not os.path.exists(dir):
         os.makedirs(dir)
     Episodes = f'Episode{episode}_' if episodic else ''
-    file_path = f'{dir}{folder}_T{training_steps}_Repeat{repeat}_{Episodes}Sto{stochastic}_M{m_z}_Gdy{greedy}_Sigma{prior_sigma}.pt'
+    # repeat = f'Repeat{repeat}_' if episodic else ''
+    file_path = f'{dir}{folder}_T{training_steps}_{Episodes}Sto{stochastic}_M{m_z}_Gdy{greedy}_Sigma{prior_sigma}.pt'
     torch.save(results, file_path)
     print(f'{Episodes}{folder} for repeat {repeat} saved at', file_path)
 

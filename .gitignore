@@ -17,7 +17,8 @@ Figures
 
 #Results
 SMC
-EpsilonGreedy
+EG
+UCB
 Results
 Returns
 Regrets

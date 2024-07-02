@@ -52,7 +52,7 @@ class DeepSea:
             for j in range(i+1):
                 learnable_idx.append(np.array((i, j, 0,)))
                 learnable_idx.append(np.array((i, j, 1,)))
-        self.learnable_idx = tuple(torch.tensor(learnable_idx).T)
+        self.learnable_idx = tuple(torch.tensor(np.array(learnable_idx)).T)
         self.names = learnable_idx
         self.learnable_no = range((n_cell[0] - 1) * n_cell[1] * self.action_space.n)
         self.learnable_shape = ((n_cell[0] - 1),  n_cell[1])
@@ -62,7 +62,7 @@ class DeepSea:
             for j in range(i+1, n_cell[0]):
                 not_learnable_idx.append(np.array((i, j, 0,)))
                 not_learnable_idx.append(np.array((i, j, 1,)))
-        self.not_learnable_idx = tuple(torch.tensor(not_learnable_idx).T)
+        self.not_learnable_idx = tuple(torch.tensor(np.array(not_learnable_idx)).T)
 
     def reset(self):
         self.state = self.starting_position
