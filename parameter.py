@@ -88,12 +88,12 @@ OBSERVE_DATA_START = -16
 OBSERVE_DATA_END = 100
 
 #ABC
-EPSILON = 0.01
+EPSILON = 0.5
 M_Z = 1200 if STOCHASTIC else 0
 ERROR_LAG = 2
 ERROR_PERCENTAGE = 1e-4
-STOPPING_CRITERIA = 'natural_reduce'
-# STOPPING_CRITERIA = 'fixed_reduce'
+# STOPPING_CRITERIA = 'natural_reduce'
+STOPPING_CRITERIA = 'fixed_reduce'
 
 #Results
 SAVE = False

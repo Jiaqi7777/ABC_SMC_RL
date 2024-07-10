@@ -70,7 +70,7 @@ class SMC:
             if test_dec:
                 print('MCMC stopped at', m, 'moves')
                 break
-        print('averaged accept prob', torch.mean(accept_probs_all, dim=0))
+        # print('averaged accept prob', torch.mean(accept_probs_all, dim=0))
         # print('pretune results, stepsize_max, L_max=', step_size_max_pretune, L_max_pretune, step_size, L)
         return smc_samples, mcmc_samples, corr_stat, m, L_max_pretune, step_size_max_pretune
     
@@ -348,7 +348,7 @@ class SMC:
     def pretune(self, smc_samples, precondition_matrix, step_size_max_pretune=0.1, L_max_pretune=99):
         H_change = torch.zeros(self.n_particle)
         step_size_pretune = torch.rand(self.n_particle) * step_size_max_pretune
-        print('pretune, max_step_size', step_size_max_pretune, step_size_pretune)
+        # print('pretune, max_step_size', step_size_max_pretune, step_size_pretune)
         L_pretune = torch.randint(1, L_max_pretune + 1, size=(self.n_particle, ))
         proposed_samples = []
         for j in range(self.n_particle):
@@ -769,7 +769,7 @@ if __name__ == '__main__':
     if env_name == 'Maze':
         env = Maze()
     if env_name == 'DeepSea':
-        env = DeepSea(depth=20)
+        env = DeepSea(depth=30)
         EPISODES = 2000#env.n_cell[0] * 100
     
     S = []
@@ -824,7 +824,7 @@ if __name__ == '__main__':
             initial_tables = load_samples[-1]
             initial_weights = load_weight[-1]
             initial_obs = torch.load(f'../SMC/{load_path}/R{repeat}/Obs_T100_StoFalse_M0_GdyFalse_Sigma4.pt')
-            initial_episode = 1300
+            initial_episode = 91
             initial_epsilon = load_epsilon[-1]
             
         else:
@@ -855,7 +855,8 @@ if __name__ == '__main__':
         else:
             # smc = SMC(model=model, initial_params=model.get_learnable_parameter())
             smc.update_history(model.get_learnable_parameter(), torch.log(model._weights))
-            r_all_epi = [] 
+            if repeat == 0:
+                r_all_epi = [] 
         obs = initial_obs
         s0, _ = env.reset()
         for e in range(initial_episode, EPISODES):
