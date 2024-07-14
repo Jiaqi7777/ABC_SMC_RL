@@ -25,6 +25,12 @@ class GridWorld:
         self.observation_space_low = (0, 0)
         self.action_space = spaces.Discrete(4) if n_cell[0] > 1 else spaces.Discrete(2)
         self.stochastic = stochastic
+        self.goal_idx = goal_position
+        self.not_learnable_idx = None
+        learnable_idx = np.vstack(np.array(np.meshgrid(range(self.n_cell[0]), range(self.n_cell[1]), range(self.action_space.n))).reshape(3, -1)).T[:-self.action_space.n]
+        self.learnable_idx = tuple(torch.tensor(np.array(learnable_idx)).T)
+        self.names = learnable_idx
+        self.learnable_no = range((n_cell[0] - 1) * n_cell[1] * self.action_space.n)[:-self.action_space.n]
         if self.stochastic:
             self.move_prob = [CORRECT_MOVE_PROB] + [(1 - CORRECT_MOVE_PROB)/5] * 5
         print('goal: ', goal_position)
@@ -205,6 +211,7 @@ class GridWorld:
                         if s0 == self.goal_position:
                             done = True
                         self.uniform_obs.insert({'state0': s0, 'state1': s1, 'action': a, 'rewards': self.R[s0], 'done': done}, unique_verbose=unique_verbose)
+                        print(s0, s1, a, self.R[s0], done)
             print('Buffer data numbers', len(self.uniform_obs._buffers['state0']))
                     
                     

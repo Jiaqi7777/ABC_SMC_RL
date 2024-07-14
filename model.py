@@ -77,9 +77,11 @@ class Buffer:
                 if unique_verbose:
                     print('New items explored', unique_check)
             if update_new_data:
-                self._new_data_buffers[k].append(v) 
+                for k, v in items.items():
+                    self._new_data_buffers[k].append(v) 
             else:   
-                self._buffers[k].append(v)
+                for k, v in items.items():
+                    self._buffers[k].append(v)
             return True
         # if unique_check in self.unique_set:
         #     if unique:
@@ -136,7 +138,7 @@ class Tabular:
         self.gamma = gamma
         self.mean = mean
         self.std = std
-        self.n_particle = n_particle
+        self.n_particle = n_particle if (initial_tables is None) else len(initial_tables)
         self._weights = initial_weights
         if prior == 'normal':
             self.random_tables = torch.normal(mean=mean, std=std, size=((n_particle,) + self.bins + (self.action_size,)))
@@ -301,7 +303,7 @@ class Tabular:
             weights = self._weights
         else:
             n = len(paras)
-            weights = torch.ones(n) / n
+            weights = np.ones(n) / n
         idx = np.argmax(paras, axis=-1).T.reshape(-1)
         thp_matrix = coo_array((np.ones(n * np.prod(self.state_size)), (idx, np.array(range(n * np.prod(self.state_size))))), shape=(self.action_size, n * np.prod(self.state_size)))
         thp_matrix = thp_matrix.toarray().reshape(thp_matrix.shape[0],-1, n).swapaxes(0,1).reshape(-1, n)
