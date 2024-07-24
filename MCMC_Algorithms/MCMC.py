@@ -713,7 +713,7 @@ if __name__ == '__main__':
                 with open(file_path, "w") as file:
                     file.write(json_data)
                 print(f"Dictionary saved to {file_path}")
-                save_results(results=posterior_samples, folder='Samples', dir=dircty_top, stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat, episodic=False)
+                save_results(results=posterior_samples, folder=f'Samples_Sgm{PRIOR_SIGMA}_Epsln{epsilon}', dir=dircty_top, stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat, episodic=False)
 
             if STOCHASTIC:
                 block_accept.append(mcmc.accept_prob['z'].numpy())
