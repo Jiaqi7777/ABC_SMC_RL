@@ -810,6 +810,7 @@ if __name__ == '__main__':
     dircty = ''
     
     time = load_path.split('/')[-1] if load else args.time
+    print('time', time)
     if save:
         dircty_top = f'../SMC/{env.n_cell[0]}/{time}/'
         if not os.path.exists(dircty_top):
