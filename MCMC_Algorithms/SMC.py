@@ -3,6 +3,7 @@ from scipy.optimize import bisect
 from scipy.optimize import root
 import sys
 import os
+import gc
 from memory_profiler import profile
 import objgraph
 from weightedcorrs import weightedcorrs
@@ -163,6 +164,7 @@ class SMC:
             if self.adapt_alg == 'pretune':
                 precondition_matrix = estimate_diag_precondition(particles=smc_samples, weights=weights)
                 smc_samples, mcmc_samples, corr_stat, m = self.adaptvie_mcmc_move(epsilon_0, smc_samples, precondition_matrix)
+                # sys.stdout.flush()
                 if not new_data_flag:
                     self.mcmc_steps_epi.append(m)
                     if m == training_steps_with_burnin - 1 and self.adapt_alg == 'pretune' and STOPPING_CRITERIA == 'natural_reduce':
@@ -733,6 +735,7 @@ if __name__ == '__main__':
     parser.add_argument('--precondition', default=False, action='store_true', help='Bool type')
     parser.add_argument('--load', default=False, action='store_true', help='Bool type')
     parser.add_argument('--load_path', type=str, default='')
+    parser.add_argument('--sample_path', type=str, default='')
     args = parser.parse_args()
     print(args)
     training_steps = args.training_step
@@ -810,6 +813,7 @@ if __name__ == '__main__':
     dircty = ''
     
     time = load_path.split('/')[-1] if load else args.time
+    real_time = args.time
     print('time', time)
     if save:
         dircty_top = f'../SMC/{env.n_cell[0]}/{time}/'
@@ -826,13 +830,12 @@ if __name__ == '__main__':
     for repeat in range(REPEAT_EXPERIMENT):
         if load:
             load_postfix = f'T{training_steps}_StoFalse_M{N_PARTICLE}_GdyFalse_Sigma{PRIOR_SIGMA}.pt'
-            load_samples = torch.load(f'../SMC/{load_path}/R{repeat}/Samples_{load_postfix}')
-            load_weight = torch.load(f'../SMC/{load_path}/R{repeat}/Weights_{load_postfix}')
+            load_samples = torch.load(f'../SMC/{load_path}/R{repeat}/Samples{args.sample_path}_{load_postfix}')[-1:]
+            load_weight = torch.load(f'../SMC/{load_path}/R{repeat}/Weights{args.sample_path}_{load_postfix}')[-1:]
             load_epsilon = torch.load(f'../SMC/{load_path}/R{repeat}/Epsilon_{load_postfix}')
             initial_obs = torch.load(f'../SMC/{load_path}/R{repeat}/Obs_{load_postfix}')
             initial_tables = load_samples[-1]
             initial_weights = load_weight[-1]
-            initial_episode = len(load_samples)
             initial_epsilon = load_epsilon[-1]
             
         else:
@@ -852,14 +855,16 @@ if __name__ == '__main__':
         smc = SMC(model=model, initial_params=model.get_learnable_parameter())
         if load:
             # smc = torch.load(f'../SMC/{load_path}/R{repeat}/SMC_T100_StoFalse_M0_GdyFalse_Sigma4.pt')
-            smc.samples = load_samples
             smc._weights = load_weight[-1]
             smc._weights_history = load_weight
             smc.epsilon_epi = [initial_epsilon]
             smc.epsilon_all_history = load_epsilon
-            smc.episode = initial_episode
-            load = False
             r_all_epi = torch.load(f'../SMC/{load_path}/R{repeat}/Returns_{load_postfix}')
+            initial_episode = len(r_all_epi)
+            print('initial episode', initial_episode)
+            smc.episode = initial_episode
+            gc.collect()
+            load = False
         else:
             # smc = SMC(model=model, initial_params=model.get_learnable_parameter())
             smc.update_history(model.get_learnable_parameter(), torch.log(model._weights))
@@ -930,8 +935,8 @@ if __name__ == '__main__':
                 if done:
                     print("done with", h + 1, 'steps')
                     print('Return', R)
+                    r_all_epi.append(R)
                     break
-            r_all_epi.append(R)
             explore_pct = [model.get_parameter().numpy()[:, i, i, 0] > model.get_parameter().numpy()[:, i, i, 1] for i in range(env.n_cell[0] - 1)]
             explore_pct_all = np.sum([np.logical_and.reduce(explore_pct[:i + 1], axis=0) for i in range(len(explore_pct))], axis=1) / len(smc_samples)
             # plot_save(smc.epsilon_epi, figure_path=dircty, episode=e, repeat=repeat, save=save, title=f'Epsilon{smc.epsilon_all_history[-1]}', show=show)
@@ -941,14 +946,15 @@ if __name__ == '__main__':
             print('explore percentage', explore_pct_all)
             if save:
                 save_results(results=r_all_epi, folder='Returns', dir=dircty, stochastic=STOCHASTIC, episode=e, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=N_PARTICLE, repeat=repeat, episodic=False)
-                save_results(results=smc.samples, folder='Samples', dir=dircty, stochastic=STOCHASTIC, episode=e, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=N_PARTICLE, repeat=repeat, episodic=False)
-                save_results(results=smc._weights_history, folder='Weights', dir=dircty, stochastic=STOCHASTIC, episode=e, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=N_PARTICLE, repeat=repeat, episodic=False)
+                save_results(results=smc.samples[-100:], folder=f'Samples{real_time}', dir=dircty, stochastic=STOCHASTIC, episode=e, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=N_PARTICLE, repeat=repeat, episodic=False)
+                save_results(results=smc._weights_history, folder=f'Weights{real_time}', dir=dircty, stochastic=STOCHASTIC, episode=e, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=N_PARTICLE, repeat=repeat, episodic=False)
                 save_results(results=obs, folder='Obs', dir=dircty, stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=N_PARTICLE, repeat=repeat)
                 save_results(results=smc.epsilon_all_history, folder='Epsilon', dir=dircty, stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=N_PARTICLE, repeat=repeat)
                 # save_results(results=smc, folder='SMC', dir=dircty, stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=N_PARTICLE, repeat=repeat)
             if len(obs._buffers['state0']) == smc.params_dim and new_data_flag:
                 print('============================', '\n', f'Finished exploration with {e} Episodes')
                 # break
+            gc.collect()
         r_all_repeat.append(r_all_epi)
         if save:
             save_results(results=r_all_repeat, folder='Returns', dir=dircty_top, stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=N_PARTICLE, episodic=False)       

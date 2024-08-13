@@ -259,7 +259,7 @@ def save_results(results, folder, training_steps, greedy, epsilon, time, m_z, di
     # repeat = f'Repeat{repeat}_' if episodic else ''
     file_path = f'{dir}{folder}_T{training_steps}_{Episodes}Sto{stochastic}_M{m_z}_Gdy{greedy}_Sigma{prior_sigma}.pt'
     torch.save(results, file_path)
-    print(f'{Episodes}{folder} for repeat {repeat} saved at', file_path)
+    # print(f'{Episodes}{folder} for repeat {repeat} saved at', file_path)
 
 def plot_repeat(data, x, smooth=5, figure_path='../Figures/', labels=[], label='', show=True, save=False, xlabel='', ylabel='MSE', title=None):
     data = np.swapaxes(np.array(data), 0, 1)

@@ -27,6 +27,12 @@ class DeepSea:
         self.action_space = spaces.Discrete(2)
         self.action_size = self.action_space.n
         self.R =  np.round(np.array([-1, 1]) / ( 100 * depth ), 4)
+        Reward = np.zeros(shape=(n_cell[0], n_cell[1], self.action_space.n))
+        Reward[:, :, 0] = self.R[0]
+        Reward[:, :, 1] = self.R[1]
+        Reward[-1, :, :] = 0
+        Reward[-2, -2, 0] = self.treasure
+        self.Reward = Reward
         print('goal: ', goal_position)
         print('start: ', starting_position)
         print('World Scale: ', f'{n_cell[0]}x{n_cell[1]}')
