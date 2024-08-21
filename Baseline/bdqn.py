@@ -23,10 +23,12 @@ from typing import Callable, Optional, Sequence
 parser = argparse.ArgumentParser()
 parser.add_argument('-R', '--random_prior', default=False, action='store_true', help='Bool type')
 parser.add_argument('--seed', default=SEED, type=int)
+parser.add_argument('-s', '--size', default=10, type=int)
 args = parser.parse_args()
 time = datetime.datetime.now().strftime("%Y%m%d_%H%M")
 RANDOM_PRIOR = args.random_prior
 seed = args.seed
+size = args.size
 
 def load_and_record_to_csv_(env,
                            results_dir: str,
@@ -107,10 +109,10 @@ def create_optimizer(learning_rate):
     return snt.optimizers.Adam(learning_rate)
 
 # Initialize the CustomDeepSea environment
-results_dir = f'/tmp/bsuite_results_Random{RANDOM_PRIOR}'
-custom_env = CustomDeepSea(size=5, randomize_actions=False, seed=seed)
+custom_env = CustomDeepSea(size=size, randomize_actions=False, seed=seed)
 
 #Modified env by adding positive reward for going left
+results_dir = f'/tmp/bsuite_results_Random{RANDOM_PRIOR}_{custom_env._size}'
 env = load_and_record_to_csv_(custom_env, results_dir=results_dir, overwrite=True)
 
 #original env
@@ -166,7 +168,7 @@ agent = BootstrappedDqn(
 experiment.run(
       agent=agent,
       environment=env,
-      num_episodes=1000,
+      num_episodes=40000,
       verbose=True)
 
 # Load the results for plotting
@@ -202,8 +204,8 @@ def plot_results(mean_df, std_df):
     plt.plot(mean_df['episode'], mean_df['episode_return'], label='Mean Return')
     plt.fill_between(
         mean_df['episode'],
-        mean_df['episode_return'] - std_df['episode_return'],
-        mean_df['episode_return'] + std_df['episode_return'],
+        mean_df['episode_return'] - 0.3*std_df['episode_return'],
+        mean_df['episode_return'] + 0.3*std_df['episode_return'],
         color='blue',
         alpha=0.2,
         label='±1 Standard Deviation'

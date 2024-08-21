@@ -55,7 +55,7 @@ class SMC:
         for m in range(training_steps_with_burnin):
             accept_probs_particle = torch.zeros(self.n_particle)
             for j in range(self.n_particle):
-                posterior_samples, accept_probs, mcmc, kernel, logdensities, proposed_logdensities, = MCMC_update(Model=self.SMC_Model, posterior_samples=[smc_samples[j]], env=env, num_samples=training_steps, training_steps_with_burnin=1, training_steps=1, stepsize=step_size[j], num_steps=L[j], precondition_matrix=precondition_matrix, USE_AUTOGRAD=USE_AUTOGRAD, WARMUP_RATIO=WARMUP_RATIO, MCMC_SHOW_DISABLE=MCMC_SHOW_DISABLE, ADAPT_STEP_SIZE=ADAPT_STEP_SIZE, ADAPT_MASS_MATRIX=ADAPT_MASS_MATRIX, kernel='HMC')
+                posterior_samples, accept_probs, mcmc, kernel, logdensities, proposed_logdensities, = MCMC_update(Model=self.SMC_Model, posterior_samples=[smc_samples[j]], env=env, training_steps_with_burnin=1, training_steps=1, stepsize=step_size[j], num_steps=L[j], precondition_matrix=precondition_matrix, USE_AUTOGRAD=USE_AUTOGRAD, WARMUP_RATIO=WARMUP_RATIO, MCMC_SHOW_DISABLE=MCMC_SHOW_DISABLE, ADAPT_STEP_SIZE=ADAPT_STEP_SIZE, ADAPT_MASS_MATRIX=ADAPT_MASS_MATRIX, kernel='HMC')
                 smc_samples[j] = posterior_samples[-1]
                 accept_probs_particle[j] = accept_probs[-1]
             accept_probs_all = torch.cat((accept_probs_all, accept_probs_particle.unsqueeze(0)))
@@ -861,7 +861,6 @@ if __name__ == '__main__':
             smc.epsilon_all_history = load_epsilon
             r_all_epi = torch.load(f'../SMC/{load_path}/R{repeat}/Returns_{load_postfix}')
             initial_episode = len(r_all_epi)
-            print('initial episode', initial_episode)
             smc.episode = initial_episode
             gc.collect()
             load = False
@@ -946,7 +945,7 @@ if __name__ == '__main__':
             print('explore percentage', explore_pct_all)
             if save:
                 save_results(results=r_all_epi, folder='Returns', dir=dircty, stochastic=STOCHASTIC, episode=e, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=N_PARTICLE, repeat=repeat, episodic=False)
-                save_results(results=smc.samples[-100:], folder=f'Samples{real_time}', dir=dircty, stochastic=STOCHASTIC, episode=e, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=N_PARTICLE, repeat=repeat, episodic=False)
+                save_results(results=smc.samples, folder=f'Samples{real_time}', dir=dircty, stochastic=STOCHASTIC, episode=e, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=N_PARTICLE, repeat=repeat, episodic=False)
                 save_results(results=smc._weights_history, folder=f'Weights{real_time}', dir=dircty, stochastic=STOCHASTIC, episode=e, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=N_PARTICLE, repeat=repeat, episodic=False)
                 save_results(results=obs, folder='Obs', dir=dircty, stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=N_PARTICLE, repeat=repeat)
                 save_results(results=smc.epsilon_all_history, folder='Epsilon', dir=dircty, stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=N_PARTICLE, repeat=repeat)
