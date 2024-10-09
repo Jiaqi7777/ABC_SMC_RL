@@ -69,12 +69,15 @@ class DeepSea:
                 not_learnable_idx.append(np.array((i, j, 0,)))
                 not_learnable_idx.append(np.array((i, j, 1,)))
         self.not_learnable_idx = tuple(torch.tensor(np.array(not_learnable_idx)).T)
+        self.count = torch.zeros(n_cell)
 
     def reset(self):
         self.state = self.starting_position
+        self.count[self.state] += 1
         #self.state = random.choice(range(self.n_cell))
         self.done = False
         self.expert_obs = Buffer(['state0', 'state1', 'action', 'rewards', 'done'])
+        self.count = torch.zeros(self.n_cell)
         return self.state, None
     
     def step(self, action, state=None, multiple=False):
@@ -83,6 +86,7 @@ class DeepSea:
             real_step = True
             state = self.state
             self.state = new_state = tuple(self.P[self.state + (action, )])
+            self.count[self.state] += 1
         else:
             real_step = False
             if np.array(state).shape > np.array(self.starting_position).shape:

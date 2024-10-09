@@ -258,10 +258,12 @@ class SMC:
     def update_history(self, smc_samples=None, weights=None):
         if smc_samples is not None:
             self.model.set_learnable_parameter(torch.tensor(smc_samples))
-            self.samples = torch.cat((self.samples, self.model.get_parameter().unsqueeze(0)))
+            self.samples = torch.cat((self.samples, self.model.get_parameter().unsqueeze(0)))[-10:]
         if weights is not None:
-            self._weights_history = torch.cat((self._weights_history, torch.exp(weights).unsqueeze(0)))
-            self.ess_history = torch.cat((self.ess_history, self.ESS(weights).unsqueeze(0)))
+            self._weights_history = torch.cat((self._weights_history, torch.exp(weights).unsqueeze(0)))[-10:]
+            self.ess_history = torch.cat((self.ess_history, self.ESS(weights).unsqueeze(0)))[-10:]
+        self.epsilon_all_history = self.epsilon_all_history[-10:]
+        self.epsilon_history = self.epsilon_history[-10:]
 
     def remove_history(self, index):
         self.samples  = self.samples[: - (index - 1)]
@@ -778,8 +780,8 @@ if __name__ == '__main__':
     if env_name == 'Maze':
         env = Maze()
     if env_name == 'DeepSea':
-        env = DeepSea(depth=30)
-        EPISODES = 200000#env.n_cell[0] * 100
+        env = DeepSea(depth=40)
+        EPISODES = 30000#env.n_cell[0] * 100
     
     S = []
     if len(env.n_cell) == 1:
@@ -806,10 +808,8 @@ if __name__ == '__main__':
     compromise_alpha = COMPROMISE_ALPHA
     
     env.reset()
-    results = []
     r_all_repeat = []
     samples_all_repeat = []
-    smc_all_repeat = []
     dircty = ''
     
     time = load_path.split('/')[-1] if load else args.time
@@ -827,16 +827,19 @@ if __name__ == '__main__':
                     for key, value in vars(args).items():
                         para_txt.write(f"{key}: {value}\n")
     
-    for repeat in range(REPEAT_EXPERIMENT):
+    for repeat in range(1, REPEAT_EXPERIMENT):
         if load:
             load_postfix = f'T{training_steps}_StoFalse_M{N_PARTICLE}_GdyFalse_Sigma{PRIOR_SIGMA}.pt'
+            r_all_epi = torch.load(f'../SMC/{load_path}/R{repeat}/Returns_{load_postfix}')
+            initial_episode = len(r_all_epi)
             load_samples = torch.load(f'../SMC/{load_path}/R{repeat}/Samples{args.sample_path}_{load_postfix}')[-1:]
             load_weight = torch.load(f'../SMC/{load_path}/R{repeat}/Weights{args.sample_path}_{load_postfix}')[-1:]
-            load_epsilon = torch.load(f'../SMC/{load_path}/R{repeat}/Epsilon_{load_postfix}')
+            load_epsilon = torch.load(f'../SMC/{load_path}/R{repeat}/Epsilon{args.sample_path}_{load_postfix}')[-1:]
             initial_obs = torch.load(f'../SMC/{load_path}/R{repeat}/Obs_{load_postfix}')
             initial_tables = load_samples[-1]
             initial_weights = load_weight[-1]
             initial_epsilon = load_epsilon[-1]
+            env.count = torch.load(f'../SMC/{load_path}/R{repeat}/Counts{args.sample_path}_{load_postfix}')[-1:]
             
         else:
             initial_tables = None
@@ -844,6 +847,7 @@ if __name__ == '__main__':
             initial_obs = Buffer(['state0', 'state1', 'action', 'rewards', 'done'])
             initial_episode = 0
             initial_epsilon = abc_epsilon
+            r_all_epi = []
         if save:
             dircty = f'{dircty_top}R{repeat}/'
             if not os.path.exists(dircty):
@@ -859,8 +863,6 @@ if __name__ == '__main__':
             smc._weights_history = load_weight
             smc.epsilon_epi = [initial_epsilon]
             smc.epsilon_all_history = load_epsilon
-            r_all_epi = torch.load(f'../SMC/{load_path}/R{repeat}/Returns_{load_postfix}')
-            initial_episode = len(r_all_epi)
             smc.episode = initial_episode
             gc.collect()
             load = False
@@ -881,7 +883,7 @@ if __name__ == '__main__':
             # h = 0
             # while True: #Turn on h += 1
             new_data_flag = False
-            for h in tqdm(range(HORIZON)):
+            for h in range(HORIZON):
                 action = model.act(s0, para, greedy=GREEDY)
                 s1, r, done, *info = env.step(action)
                 # if STOCHASTIC:
@@ -939,7 +941,7 @@ if __name__ == '__main__':
             explore_pct = [model.get_parameter().numpy()[:, i, i, 0] > model.get_parameter().numpy()[:, i, i, 1] for i in range(env.n_cell[0] - 1)]
             explore_pct_all = np.sum([np.logical_and.reduce(explore_pct[:i + 1], axis=0) for i in range(len(explore_pct))], axis=1) / len(smc_samples)
             # plot_save(smc.epsilon_epi, figure_path=dircty, episode=e, repeat=repeat, save=save, title=f'Epsilon{smc.epsilon_all_history[-1]}', show=show)
-            plot_save(smc.epsilon_all_history[:], figure_path=dircty, repeat=repeat, save=save, title=f'Epsilon', show=show)
+            # plot_save(smc.epsilon_all_history[:], figure_path=dircty, repeat=repeat, save=save, title=f'Epsilon', show=show)
             # plot_save(smc.mcmc_steps_epi[:], figure_path=dircty, episode=e, repeat=repeat, save=save, title=f'MCMCSteps', show=show)
             # plot_save(smc.ess_history[:], figure_path=dircty, repeat=repeat, save=save, title='ESS')
             print('explore percentage', explore_pct_all)
@@ -948,7 +950,8 @@ if __name__ == '__main__':
                 save_results(results=smc.samples, folder=f'Samples{real_time}', dir=dircty, stochastic=STOCHASTIC, episode=e, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=N_PARTICLE, repeat=repeat, episodic=False)
                 save_results(results=smc._weights_history, folder=f'Weights{real_time}', dir=dircty, stochastic=STOCHASTIC, episode=e, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=N_PARTICLE, repeat=repeat, episodic=False)
                 save_results(results=obs, folder='Obs', dir=dircty, stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=N_PARTICLE, repeat=repeat)
-                save_results(results=smc.epsilon_all_history, folder='Epsilon', dir=dircty, stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=N_PARTICLE, repeat=repeat)
+                save_results(results=smc.epsilon_all_history, folder=f'Epsilon{real_time}', dir=dircty, stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=N_PARTICLE, repeat=repeat)
+                save_results(results=env.count, folder=f'Counts{real_time}', dir=dircty, stochastic=STOCHASTIC, episode=e, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=N_PARTICLE, repeat=repeat, episodic=False)
                 # save_results(results=smc, folder='SMC', dir=dircty, stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=N_PARTICLE, repeat=repeat)
             if len(obs._buffers['state0']) == smc.params_dim and new_data_flag:
                 print('============================', '\n', f'Finished exploration with {e} Episodes')
