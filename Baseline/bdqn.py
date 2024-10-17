@@ -112,7 +112,7 @@ def create_optimizer(learning_rate):
 custom_env = CustomDeepSea(size=size, randomize_actions=False, seed=seed)
 
 #Modified env by adding positive reward for going left
-results_dir = f'/tmp/bsuite_results_Random{RANDOM_PRIOR}_{custom_env._size}'
+results_dir = f'../Baseline/results/{custom_env._size}/Random{RANDOM_PRIOR}'
 env = load_and_record_to_csv_(custom_env, results_dir=results_dir, overwrite=True)
 
 #original env
@@ -168,7 +168,7 @@ agent = BootstrappedDqn(
 experiment.run(
       agent=agent,
       environment=env,
-      num_episodes=40000,
+      num_episodes=10000,
       verbose=True)
 
 # Load the results for plotting

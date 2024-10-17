@@ -22,7 +22,7 @@ from parameter import *
 
 class SMC:
     """the class to run SMC"""
-    def __init__(self, model, Model=None, min_ess=0.5, num_samples=None, initial_params=None, params_dim=None, adapt_alg=ADAPT_ALG):
+    def __init__(self, model, Model=None, min_ess=0.5, num_samples=None, initial_params=None, params_dim=None, adapt_alg=ADAPT_ALG, buffer_size=10):
         assert initial_params is not None or params_dim is not None, "Should either specify initial_params or params_dim"
         if initial_params is not None:
             self.initial_params = initial_params
@@ -729,6 +729,7 @@ if __name__ == '__main__':
     parser.add_argument('--MCMC', default=True, action='store_false', help='Bool type')
     parser.add_argument('-g', '--Greedy', default=GREEDY, action='store_true', help='Bool type')
     parser.add_argument('--Env', default=ENV_NAME)
+    parser.add_argument('--Env_d', default=15, type=int)
     parser.add_argument('--sto', default=False)
     parser.add_argument('--online', default=False, action='store_true', help='Bool type')
     parser.add_argument('--auto', default=False, action='store_true', help='Bool type')
@@ -751,6 +752,7 @@ if __name__ == '__main__':
     MASS = args.mass
     GREEDY = args.Greedy
     env_name = args.Env
+    env_depth = args.Env_d
     STOCHASTIC = args.sto
     ONLINE_LEARNING = args.online
     USE_AUTOGRAD = args.auto
@@ -774,14 +776,18 @@ if __name__ == '__main__':
     np.random.seed(seed)
     torch.manual_seed(seed)
     
+    load_path_info = load_path.split('/')
+    time = load_path_info[-1] if load else args.time
     if env_name == 'GridWorld':
         env = GridWorld((1,2), obstacles=False, stochastic=STOCHASTIC)
         # env.plot_env()
     if env_name == 'Maze':
         env = Maze()
     if env_name == 'DeepSea':
-        env = DeepSea(depth=40)
-        EPISODES = 30000#env.n_cell[0] * 100
+        if load:
+            env_depth = int(load_path_info[0])
+        env = DeepSea(depth=env_depth)
+        EPISODES = 10000#env.n_cell[0] * 100
     
     S = []
     if len(env.n_cell) == 1:
@@ -795,6 +801,7 @@ if __name__ == '__main__':
             for i in range(env.n_cell[0]):
                 for j in range(env.n_cell[1]):
                     S.append((i, j)) 
+    buffer_size = 10 if max(env.n_cell) >=20 else 1000
     Q = np.zeros(shape=(env.n_cell + (env.action_space.n, ))) / env.observation_space.n / env.action_space.n
     A = range(env.action_space.n)
     # pi_star, Q_star, V_star = OfflineQLearning(Q, A, S, env, gamma=GAMMA, show=show, thresh=1e-3, alpha=1)
@@ -812,11 +819,10 @@ if __name__ == '__main__':
     samples_all_repeat = []
     dircty = ''
     
-    time = load_path.split('/')[-1] if load else args.time
     real_time = args.time
     print('time', time)
     if save:
-        dircty_top = f'../SMC/{env.n_cell[0]}/{time}/'
+        dircty_top = f'../SMC/{env.n_cell[0]}/{time}/' if STOPPING_CRITERIA == 'fixed_reduce' else f'../SMC/0adaptive/{env.n_cell[0]}/{time}/'
         if not os.path.exists(dircty_top):
             os.makedirs(dircty_top)
             if not load:
@@ -829,6 +835,14 @@ if __name__ == '__main__':
     
     for repeat in range(1, REPEAT_EXPERIMENT):
         if load:
+            folder_path = f'../SMC/{load_path}/R{repeat}'
+            for file_name in os.listdir(folder_path):
+                if file_name.startswith('Returns') and file_name.endswith('.pt'):
+                    return_path = os.path.join(folder_path, file_name)
+                    r_all_epi = torch.load(return_path)
+                    break
+            return_path = return_path.split('/')[-1].split('.')[0]
+            training_steps, N_PARTICLE, PRIOR_SIGMA = int(return_path.split('_')[1].split('T')[1]), int(return_path.split('_')[3].split('M')[1]), int(return_path.split('_')[5].split('Sigma')[1])
             load_postfix = f'T{training_steps}_StoFalse_M{N_PARTICLE}_GdyFalse_Sigma{PRIOR_SIGMA}.pt'
             r_all_epi = torch.load(f'../SMC/{load_path}/R{repeat}/Returns_{load_postfix}')
             initial_episode = len(r_all_epi)
@@ -839,9 +853,10 @@ if __name__ == '__main__':
             initial_tables = load_samples[-1]
             initial_weights = load_weight[-1]
             initial_epsilon = load_epsilon[-1]
-            env.count = torch.load(f'../SMC/{load_path}/R{repeat}/Counts{args.sample_path}_{load_postfix}')[-1:]
+            env.count = torch.load(f'../SMC/{load_path}/R{repeat}/Counts_{load_postfix}')[-1:]
             
         else:
+            env.reset_count()
             initial_tables = None
             initial_weights = torch.ones(N_PARTICLE) / N_PARTICLE
             initial_obs = Buffer(['state0', 'state1', 'action', 'rewards', 'done'])
@@ -856,7 +871,7 @@ if __name__ == '__main__':
         STEPSIZE = INITIAL_STEPSIZE
         # model = Tabular(env=env, n_particle=N_PARTICLE, prior='normal', gamma=GAMMA)
         model = Tabular(env=env, n_particle=N_PARTICLE, prior='normal', mean=PRIOR_MEAN, std=PRIOR_SIGMA, gamma=GAMMA, initial_tables=initial_tables, initial_weights=initial_weights, idx=FROZEN_IDX)#For frozen all but one dimensions
-        smc = SMC(model=model, initial_params=model.get_learnable_parameter())
+        smc = SMC(model=model, initial_params=model.get_learnable_parameter(), buffer_size=buffer_size)
         if load:
             # smc = torch.load(f'../SMC/{load_path}/R{repeat}/SMC_T100_StoFalse_M0_GdyFalse_Sigma4.pt')
             smc._weights = load_weight[-1]
@@ -934,7 +949,7 @@ if __name__ == '__main__':
                         pre_sample_size -= min(pre_sample_size, 10)
                     # display_smc_results(smc, n=pre_sample_size, episode=e, repeat=repeat, save=save, figure_path=dircty, show=show)
                 if done:
-                    print("done with", h + 1, 'steps')
+                    # print("done with", h + 1, 'steps')
                     print('Return', R)
                     r_all_epi.append(R)
                     break
@@ -951,7 +966,7 @@ if __name__ == '__main__':
                 save_results(results=smc._weights_history, folder=f'Weights{real_time}', dir=dircty, stochastic=STOCHASTIC, episode=e, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=N_PARTICLE, repeat=repeat, episodic=False)
                 save_results(results=obs, folder='Obs', dir=dircty, stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=N_PARTICLE, repeat=repeat)
                 save_results(results=smc.epsilon_all_history, folder=f'Epsilon{real_time}', dir=dircty, stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=N_PARTICLE, repeat=repeat)
-                save_results(results=env.count, folder=f'Counts{real_time}', dir=dircty, stochastic=STOCHASTIC, episode=e, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=N_PARTICLE, repeat=repeat, episodic=False)
+                save_results(results=env.count, folder=f'Counts', dir=dircty, stochastic=STOCHASTIC, episode=e, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=N_PARTICLE, repeat=repeat, episodic=False)
                 # save_results(results=smc, folder='SMC', dir=dircty, stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=N_PARTICLE, repeat=repeat)
             if len(obs._buffers['state0']) == smc.params_dim and new_data_flag:
                 print('============================', '\n', f'Finished exploration with {e} Episodes')
