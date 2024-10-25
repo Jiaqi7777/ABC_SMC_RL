@@ -219,8 +219,8 @@ def plot_results(mean_df, std_df):
     plt.show()
 
 # Load and aggregate the data
-df = load_multiple_csv(results_dir)
-mean_df, std_df = aggregate_data(df)
+# df = load_multiple_csv(results_dir)
+# mean_df, std_df = aggregate_data(df)
 
 # Plot the results
-plot_results(mean_df, std_df)
+# plot_results(mean_df, std_df)

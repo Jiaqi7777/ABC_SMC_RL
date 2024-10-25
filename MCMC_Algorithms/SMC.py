@@ -37,6 +37,7 @@ class SMC:
         self.SMC_Model = Model
         self.adapt_alg = adapt_alg
         self.reset_stat()
+        self._buffer_size = buffer_size
         # self.kernel = 'HMC' if adapt_alg == 'pretune' else 'NUTS'
 
     def set_weights(self, weights):
@@ -258,12 +259,12 @@ class SMC:
     def update_history(self, smc_samples=None, weights=None):
         if smc_samples is not None:
             self.model.set_learnable_parameter(torch.tensor(smc_samples))
-            self.samples = torch.cat((self.samples, self.model.get_parameter().unsqueeze(0)))[-10:]
+            self.samples = torch.cat((self.samples, self.model.get_parameter().unsqueeze(0)))[-self._buffer_size:]
         if weights is not None:
-            self._weights_history = torch.cat((self._weights_history, torch.exp(weights).unsqueeze(0)))[-10:]
-            self.ess_history = torch.cat((self.ess_history, self.ESS(weights).unsqueeze(0)))[-10:]
-        self.epsilon_all_history = self.epsilon_all_history[-10:]
-        self.epsilon_history = self.epsilon_history[-10:]
+            self._weights_history = torch.cat((self._weights_history, torch.exp(weights).unsqueeze(0)))[-self._buffer_size:]
+            self.ess_history = torch.cat((self.ess_history, self.ESS(weights).unsqueeze(0)))[-self._buffer_size:]
+        self.epsilon_all_history = self.epsilon_all_history[-self._buffer_size:]
+        self.epsilon_history = self.epsilon_history[-self._buffer_size:]
 
     def remove_history(self, index):
         self.samples  = self.samples[: - (index - 1)]
@@ -787,7 +788,7 @@ if __name__ == '__main__':
         if load:
             env_depth = int(load_path_info[0])
         env = DeepSea(depth=env_depth)
-        EPISODES = 10000#env.n_cell[0] * 100
+        EPISODES = 30000#env.n_cell[0] * 100
     
     S = []
     if len(env.n_cell) == 1:
@@ -853,7 +854,7 @@ if __name__ == '__main__':
             initial_tables = load_samples[-1]
             initial_weights = load_weight[-1]
             initial_epsilon = load_epsilon[-1]
-            env.count = torch.load(f'../SMC/{load_path}/R{repeat}/Counts_{load_postfix}')[-1:]
+            env.count = torch.load(f'../SMC/{load_path}/R{repeat}/Counts_{load_postfix}')
             
         else:
             env.reset_count()

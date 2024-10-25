@@ -1,4 +1,6 @@
 from parameter import *
+import sys
+import numpy as np
 
 class UCRL2Agent:
     def __init__(self, env, horizon=HORIZON, alpha=0.2, gamma=1, delta=0.8, tol=1e-2):
@@ -107,6 +109,135 @@ class UCRL2Agent:
             self.evi(S)
             # plot_obs(agent.obs, env, env_name=ENV_NAME, title=f'ExplorationE{e}', additional_info=V_star, figure_path=dircty, save=save, show=show)
 
+# PSRL agent for 2D Grid
+class PSRL:
+    def __init__(self, env, gamma=1):
+        self.n = env.n_cell[0]
+        self.n_actions = env.action_space.n
+        self.return_l = []
+        self.Q = np.zeros((self.n, self.n, self.n_actions))
+        self.gamma = gamma
+        # self.horizon = horizon
+        
+        # Initialize transition counts and rewards as if observed 10 times
+        self.transition_counts = np.ones((self.n, self.n, self.n_actions, self.n, self.n)) 
+        self.rewards = np.zeros((self.n, self.n, self.n_actions))
+        self.reward_counts = np.ones((self.n, self.n, self.n_actions))
+
+    def update_model(self, s, action, r, s_prime):
+        """ Update the transition and reward model. """
+        self.transition_counts[s[0], s[1], action, s_prime[0], s_prime[1]] += 10
+        self.reward_counts[s[0], s[1], action] += 10
+        self.rewards[s[0], s[1], action] += 10 * r
+
+    def sample_model(self):
+        """ Sample the transition and reward models for planning. """
+        sampled_transitions = np.zeros((self.n, self.n, self.n_actions, self.n, self.n))
+        sampled_rewards = np.zeros((self.n, self.n, self.n_actions))
+        
+        for i in range(self.n - 1):
+            for j in range(i+1):
+                for a in range(self.n_actions):
+                    # Sample next state based on transition counts
+                    sampled_transitions[i, j, a] = np.random.dirichlet(self.transition_counts[i, j, a].flatten()).reshape(self.n, self.n)
+                    # print(np.random.dirichlet(self.transition_counts[i, j, a].flatten()).reshape(5,5)[0], sampled_transitions[i, j, a][0])
+                    # Sample reward based on observed rewards
+                    reward_mean = self.rewards[i, j, a] / self.reward_counts[i, j, a]
+                    sampled_rewards[i, j, a] = np.random.normal(reward_mean, 0.1 / np.sqrt(self.reward_counts[i, j, a]))
+        return sampled_transitions, sampled_rewards
+    
+    def plan_old(self, transitions, rewards):
+        """ Value iteration to find the optimal policy. """
+        V = np.zeros((self.n, self.n))
+        policy = np.zeros((self.n, self.n), dtype=int)
+        
+        for _ in range(self.n):
+            V_next = np.zeros((self.n, self.n))
+            for i in range(self.n):
+                for j in range(i+1):
+                    Q_values = [rewards[i, j, a] + self.gamma * V[transitions[i, j, a][0], transitions[i, j, a][1]]
+                                for a in range(self.n_actions)]
+                    V_next[i, j] = max(Q_values)
+                    max_indices = np.flatnonzero(Q_values == np.max(Q_values))
+                    policy[i, j] = np.random.choice(max_indices)
+                    self.Q[i, j] = torch.tensor(Q_values)
+            V = V_next
+        return policy
+    def plan(self, transition_model, reward_model, max_iterations=1000, tol=1e-6):
+        # Initialize value function for all states
+        V = np.zeros((self.n, self.n))
+        
+        # Run value iteration
+        for _ in range(max_iterations):
+            V_prev = V.copy()
+            for i in range(self.n - 1):
+                for j in range(i+1):
+                # Bellman update for each state
+                    V[i, j] = max(
+                        reward_model[i, j, a] + self.gamma * np.sum(transition_model[i, j, a] * V_prev)
+                        for a in range(self.n_actions)
+                    )
+            # Check for convergence
+            if np.max(np.abs(V - V_prev)) < tol:
+                break
+        
+        # Extract the optimal policy
+        policy = np.zeros((self.n, self.n), dtype=int)
+        for i in range(self.n - 1):
+                for j in range(i+1):
+                    self.Q[i, j] = np.array([
+                        reward_model[i, j, a] + self.gamma * np.sum(transition_model[i, j, a] * V)
+                        for a in range(self.n_actions)
+                    ])
+                    policy[i, j] = np.argmax([self.Q[i, j]])
+        
+        return policy
+
+# UCRL2 agent for 2D Grid
+class UCRL2:
+    def __init__(self, env):
+        self.n = env.n_cell[0]
+        self.n_actions = env.action_space.n
+        # self.horizon = horizon
+        
+        # Initialize transition counts and rewards as if observed 10 times
+        self.transition_counts = np.ones((self.n, self.n, self.n_actions, self.n, self.n)) * 10
+        self.reward_sums = np.zeros((self.n, self.n, self.n_actions))
+        self.reward_counts = np.ones((self.n, self.n, self.n_actions)) * 10
+
+    def update_model(self, s, action, r, s_prime):
+        """ Update the transition and reward models. """
+        self.transition_counts[s[0], s[1], action, s_prime[0], s_prime[1]] += 10
+        self.reward_sums[s[0], s[1], action] += 10 * r
+        self.reward_counts[s[0], s[1], action] += 10
+
+    def compute_confidence_bounds(self, s, a, total_transitions):
+        """ Compute reduced confidence bounds (scaled by factor of 10). """
+        return 1 / np.sqrt(10 * total_transitions[s[0], s[1], a])
+
+    def plan(self, gamma=1):
+        """ Value iteration with confidence bounds. """
+        V = np.zeros((self.n, self.n))
+        policy = np.zeros((self.n, self.n), dtype=int)
+        
+        for _ in range(self.horizon):
+            V_next = np.zeros((self.n, self.n))
+            for i in range(self.n):
+                for j in range(self.n):
+                    Q_values = []
+                    for a in range(self.n_actions):
+                        total_transitions = np.sum(self.transition_counts[i, j, a])
+                        expected_reward = self.reward_sums[i, j, a] / self.reward_counts[i, j, a]
+                        confidence_bound = self.compute_confidence_bounds((i, j), a, total_transitions)
+                        Q_value = expected_reward + confidence_bound + gamma * np.max(V)
+                        Q_values.append(Q_value)
+                    V_next[i, j] = max(Q_values)
+                    policy[i, j] = np.argmax(Q_values)
+            V = V_next
+        self.Q = Q_values
+        return policy
+
+
         
 if __name__ == '__main__':
     # from tqdm import tqdm
@@ -132,6 +263,9 @@ if __name__ == '__main__':
     parser.add_argument('--seed', default=SEED, type=int)
     parser.add_argument('-c', '--c_ucb', default=1, type=float)
     parser.add_argument('--Env', default=ENV_NAME)
+    parser.add_argument('--algorithm', default='PSRL', type=str)
+    parser.add_argument('--Env_d', default=10, type=int)
+    parser.add_argument('--episode', default=100, type=int)
     args = parser.parse_args()
     time = args.time
     save = args.save
@@ -140,72 +274,134 @@ if __name__ == '__main__':
     c = args.c_ucb
     training_steps = args.training_step
     env_name = args.Env
+    algorithm = args.algorithm
+    Env_d = args.Env_d
+    EPISODES = args.episode
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     
     dircty=''
-
-    if env_name == 'GridWorld':
-        env = GridWorld((1, 2), obstacles=False, stochastic=STOCHASTIC)
-        # env.plot_env()
-    if env_name == 'Maze':
-        env = Maze()
-    if env_name == 'DeepSea':
-        env = DeepSea(depth=3)
-        EPISODES = 1#env.n_cell[0] * 100
-    if save:
-        dircty_top = f'../UCRL2/{env.n_cell[0]}/c{c}/{time}/'
-        if not os.path.exists(dircty_top):
-            os.makedirs(dircty_top)
-    
-    S = []
-    if len(env.n_cell) == 1:
-        S = [(i, ) for i in range(env.n_cell[0])]
-    else:
+    ep_l = [40000, 80000, 100000, 150000, 160000, 180000, 200000, 300000]
+    for idx, env_d in enumerate([15, 20, 25, 30, 35, 40, 45, 50]):
+        print(f'Running {env_d} depth with {ep_l[idx]} episodes')
+        if env_name == 'GridWorld':
+            env = GridWorld((1, 2), obstacles=False, stochastic=STOCHASTIC)
+            # env.plot_env()
+        if env_name == 'Maze':
+            env = Maze()
         if env_name == 'DeepSea':
-            for i in range(env.n_cell[0] - 1):
-                for j in range(env.n_cell[1]):
-                    S.append((i, j)) 
-        else:
-            for i in range(env.n_cell[0]):
-                for j in range(env.n_cell[1]):
-                    S.append((i, j)) 
-    Q_dp = np.zeros(shape=(env.n_cell + (env.action_space.n, ))) / env.observation_space.n / env.action_space.n
-    A = range(env.action_space.n)
-    # pi_star, Q_star, V_star = OfflineQLearning(Q, A, S, env, gamma=GAMMA, show=show, thresh=1e-3, alpha=1)
-    pi_star, Q_star, V_star = DynamicProgramming(Q_dp, A, S, env, gamma=GAMMA, show=show)
-    dim = env.observation_space.n * env.action_space.n
-    # Q = np.random.normal(loc=PRIOR_MEAN, scale=PRIOR_SIGMA, size=(env.n_cell + (env.action_space.n, )))
-    # if env.not_learnable_idx:
-    #     Q[env.not_learnable_idx] = 0
-    
-    env.reset()
-    results = []
-    r_all_repeat = []
-    Q_all_repeat = []
-    N_all_repeat = []
-
-    dircty = ''
-    for repeat in range(REPEAT_EXPERIMENT_NAIVE):
-        agent = UCRL2Agent(env=env)
+            env = DeepSea(depth=env_d)
+            EPISODES = ep_l[idx]#env.n_cell[0] * 100
         if save:
-            dircty = f'{dircty_top}R{repeat}/'
-            if not os.path.exists(dircty):
-                os.makedirs(dircty)
+            dircty_top = f'../{algorithm}/{env.n_cell[0]}/{time}/'
+            if not os.path.exists(dircty_top):
+                os.makedirs(dircty_top)
         
-        agent.train(env, EPISODES, S)
+        S = []
+        if len(env.n_cell) == 1:
+            S = [(i, ) for i in range(env.n_cell[0])]
+        else:
+            if env_name == 'DeepSea':
+                for i in range(env.n_cell[0] - 1):
+                    for j in range(env.n_cell[1]):
+                        S.append((i, j)) 
+            else:
+                for i in range(env.n_cell[0]):
+                    for j in range(env.n_cell[1]):
+                        S.append((i, j)) 
+        Q_dp = np.zeros(shape=(env.n_cell + (env.action_space.n, ))) / env.observation_space.n / env.action_space.n
+        A = range(env.action_space.n)
+        # pi_star, Q_star, V_star = OfflineQLearning(Q, A, S, env, gamma=GAMMA, show=show, thresh=1e-3, alpha=1)
+        pi_star, Q_star, V_star = DynamicProgramming(Q_dp, A, S, env, gamma=GAMMA, show=show)
+        dim = env.observation_space.n * env.action_space.n
+        # Q = np.random.normal(loc=PRIOR_MEAN, scale=PRIOR_SIGMA, size=(env.n_cell + (env.action_space.n, )))
+        # if env.not_learnable_idx:
+        #     Q[env.not_learnable_idx] = 0
+        
+        env.reset()
+        results = []
+        r_all_repeat = []
+        Q_all_repeat = []
+        N_all_repeat = []
+        R_count_all_repeat = []
 
-        r_all_repeat.append(agent.return_l)
-        Q_all_repeat.append(agent.Q)
-        N_all_repeat.append(agent.N)
-        if save:
-            torch.save(r_all_repeat, f'{dircty_top}Return.pt')
-            torch.save(Q_all_repeat, f'{dircty_top}Q.pt')
-            torch.save(N_all_repeat, f'{dircty_top}N.pt')
-        print(r_all_repeat)
-        plot_return_vs_episodes(agent.return_l, repeat=repeat, save=save, figure_path=dircty, show=show)
+        dircty = ''
+        for repeat in range(REPEAT_EXPERIMENT_NAIVE):
+            print(f'Running {algorithm} for {repeat}th time')
+            sys.stdout.flush()
+            # agent = UCRL2Agent(env=env)
+            if algorithm == 'PSRL':
+                agent = PSRL(env)
+                psrl_transitions, psrl_rewards = agent.sample_model()
+                psrl_policy = agent.plan(psrl_transitions, psrl_rewards)
+                for episode in range(EPISODES):
+                    # PSRL planning
+                    psrl_transitions, psrl_rewards = agent.sample_model()
+                    psrl_policy = agent.plan(psrl_transitions, psrl_rewards)
+                    s0, _ = env.reset()
+                    done = False
+                    R = 0
+                    while not done:
+                        action = psrl_policy[s0]
+                        s1, r, done, *info = env.step(action)
+                        agent.update_model(s0, action, r, s1)
+                        s0 = s1
+                        R += r
+                    agent.return_l.append(R)
+            # UCRL2 planning
+            elif algorithm == 'UCRL2':
+                agent = UCRL2(env)
+                ucrl2_policy = agent.plan()
+                for episode in range(EPISODES):
+                    # PSRL planning
+                    ucrl2_policy = agent.plan()
+                    s0, _ = env.reset()
+                    done = False
+                    R = 0
+                    while not done:
+                        action = ucrl2_policy[s0]
+                        s1, r, done, *info = env.step(action)
+                        agent.update_model(s0, action, r, s1)
+                        s0 = s1
+                        R += r
+                    agent.return_l.append(R)
+            
+            # if save:
+            #     dircty = f'{dircty_top}R{repeat}/'
+            #     if not os.path.exists(dircty):
+            #         os.makedirs(dircty)
+            
+            # agent.train(env, EPISODES, S)
 
-    plot_return_vs_episodes_repeat(r_all_repeat, save=save, figure_path=dircty, show=show, smooth=1)
-    if show:
-        plt.show()
+
+            r_all_repeat.append(agent.return_l)
+            Q_all_repeat.append(agent.Q)
+            N_all_repeat.append(agent.transition_counts)
+            R_count_all_repeat.append(agent.reward_counts)  
+            if save:
+                torch.save(r_all_repeat, f'{dircty_top}Return.pt')
+                torch.save(Q_all_repeat, f'{dircty_top}Q.pt')
+                torch.save(N_all_repeat, f'{dircty_top}N.pt')
+                torch.save(R_count_all_repeat, f'{dircty_top}R_count.pt')
+
+            # plot_return_vs_episodes(agent.return_l, repeat=repeat, save=save, figure_path=dircty, show=show)
+
+        plot_return_vs_episodes_repeat(r_all_repeat, save=save, figure_path=dircty_top, show=show, smooth=1)
+        if show:
+            plt.show()
+
+# Experiment with 2D grid environment
+# n, horizon, n_episodes = 5, 10, 50
+# env = StochasticGridEnv(n)
+
+# psrl_agent = PSRL(n, len(env.actions), horizon)
+# ucrl2_agent = UCRL2(n, len(env.actions), horizon)
+
+# for episode in range(n_episodes):
+#     # PSRL planning
+#     psrl_transitions, psrl_rewards = psrl_agent.sample_model()
+#     psrl_policy = psrl_agent.plan(psrl_transitions, psrl_rewards)
+    
+#     # UCRL2 planning
+#     ucrl2_policy = ucrl2_agent.plan()
