@@ -788,7 +788,7 @@ if __name__ == '__main__':
         if load:
             env_depth = int(load_path_info[0])
         env = DeepSea(depth=env_depth)
-        EPISODES = 30000#env.n_cell[0] * 100
+        EPISODES = 40000#env.n_cell[0] * 100
     
     S = []
     if len(env.n_cell) == 1:
@@ -834,7 +834,7 @@ if __name__ == '__main__':
                     for key, value in vars(args).items():
                         para_txt.write(f"{key}: {value}\n")
     
-    for repeat in range(1, REPEAT_EXPERIMENT):
+    for repeat in range(0, REPEAT_EXPERIMENT):
         if load:
             folder_path = f'../SMC/{load_path}/R{repeat}'
             for file_name in os.listdir(folder_path):

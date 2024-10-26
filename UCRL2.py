@@ -282,7 +282,7 @@ if __name__ == '__main__':
     torch.manual_seed(seed)
     
     dircty=''
-    ep_l = [40000, 80000, 100000, 150000, 160000, 180000, 200000, 300000]
+    ep_l = [40000, 80000, 150000, 250000, 260000, 280000, 300000, 400000]
     for idx, env_d in enumerate([15, 20, 25, 30, 35, 40, 45, 50]):
         print(f'Running {env_d} depth with {ep_l[idx]} episodes')
         if env_name == 'GridWorld':

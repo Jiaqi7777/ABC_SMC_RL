@@ -353,3 +353,190 @@ def plot_ess(e_l, ess_l, epsilon_0, ess, alpha, new_epsilon, i=-1, save=False, l
     if show:
         plt.show()
     plt.close()
+    
+def load_return(depth, adaptive=False):
+    if adaptive:
+        file_path = f'../SMC/0adaptive/{depth}'
+    else:
+        file_path = f'../SMC/{depth}'
+    loaded_files = []
+
+    # Loop through each item in the main directory (file_path)
+    try:
+        for date in os.listdir(file_path):
+            if not date.startswith('R'):
+                date_file_path = f'{file_path}/{date}'
+            else:
+                date_file_path = file_path
+            for folder_name in os.listdir(date_file_path):
+                folder_path = os.path.join(date_file_path, folder_name)
+                # Check if it is a directory and its name starts with 'R' followed by a number
+                if os.path.isdir(folder_path) and folder_name.startswith('R') and folder_name[1:].isdigit():
+                    # Loop through files in the Rn directory
+                    for file_name in os.listdir(folder_path):
+                        if file_name.startswith('Returns') and file_name.endswith('.pt'):
+                            return_path = os.path.join(folder_path, file_name)
+
+                            # Load the .pt file using torch.load and append it to the list
+                            loaded_data = torch.load(return_path)
+                            loaded_files.append(loaded_data)
+                            break
+    except FileNotFoundError:
+        return False
+    if loaded_files == []:
+        return False
+    return loaded_files
+
+def display_smc_results_notebook(samples, n=0, smooth=1, Q_star=None, figure_path=None, save=False, episode='', repeat='', show=False):
+    figure_name = f'E{episode}R{repeat}SMCSamples'
+    len_sample = len(samples)
+    subsample_int = 1
+    samples = np.apply_along_axis(lambda m: np.convolve(m, np.ones(smooth)/smooth, mode='valid'), axis=0, arr=samples)
+    samples = samples[n::subsample_int]
+    dim = samples.shape
+    means = np.mean(samples, axis=1)
+#     means = np.apply_along_axis(lambda m: np.convolve(m, np.ones(smooth)/smooth, mode='valid'), axis=0, arr=means)
+    stds = np.std(samples, axis=1)
+#     stds = np.apply_along_axis(lambda m: np.convolve(m, np.ones(smooth)/smooth, mode='valid'), axis=0, arr=stds)
+    upbd = means + stds
+    lwbd = means - stds
+    cell = dim[2]//1
+#     for a in [0, 1]:
+#     print('action', a)
+    fig2, ax2 = plt.subplots(cell - 1, cell-1, figsize=(dim[2]*3, dim[3]*3))
+    for i in range(cell * 0, cell * 1-1):
+        for k in range(cell * 0, i+1):
+            for a in [0, 1]:
+                ax2[i%cell, k%cell].set_ylim(-4, 4)
+                ax2[i%cell, k%cell].plot(range(n, len_sample-smooth+1)[::subsample_int], means[:, i, k, a], label=f'Action {a}')
+                ax2[i%cell, k%cell].fill_between(range(n, len_sample-smooth+1)[::subsample_int], lwbd[:, i, k, a], upbd[:, i, k, a], alpha=0.5)
+#                 for j in range(dim[1]//2):
+                    # ax2[i,k].scatter(range(dim[0]), samples[:, j, i, k, 0], label=f"right {j}", alpha=smc._weights_history[:,j])
+                    # ax2[i,k].plot(range(dim[0]), samples[:, j, i, k, 0], linestyle='--')
+#                 ax2[i%cell, k%cell].scatter(range(n, len_sample)[::subsample_int], samples[:, j, i, k, a])
+#                     ax2[i%cell, k%cell].plot(range(n, len_sample)[::subsample_int], samples[:, j, i, k, a], linestyle='-', alpha=0.6)
+            if Q_star is not None:
+                # Assuming Q_star[i, k, :] has two values and you want different labels for each
+                ax2[i % cell, k % cell].hlines(Q_star[i, k, 0], xmin=n, xmax=len_sample, linestyle="--", label="Ground Truth Action 0", color="Blue")
+                ax2[i % cell, k % cell].hlines(Q_star[i, k, 1], xmin=n, xmax=len_sample, linestyle="--", label="Ground Truth Action 1", color="Orange")
+#                 ax2[i,k].hlines(Q_star[i, k, 1], xmin=n, xmax=len_sample-1, linestyle="--", label="true left", color="purple")
+            ax2[i%cell, k%cell].set_title([i, k])
+    for i in range(cell * 0, cell * 1 - 1):
+        for k in range(i+1, cell - 1):
+            for spine in ax2[i, k].spines.values():
+                spine.set_visible(False)
+            ax2[i, k].set_xticks([])  # Remove x-axis ticks
+            ax2[i, k].set_yticks([])  # Remove y-axis ticks
+            ax2[i, k].set_xlabel('')  # Remove x-axis label
+            ax2[i, k].set_ylabel('')  
+        handles, labels = ax2[i%cell, k%cell].get_legend_handles_labels()
+    ax2[i%cell, k%cell].legend(handles, labels, bbox_to_anchor=(0.9, 1.5), loc='right')
+    fig2.text(0.5, 0.08, r'\textbf{Training Steps}', ha='center', va='center', fontsize=20, fontweight='bold')
+    fig2.text(0.08, 0.5, r'\textbf{Particle Values }$\mathbf{\theta}$', ha='center', va='center', rotation='vertical', fontsize=20, fontweight='bold')
+  #     plt.tight_layout(rect=[0, 1, 1, 0.95])  # Adjust for suptitle and axis labels
+
+
+    plt.show()
+    
+def first_index_exceeding_average(arr_of_lists, threshold=0.5):
+    # Check if the input is a single list
+    if isinstance(arr_of_lists, list) and len(arr_of_lists) > 0 and not isinstance(arr_of_lists[0], list):
+        arr = arr_of_lists  # Treat as a single list
+        cumulative_sum = 0
+
+        for i in range(len(arr)):
+            cumulative_sum += arr[i]
+            average = cumulative_sum / (i + 1)
+            if average > threshold:
+                return i
+        
+        return -1  # If no index exceeds the threshold
+
+    # If input is a list of lists
+    if not arr_of_lists or not all(arr_of_lists):  # Check for empty or invalid inputs
+        return -1
+
+    total_indices = 0
+    total_runs = len(arr_of_lists)
+
+    for arr in arr_of_lists:
+        cumulative_sum = 0
+        found_index = -1
+
+        for i in range(len(arr)):
+            cumulative_sum += arr[i]
+            average = cumulative_sum / (i + 1)
+            if average > threshold:
+                found_index = i
+                break
+        
+        # If no index found, count it as the end of the array
+        if found_index == -1:
+            total_indices += len(arr)  # Use length of array if no index exceeds the threshold
+        else:
+            total_indices += found_index
+
+    # Return the average of the indices over the runs
+    return total_indices / total_runs
+
+def calculate_regret():
+    all_depth_return = []
+    all_depth_success = []
+    all_depth_return_adaptive = []
+    all_depth_success_adaptive = []
+    d_l = [5, 7, 10, 12, 14, 15, 20, 25, 30, 40]
+    d_l_fixed = []
+    d_l_a = []
+    for d in d_l:
+        r_d = load_return(d)
+        if r_d:
+            d_l_fixed.append(d)
+            all_depth_return.append(r_d)
+            all_depth_success.append(first_index_exceeding_average(r_d))
+        r_d_a = load_return(d, True)
+        if r_d_a:
+            d_l_a.append(d)
+            all_depth_return_adaptive.append(r_d_a)
+            all_depth_success_adaptive.append(first_index_exceeding_average(r_d_a))
+    return all_depth_return, all_depth_success, all_depth_return_adaptive, all_depth_success_adaptive, d_l_fixed, d_l_a
+
+def plot_log(d_l_fixed, all_depth_success, d_l_a, all_depth_success_adaptive):
+    plt.rcParams.update({
+    'font.family': 'serif',
+    'font.serif': ['Times New Roman'],
+    'axes.labelsize': 14,    # Font size for axis labels
+    'axes.titlesize': 16,    # Font size for titles
+    'legend.fontsize': 12,   # Font size for legend
+    'xtick.labelsize': 12,   # Font size for x-tick labels
+    'ytick.labelsize': 12,   # Font size for y-tick labels
+    'figure.titlesize': 18,   # Font size for figure title
+        'text.usetex': True,  
+    })
+    coefficients = np.polyfit(np.log10(d_l_fixed), np.log10(all_depth_success), 1)
+    coefficients_a = np.polyfit(np.log10(d_l_a), np.log10(all_depth_success_adaptive), 1)
+    # coefficients[-3] = 0
+    # 3. Get the fitted values using the polynomial
+    # polynomial = np.poly1d(coefficients)
+
+    plt.scatter(np.log10(d_l_fixed), np.log10(all_depth_success), label='ABRL - Non-Adaptive')
+    plt.scatter(np.log10(d_l_a), np.log10(all_depth_success_adaptive), label='ABRL - Adaptive')
+
+    x_range = np.linspace(np.min(np.log10(d_l_fixed)), np.max(np.log10(d_l_fixed)), num=100)
+    x_range_a = np.linspace(np.min(np.log10(d_l_a)), np.max(np.log10(d_l_a)), num=100)
+    # plt.plot(x_range, x_range*20-12.6, '--', label='slope 20', linewidth=0.5)
+    plt.plot(x_range, x_range*coefficients[0] + coefficients[1], '--', label=f'slope {np.round(coefficients[0], 0)}', linewidth=0.5)
+    plt.plot(x_range_a, x_range_a*coefficients_a[0] + coefficients_a[1], '--', label=f'slope {np.round(coefficients_a[0], 0)}', linewidth=0.5)
+
+    # plt.plot(x_range, x_range*4-2, '--', label='slope 4', linewidth=0.5)
+    # plt.plot(x_range, x_range*6-3.2, '--', label='slope 6', linewidth=0.5)
+    # Add grid lines
+    plt.grid(True, which="both", ls="--", linewidth=0.5)
+
+    # Add labels and title
+    plt.xlabel(r'\textbf{log}$_{10}$\textbf{N}')#, fontfamily='serif', fontstyle='italic')
+    plt.ylabel(r'\textbf{log}$_{10}$\textbf{T}')#, fontfamily='serif', fontstyle='italic')
+
+    # plt.title('Learning time by when the average regret drops below 0.5(Log scale)')
+    plt.legend()
+    plt.savefig('../SMC/LearningT.png', dpi=300, bbox_inches='tight')
+    plt.show()
