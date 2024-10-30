@@ -266,6 +266,9 @@ if __name__ == '__main__':
     parser.add_argument('--algorithm', default='PSRL', type=str)
     parser.add_argument('--Env_d', default=10, type=int)
     parser.add_argument('--episode', default=100, type=int)
+    parser.add_argument('--load', default=False, action='store_true', help='Bool type')
+    parser.add_argument('--load_path', type=str, default='')
+    parser.add_argument('--sample_path', type=str, default='')
     args = parser.parse_args()
     time = args.time
     save = args.save
@@ -277,13 +280,26 @@ if __name__ == '__main__':
     algorithm = args.algorithm
     Env_d = args.Env_d
     EPISODES = args.episode
+    load = args.load
+    load_path = args.load_path
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     
+    if load:
+        load_path_info = load_path.split('/')
+        env_d, time, initial_repeat = load_path_info
+        initial_repeat = int(initial_repeat[1:])
+    else:
+        time = args.time
+        initial_repeat = 0
+    
     dircty=''
-    ep_l = [40000, 80000, 150000, 250000, 260000, 280000, 300000, 400000]
-    for idx, env_d in enumerate([15, 20, 25, 30, 35, 40, 45, 50]):
+    dircty_top = ''
+    env_d_l = [15, 20, 25, 30, 35, 40, 45, 50]
+    skip = env_d_l.index(int(env_d)) if load else 2
+    ep_l = [40000, 80000, 150000, 250000, 260000, 280000, 300000, 400000][skip:]
+    for idx, env_d in enumerate(env_d_l[skip:]):
         print(f'Running {env_d} depth with {ep_l[idx]} episodes')
         if env_name == 'GridWorld':
             env = GridWorld((1, 2), obstacles=False, stochastic=STOCHASTIC)
@@ -291,6 +307,8 @@ if __name__ == '__main__':
         if env_name == 'Maze':
             env = Maze()
         if env_name == 'DeepSea':
+            if load:
+                env_d = int(load_path_info[0])
             env = DeepSea(depth=env_d)
             EPISODES = ep_l[idx]#env.n_cell[0] * 100
         if save:
@@ -314,6 +332,7 @@ if __name__ == '__main__':
         A = range(env.action_space.n)
         # pi_star, Q_star, V_star = OfflineQLearning(Q, A, S, env, gamma=GAMMA, show=show, thresh=1e-3, alpha=1)
         pi_star, Q_star, V_star = DynamicProgramming(Q_dp, A, S, env, gamma=GAMMA, show=show)
+        BestValue = np.max(Q_star)
         dim = env.observation_space.n * env.action_space.n
         # Q = np.random.normal(loc=PRIOR_MEAN, scale=PRIOR_SIGMA, size=(env.n_cell + (env.action_space.n, )))
         # if env.not_learnable_idx:
@@ -325,17 +344,66 @@ if __name__ == '__main__':
         Q_all_repeat = []
         N_all_repeat = []
         R_count_all_repeat = []
+        Rewards_all_repeat = []
 
         dircty = ''
-        for repeat in range(REPEAT_EXPERIMENT_NAIVE):
-            print(f'Running {algorithm} for {repeat}th time')
+        for repeat in range(initial_repeat, REPEAT_EXPERIMENT_NAIVE):
+            print(f'Running {algorithm} for {repeat}th repeat')
             sys.stdout.flush()
             # agent = UCRL2Agent(env=env)
             if algorithm == 'PSRL':
                 agent = PSRL(env)
+                if load:
+                    folder_path = f'../{algorithm}/{env_d}/{time}/R{repeat}/'
+                    if not os.path.exists(folder_path): 
+                        print('use collection of data')
+                        folder_path = f'../{algorithm}/{env_d}/{time}/'
+                        for file_name in os.listdir(folder_path):
+                            if file_name.endswith('.pt'):
+                                record_path = os.path.join(folder_path, file_name)
+                                record = torch.load(record_path)
+                                if len(record) - 1 < repeat:
+                                    print('No data for this repeat')
+                                    load = False
+                                    break
+                            if file_name.startswith('Return') and file_name.endswith('.pt'):
+                                return_path = os.path.join(folder_path, file_name)
+                                agent.return_l = torch.load(return_path)[repeat]
+                            if file_name.startswith('Q') and file_name.endswith('.pt'):
+                                Q_path = os.path.join(folder_path, file_name)
+                                agent.Q = torch.load(Q_path)[repeat]
+                            if file_name.startswith('N') and file_name.endswith('.pt'):
+                                N_path = os.path.join(folder_path, file_name)
+                                agent.transition_counts = torch.load(N_path)[repeat]
+                            if file_name.startswith('R_count') and file_name.endswith('.pt'):
+                                R_count_path = os.path.join(folder_path, file_name)
+                                agent.reward_counts = torch.load(R_count_path)[repeat]
+                            if file_name.startswith('Rewards') and file_name.endswith('.pt'):
+                                Rewards_path = os.path.join(folder_path, file_name)
+                                agent.rewards = torch.load(Rewards_path)[repeat]
+                    else:
+                        for file_name in os.listdir(folder_path):
+                            if file_name.startswith('Return') and file_name.endswith('.pt'):
+                                return_path = os.path.join(folder_path, file_name)
+                                agent.return_l = torch.load(return_path)
+                            if file_name.startswith('Q') and file_name.endswith('.pt'):
+                                Q_path = os.path.join(folder_path, file_name)
+                                agent.Q = torch.load(Q_path)
+                            if file_name.startswith('N') and file_name.endswith('.pt'):
+                                N_path = os.path.join(folder_path, file_name)
+                                agent.transition_counts = torch.load(N_path)
+                            if file_name.startswith('R_count') and file_name.endswith('.pt'):
+                                R_count_path = os.path.join(folder_path, file_name)
+                                agent.reward_counts = torch.load(R_count_path)
+                            if file_name.startswith('Rewards') and file_name.endswith('.pt'):
+                                Rewards_path = os.path.join(folder_path, file_name)
+                                agent.rewards = torch.load(Rewards_path)
+
                 psrl_transitions, psrl_rewards = agent.sample_model()
                 psrl_policy = agent.plan(psrl_transitions, psrl_rewards)
-                for episode in range(EPISODES):
+                ep = len(agent.return_l)
+                # for episode in range(EPISODES):
+                while True:
                     # PSRL planning
                     psrl_transitions, psrl_rewards = agent.sample_model()
                     psrl_policy = agent.plan(psrl_transitions, psrl_rewards)
@@ -349,11 +417,32 @@ if __name__ == '__main__':
                         s0 = s1
                         R += r
                     agent.return_l.append(R)
+                    if ep % 100 == 0:
+                        print(f'episodes {ep} with average return {sum(agent.return_l)/ep}')
+                        if save:
+                            repeat_path = f'{dircty_top}R{repeat}/'
+                            if not os.path.exists(repeat_path):
+                                os.makedirs(repeat_path)
+                            torch.save(agent.return_l, f'{repeat_path}Return.pt')
+                            torch.save(agent.Q, f'{repeat_path}Q.pt')
+                            torch.save(agent.transition_counts, f'{repeat_path}N.pt')
+                            torch.save(agent.reward_counts, f'{repeat_path}R_count.pt')
+                            torch.save(agent.rewards, f'{repeat_path}Rewards.pt')
+                    sys.stdout.flush()
+                    ep += 1
+                    if sum(agent.return_l)/ep > 0.12:
+                        print('===================================')
+                        print('\n', '\n')
+                        #0.12L + X = 0.49 (L + X) -> 0.37L = 0.51X -> X = 0.37/0.51 L = 0.72 L
+                        break
             # UCRL2 planning
             elif algorithm == 'UCRL2':
                 agent = UCRL2(env)
                 ucrl2_policy = agent.plan()
-                for episode in range(EPISODES):
+                # for episode in range(EPISODES):
+                ep = 0
+                while True:
+                    ep += 1
                     # PSRL planning
                     ucrl2_policy = agent.plan()
                     s0, _ = env.reset()
@@ -366,42 +455,23 @@ if __name__ == '__main__':
                         s0 = s1
                         R += r
                     agent.return_l.append(R)
-            
-            # if save:
-            #     dircty = f'{dircty_top}R{repeat}/'
-            #     if not os.path.exists(dircty):
-            #         os.makedirs(dircty)
-            
-            # agent.train(env, EPISODES, S)
-
+                    if sum(agent.return_l)/ep > 0.12:
+                        break
 
             r_all_repeat.append(agent.return_l)
             Q_all_repeat.append(agent.Q)
             N_all_repeat.append(agent.transition_counts)
             R_count_all_repeat.append(agent.reward_counts)  
+            Rewards_all_repeat.append(agent.rewards)
             if save:
                 torch.save(r_all_repeat, f'{dircty_top}Return.pt')
                 torch.save(Q_all_repeat, f'{dircty_top}Q.pt')
                 torch.save(N_all_repeat, f'{dircty_top}N.pt')
                 torch.save(R_count_all_repeat, f'{dircty_top}R_count.pt')
+                torch.save(Rewards_all_repeat, f'{dircty_top}Rewards.pt')   
 
             # plot_return_vs_episodes(agent.return_l, repeat=repeat, save=save, figure_path=dircty, show=show)
 
-        plot_return_vs_episodes_repeat(r_all_repeat, save=save, figure_path=dircty_top, show=show, smooth=1)
+            plot_return_vs_episodes_repeat(r_all_repeat, save=save, figure_path=dircty_top, show=show, smooth=1)
         if show:
             plt.show()
-
-# Experiment with 2D grid environment
-# n, horizon, n_episodes = 5, 10, 50
-# env = StochasticGridEnv(n)
-
-# psrl_agent = PSRL(n, len(env.actions), horizon)
-# ucrl2_agent = UCRL2(n, len(env.actions), horizon)
-
-# for episode in range(n_episodes):
-#     # PSRL planning
-#     psrl_transitions, psrl_rewards = psrl_agent.sample_model()
-#     psrl_policy = psrl_agent.plan(psrl_transitions, psrl_rewards)
-    
-#     # UCRL2 planning
-#     ucrl2_policy = ucrl2_agent.plan()

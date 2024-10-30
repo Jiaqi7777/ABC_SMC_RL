@@ -540,3 +540,34 @@ def plot_log(d_l_fixed, all_depth_success, d_l_a, all_depth_success_adaptive):
     plt.legend()
     plt.savefig('../SMC/LearningT.png', dpi=300, bbox_inches='tight')
     plt.show()
+    
+def append_rewards(r, length=None):
+    assert hasattr(r, '__len__')
+    if len(r) > 1 :
+        out_r = []
+        
+        if length is None:
+            length = len(r[0])
+            for ri in r[1:]:
+                if len(ri) > length:
+                    length = len(ri)
+        for ri in r:
+            out_r.append(append_rewards([ri], length=length))
+        return out_r
+    if length is None:
+        print('No change')
+        return r
+    ri = r[0]
+    for _ in range(len(ri), length):
+        ri.append(ri[-1])
+    return ri
+
+def plot_return(input_r):
+    if len(input_r) >= 2:
+        r_m = np.mean(input_r, axis=0)
+        r_std = np.std(input_r, axis=0) * 0.5
+        plt.plot(r_m, label='Average Return')
+        plt.fill_between(range(len(input_r[0])), r_m-r_std, r_m + r_std, alpha=0.2, label='0.5 std')
+        plt.title('Average Return vs Episode')
+        plt.legend()
+        plt.show()

@@ -4,12 +4,9 @@ from scipy.optimize import root
 import sys
 import os
 import gc
-from memory_profiler import profile
-import objgraph
-from weightedcorrs import weightedcorrs
-# import matplotlib
-# matplotlib.use('MacOSX')
-from statsmodels.regression.quantile_regression import QuantReg
+from memory_profiler import profile # type: ignore
+from weightedcorrs import weightedcorrs # type: ignore
+from statsmodels.regression.quantile_regression import QuantReg # type: ignore
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 sys.path.append('/scratch/Rabbit/work/ABC_SMC_RL/')
 sys.path.append('/Users/guojiaqi/work/ABC_SMC_RL/')
@@ -67,7 +64,7 @@ class SMC:
             #     pass
             if early_stop:
                 # test_dec, corr_stat = mcmc_stop(mcmc_samples, smc_samples, weights=self._weights, save=save, show=show, figure_path=dircty, figure_name=f'E{self.episode}R{repeat}loop{self.loop}Epsln{epsilon_0}Steps{m}', corr_stat_all=corr_stat_all)
-                test_dec, gb = gelman_rubin(mcmc_samples, smc_samples, corr_stat, weights=self._weights, thresh=GELMAN_RUBIN, save=save, show=show, figure_path=dircty, figure_name=f'E{self.episode}R{repeat}loop{self.loop}Epsln{epsilon_0}StpMax{step_size_max_pretune}Steps{m}', corr_stat_all=corr_stat_all, gelman_rubin_all=gelman_rubin_all)
+                test_dec, _ = gelman_rubin(mcmc_samples, smc_samples, corr_stat, weights=self._weights, thresh=GELMAN_RUBIN, save=save, show=show, figure_path=dircty, figure_name=f'E{self.episode}R{repeat}loop{self.loop}Epsln{epsilon_0}StpMax{step_size_max_pretune}Steps{m}', corr_stat_all=corr_stat_all, gelman_rubin_all=gelman_rubin_all)
                 # test_dec, corr_stat = test_mcmc_stop(mcmc_samples, smc_samples, corr_stat, weights=self._weights, save=save, show=show, figure_path=dircty, figure_name=f'E{self.episode}R{repeat}loop{self.loop}Epsln{epsilon_0}Steps{m}', corr_stat_all=corr_stat_all)
                 # corr_stat_all = torch.cat((corr_stat_all, torch.tensor(corr_stat).unsqueeze(0)))
                 # gelman_rubin_all = torch.cat((gelman_rubin_all, torch.tensor(gb).unsqueeze(0)))
@@ -680,7 +677,7 @@ def display_smc_results(smc, n=0, figure_path=None, save=False, episode='', repe
     upbd = means + stds
     lwbd = means - stds
     for a in range(env.action_size):
-        fig, ax = plt.subplots(env.n_cell[0]-1, env.n_cell[1]-1, figsize=(dim[2]*4, dim[3]*4))
+        _, ax = plt.subplots(env.n_cell[0]-1, env.n_cell[1]-1, figsize=(dim[2]*4, dim[3]*4))
         for i in range(dim[2] - 1):
             for k in range(i+1):
                 ax[i, k].set_ylim(-PRIOR_SIGMA, PRIOR_SIGMA)
@@ -703,11 +700,6 @@ def display_smc_results(smc, n=0, figure_path=None, save=False, episode='', repe
         plt.close()
     
 if __name__ == '__main__':
-    # from tqdm import tqdm
-    import json
-    from mcmcplot import mcmcplot as mcp
-    from arviz import ess, plot_autocorr, plot_trace
-    from sklearn.metrics import mean_squared_error
     import datetime
     import argparse
     '''module import'''
@@ -834,7 +826,7 @@ if __name__ == '__main__':
                     for key, value in vars(args).items():
                         para_txt.write(f"{key}: {value}\n")
     
-    for repeat in range(0, REPEAT_EXPERIMENT):
+    for repeat in range(1, REPEAT_EXPERIMENT):
         if load:
             folder_path = f'../SMC/{load_path}/R{repeat}'
             for file_name in os.listdir(folder_path):
