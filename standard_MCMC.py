@@ -92,7 +92,7 @@ if __name__ == '__main__':
                 S.append((i,j)) 
     Q = np.ones(shape=(env.n_cell + (env.action_space.n, )))/env.observation_space.n / env.action_space.n
     A = range(env.action_space.n)
-    pi_star, Q_star, V_star = DynamicProgramming(Q, A, S, env, gamma=GAMMA, show=show)
+    pi_star, Q_star, V_star = OfflineQLearning(Q, A, S, env, gamma=GAMMA, show=show)
     
     env.reset()
     results = []

@@ -9,6 +9,7 @@ from tqdm.notebook import tqdm
 import math
 import sys
 import os
+import pickle
 os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
 sys.path.append('/scratch/Rabbit/work/ABC_SMC_RL/')
 sys.path.append('/Users/guojiaqi/work/ABC_SMC_RL/')
@@ -16,8 +17,8 @@ print('system path', sys.path)
 '''module import'''
 from MCMC_Algorithms.Kernels import *
 from MCMC_Algorithms.Models import *
-from parameter import *
-from utils import *
+# from parameter import *
+# from utils import *
 
 def autocorrelation(chain):
     """
@@ -84,14 +85,13 @@ class MCMC:
 
         self.reset_stat()
 
-    def run(self, idx=None):
+    def run(self, idx=None, MCMC_SHOW_DISABLE=False):
 
         self.reset_stat()
 
         current_para = self.initial_params
         current_logtarget_density, current_para_llh_info_dict  = self.kernel.model.logtarget_density(parameter=current_para, llh_info_dict=dict())
         current_para_info_dict = {"logdensities":current_logtarget_density, "llh_info_dict":current_para_llh_info_dict}
-
         if self.warmup_steps > 0:
             try: 
                 current_para, current_para_info_dict, _ = self.warmup(init_para=current_para, init_para_info_dict=current_para_info_dict)
@@ -102,7 +102,7 @@ class MCMC:
         # self.logdensities[0] = current_logtarget_density
         # self.proposed_logdensities[0] = current_logtarget_density
 
-        pbar = tqdm(range(self.num_samples))
+        pbar = range(self.num_samples) if MCMC_SHOW_DISABLE else tqdm(range(self.num_samples))
         for i in pbar:
             accept_prob, proposed_para, proposed_para_info_dict  = self.kernel.propose_accept(current_para=current_para,
                                                                          current_para_info_dict=current_para_info_dict, indices=idx)
@@ -112,10 +112,11 @@ class MCMC:
                 current_para_info_dict = proposed_para_info_dict
                 self.accepted += 1
                 self.ifaccept[i + 1] = 1
-
-            pbar.set_description("Acceptance probability {}".format(np.round(self.accepted/(i+1), 2)))
+            if not MCMC_SHOW_DISABLE:
+                pbar.set_description("Acceptance probability {}".format(np.round(self.accepted/(i+1), 2)))
 
             self.samples[i + 1] = current_para
+            self.proposed_samples[i+1] = proposed_para
             self.logdensities[i + 1] = current_para_info_dict["logdensities"]
             self.proposed_logdensities[i + 1] = proposed_para_info_dict["logdensities"]
             self.accept_prob[i + 1] = accept_prob
@@ -149,6 +150,7 @@ class MCMC:
     def reset_stat(self):
         self.samples = torch.zeros((self.num_samples+1, self.params_dim))
         self.logdensities = torch.zeros(self.num_samples + 1)
+        self.proposed_samples = torch.zeros((self.num_samples + 1, self.params_dim))
         self.proposed_logdensities = torch.zeros(self.num_samples + 1)
         self.accepted = 0
         self.accept_prob = torch.zeros(self.num_samples + 1)
@@ -163,14 +165,13 @@ class MCMC_pyro(MCMC):
             - MCMC kernel from pyro
         See MCMC()
         """
-        super(MCMC_pyro, self).__init__(kernel=kernel, warmup_steps=warmup_steps, num_samples=num_samples, initial_params=initial_params[FROZEN_NO], params_dim=params_dim, **kwargs)
+        super(MCMC_pyro, self).__init__(kernel=kernel, warmup_steps=warmup_steps, num_samples=num_samples, initial_params=initial_params, params_dim=params_dim, **kwargs)
         self.kernel_ = kernel
-        self.pyro_kernel = kernel.get_pyro_kernel(parameter_len=self.params_dim, full_para=torch.log(-torch.tensor(Q_star, dtype=torch.float32).reshape(-1)))
-        self.pyro_mcmc = pyro.infer.mcmc.MCMC(kernel=self.pyro_kernel, num_samples=num_samples, initial_params={'prior_parameter': initial_params[FROZEN_NO]}, warmup_steps=warmup_steps, disable_progbar=disable_progbar, **kwargs)
+        self.pyro_kernel = kernel.get_pyro_kernel(parameter_len=self.params_dim)
+        self.pyro_mcmc = pyro.infer.mcmc.MCMC(kernel=self.pyro_kernel, num_samples=num_samples, initial_params={'prior_parameter': initial_params}, warmup_steps=warmup_steps, disable_progbar=disable_progbar, **kwargs)
         self.data = self.kernel.model.data
 
-    def run(self):
-
+    def run(self, MCMC_SHOW_DISABLE=None):
         self.reset_stat()
 
         self.pyro_mcmc.run(self.data)
@@ -206,18 +207,18 @@ class MCMC_Gibbs(MCMC):
 
         assert warmup_steps is None or isinstance(warmup_steps,int) or isinstance(warmup_steps, np.integer), "warmup_steps must be None or integer"
         self.warmup_steps = 0 if warmup_steps is None else warmup_steps
-        self.warmup_settings = warmup_settings  
+        self.warmup_settings = warmup_settings
         
         self.variables = variables      
         self.block_size = block_size
         
         self.reset_stat()
         
-    def run(self, idx=None):
+    def run(self, idx=None, MCMC_SHOW_DISABLE=False):
         
         self.reset_stat()
         
-        pbar = tqdm(range(self.num_samples), position=0, leave=True)
+        pbar = tqdm(range(self.num_samples), position=0, leave=True, dynamic_ncols=True)
         current_para = self.initial_params
         current_para_info_dict = dict()
         
@@ -232,7 +233,7 @@ class MCMC_Gibbs(MCMC):
             
             if self.warmup_steps > 0:
                 try: 
-                    current_para[var], current_para_info_dict[var], _ = self.warmup(var=var, init_para=current_para[var], init_para_info_dict=current_para_info_dict)
+                    current_para[var], current_para_info_dict[var], _ = self.warmup(var=var, init_para=current_para[var], init_para_info_dict=current_para_info_dict, MCMC_SHOW_DISABLE=MCMC_SHOW_DISABLE)
                 except NotImplementedError:
                     print("Warmup is not implemented for the current kernel. Skip to sampling...")
         
@@ -264,11 +265,12 @@ class MCMC_Gibbs(MCMC):
             pbar.set_description("Acceptance probability {}".format(np.round(self.accepted['para']/(i+1), 2)))
         return self.samples['para']
     
-    def warmup(self, var, init_para, init_para_info_dict=dict()):
+    def warmup(self, var, init_para, init_para_info_dict=dict(), MCMC_SHOW_DISABLE=False):
         current_para, current_para_info_dict, info = self.kernel[var].warmup(init_para=init_para, 
                                                                         init_para_info_dict=init_para_info_dict,
                                                                         iterations=self.warmup_steps, 
                                                                         set_stepsize=True,
+                                                                        MCMC_SHOW_DISABLE=MCMC_SHOW_DISABLE
                                                                         **self.warmup_settings)
 
         return current_para, current_para_info_dict, info
@@ -283,9 +285,7 @@ class MCMC_Gibbs(MCMC):
         self.accept_prob = {var: torch.zeros(self.num_samples, math.ceil(self.data_length[var] / self.block_size[var])) for var in self.params_dim.keys()}   
         # self.proposed_samples = {var: torch.zeros((self.num_samples, math.ceil(self.data_length[var] / self.block_size[var]), ) + tuple(dim)) for var, dim in self.params_dim.items()}   
 
-    
-#MCMC
-def MCMC_update(obs, posterior_samples, model, env):
+def get_MCMC_Model(obs, model, env, epsilon):
     global STEPSIZE, Model
     if BATCH_TRAINING:
         batch_indices = random.sample(range(min(len(obs._buffers['state0']), BUFFER_SIZE)), k=min(BATCH_SIZE, len(obs._buffers['state0']))) #TODO: what is this?
@@ -296,11 +296,12 @@ def MCMC_update(obs, posterior_samples, model, env):
         prior = TruncatedGaussianPrior(sd=PRIOR_SIGMA)
     else:
         prior = IsotropicGaussianPrior(sd=PRIOR_SIGMA)
+    
     data = torch.tensor(obs._buffers["rewards"], dtype=torch.float32)[-BUFFER_SIZE:][batch_indices]
     
     if STOCHASTIC:
         '''Stochastic'''
-        abclikelihood = PartialGaussianABCLikelihood(epsilon=EPSILON)
+        abclikelihood = PartialGaussianABCLikelihood(epsilon=epsilon)
         z_sample = generate_z(env=env, obs=obs._buffers)
         r_hat = partial(generate_samples_with_z, model=model, obs=obs._buffers, batch_indices=batch_indices)
         z_transform_func = partial(generate_z, env=env, obs=obs._buffers)
@@ -310,84 +311,107 @@ def MCMC_update(obs, posterior_samples, model, env):
     else:
         '''Determinisitc'''
         if TRANSFORM:
-            abclikelihood = TruncatedGaussianABCLikelihood(epsilon=EPSILON)
+            abclikelihood = TruncatedGaussianABCLikelihood(epsilon=epsilon)
         else:
-            abclikelihood = GaussianABCLikelihood(epsilon=EPSILON)
+            abclikelihood = GaussianABCLikelihood(epsilon=epsilon)
         r_hat = partial(generate_samples, model=model, obs=obs._buffers,  batch_indices=batch_indices)
         llh_transform_grad_fn = lambda parameter:  tabular_indicator_deterministic(para=parameter.reshape(env.n_cell + (env.action_space.n, )), model=model, obs=obs._buffers)#standard form
         Model = DeterministicSRModel(prior=prior, abclikelihood=abclikelihood, data=data, llh_transform_fn=r_hat, llh_transform_grad_fn=llh_transform_grad_fn)
+    print('MCMC model with prior sigma', PRIOR_SIGMA, 'likelihood epsilon', epsilon)
+    return Model
 
+#MCMC
+def MCMC_update(Model, posterior_samples, env, training_steps_with_burnin, training_steps, mode_idx=None, use_precondition=False, stepsize=STEPSIZE, USE_AUTOGRAD=False, WARMUP_RATIO=WARMUP_RATIO, MCMC_SHOW_DISABLE=MCMC_SHOW_DISABLE, ADAPT_STEP_SIZE=False, ADAPT_MASS_MATRIX=False, kernel='NUTS', num_steps=None, precondition_matrix=None, trajectory_length=None):
     def fn(parameter):
         current_logtarget_density, _ = Model.logtarget_density(parameter=parameter, llh_info_dict=dict())
         return current_logtarget_density
     if STOCHASTIC:
-        # kernel = HMC(model=Model, stepsize=STEPSIZE, use_autograd=USE_AUTOGRAD, traj_len=0.1)
-        kernel = RandomWalk(model=Model, stepsize=STEPSIZE)
+        # kernel = HMC(model=Model, stepsize=stepsize, use_autograd=USE_AUTOGRAD, traj_len=0.1)
+        kernel = RandomWalk(model=Model, stepsize=stepsize)
         z_kernel = Z(model=Model)
     else:
-        # hessian = torch.autograd.functional.hessian(fn, posterior_samples[0].reshape(-1)) + 1e-6 * torch.eye(len(posterior_samples[0]).reshape(-1))
-        hessian = torch.autograd.functional.hessian(fn, TruncatedGaussianABCLikelihood.log_neg_transform(torch.tensor(Q_star, dtype=torch.float32)).reshape(-1)) - 1e-6 * torch.eye(len(posterior_samples[0].reshape(-1)))
-        cov_ = torch.tensor([[0.8076, 0.1582], [0.1582, 0.9567]])
-        cov = torch.zeros_like(hessian) + torch.eye(4) * 1e-6
-        cov[:2, :2] = cov_
-        # kernel = RandomWalk(model=Model, stepsize=STEPSIZE)
-        #kernel = RandomWalk(model=Model, stepsize=STEPSIZE, covariance_matrix=-torch.linalg.inv(hessian))
-        #kernel = pCN(model=Model, stepsize=STEPSIZE)
-        #kernel = MALA(model=Model, stepsize=STEPSIZE, precondition_matrix=None)
-        #kernel = MALA(model=Model, stepsize=STEPSIZE, precondition_matrix=-torch.linalg.inv(hessian))
-        #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=USE_AUTOGRAD)
-        #kernel = MALA(model=Model, stepsize=STEPSIZE, use_autograd=USE_AUTOGRAD, precondition_matrix=-torch.linalg.inv(hessian))
-        # kernel = HMC_pyro(model=Model, stepsize=STEPSIZE, full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB, num_steps=NUM_STEPS)
-        print("Precondition", use_precondition)
         if use_precondition:
-            # kernel = HMC(model=Model, stepsize=STEPSIZE, use_autograd=USE_AUTOGRAD, mass=MASS, precondition_matrix=-torch.linalg.inv(hessian))
-            # kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=USE_AUTOGRAD, mass=MASS, precondition_matrix=cov, traj_len=TRAJECTORY_LENGTH)
-            kernel = NUTS_pyro(model=Model, stepsize=STEPSIZE, full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB, precondition_matrix=-torch.linalg.inv(hessian))
+            if precondition_matrix is None:
+                if TRANSFORM:
+                    hessian = torch.autograd.functional.hessian(fn, TruncatedGaussianABCLikelihood.log_neg_transform(torch.tensor(Q_star[env.learnable_idx], dtype=torch.float32)).reshape(-1)) - 1e-6 * torch.eye(len(posterior_samples[0].reshape(-1)))
+                else:
+                    if mode_idx is None:
+                        hessian = torch.autograd.functional.hessian(fn, torch.tensor(Q_star[env.learnable_idx], dtype=torch.float32).reshape(-1)) - 1e-6 * torch.eye(len(posterior_samples[0].reshape(-1)))
+                    else:
+                        #diagnosis
+                        # mode_sample = torch.load('../Samples/MCMC/094980/T200_Repeat1_StoFalse_M1200_GdyFalse_Sigma4.pt')[1][27]
+                        # hessian = torch.autograd.functional.hessian(fn, mode_sample[mode_idx][env.learnable_idx].reshape(-1)) #- 1e-6 * torch.eye(len(posterior_samples[0].reshape(-1)))
+                        ###########
+                        hessian = torch.autograd.functional.hessian(fn, posterior_samples[mode_idx].reshape(-1)) #- 1e-6 * torch.eye(len(posterior_samples[0].reshape(-1)))
+                        print('Use mode from previous samples', -torch.linalg.inv(hessian))
+                # hessian = torch.autograd.functional.hessian(fn, posterior_samples[0].reshape(-1)) + 1e-6 * torch.eye(len(posterior_samples[0]).reshape(-1))
+                precondition_matrix=-torch.linalg.inv(hessian)
+            #kernel = RandomWalk(model=Model, stepsize=stepsize, covariance_matrix=precondition_matrix)
+            #kernel = MALA(model=Model, stepsize=stepsize, precondition_matrix=precondition_matrix)
+            #kernel = MALA(model=Model, stepsize=stepsize, use_autograd=USE_AUTOGRAD, precondition_matrix=precondition_matrix)
+            # kernel = HMC(model=Model, stepsize=stepsize, use_autograd=USE_AUTOGRAD, mass=MASS, precondition_matrix=precondition_matrix)
+            if kernel == 'HMC':
+                kernel = HMC(model=Model, stepsize=stepsize, num_steps=num_steps, use_autograd=USE_AUTOGRAD, mass=MASS, precondition_matrix=precondition_matrix)
+            if kernel == 'NUTS':
+                kernel = NUTS_pyro(model=Model, stepsize=stepsize, full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB, precondition_matrix=precondition_matrix)
         else:
-            # kernel = HMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=USE_AUTOGRAD, traj_len=TRAJECTORY_LENGTH)
-            kernel = NUTS_pyro(model=Model, stepsize=STEPSIZE, full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB, precondition_matrix=-torch.linalg.inv(hessian))
+            # kernel = RandomWalk(model=Model, stepsize=stepsize)
+            #kernel = pCN(model=Model, stepsize=stepsize)
+            #kernel = MALA(model=Model, stepsize=stepsize, precondition_matrix=None)
+            #kernel = MALA(model=Model, stepsize=stepsize, use_autograd=USE_AUTOGRAD)
+            # kernel = HMC_pyro(model=Model, stepsize=stepsize, full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB, trajectory_length=trajectory_length)
+            if kernel == 'HMC':
+                kernel = HMC(model=Model, stepsize=stepsize, num_steps=num_steps, use_autograd=USE_AUTOGRAD, mass=MASS, traj_len=trajectory_length)
+            if kernel == 'NUTS':
+                kernel = NUTS_pyro(model=Model, stepsize=stepsize, full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB)
 
-        # kernel = AM(model=Model,  stepsize=STEPSIZE)
-        #kernel = mMALA(model=Model, stepsize=STEPSIZE, use_autograd=USE_AUTOGRAD, use_autohess=False)
-        #kernel = mMALA(model=Model, stepsize=STEPSIZE, use_autograd=USE_AUTOGRAD, use_autohess=True)
-        #kernel = mHMC(model=Model, stepsize=STEPSIZE, num_steps=NUM_STEPS, use_autograd=USE_AUTOGRAD, use_autohess=False, traj_len=None, fp_iterations=50)
+        # kernel = AM(model=Model,  stepsize=stepsize)
+        #kernel = mMALA(model=Model, stepsize=stepsize, use_autograd=USE_AUTOGRAD, use_autohess=False)
+        #kernel = mMALA(model=Model, stepsize=stepsize, use_autograd=USE_AUTOGRAD, use_autohess=True)
+        #kernel = mHMC(model=Model, stepsize=stepsize, num_steps=num_steps, use_autograd=USE_AUTOGRAD, use_autohess=False, traj_len=None, fp_iterations=50)
     accept_probs = None
-    STEPSIZE *= DECREASING_FACTOR
-    submatrix_shape_ = submatrix_shape(Q_star, FROZEN_IDX)
-    print(submatrix_shape_)
+    stepsize *= DECREASING_FACTOR
+    # if FROZEN:
+    #     submatrix_shape_ = submatrix_shape(Q_star, FROZEN_IDX)
+    # else:
+    #     submatrix_shape_ = env.learnable_shape
+    # print('submatrix_shape', submatrix_shape_)
     if kernel.original is True:
         if STOCHASTIC:
-            mcmc = MCMC_Gibbs(variables=['para', 'z'], kernel_functions={'para': kernel, 'z': z_kernel}, num_samples=training_steps, initial_params={'para': posterior_samples[-1].reshape(-1), 'z': z_sample}, warmup_steps=np.int64(np.floor(training_steps*WARMUP_RATIO)), warup_settings=dict(target_prob=0.7, auto_init_stepsize=True))
-            posterior_samples = mcmc.run(idx={'para':FROZEN_NO, 'z': None})
-            posterior_samples = posterior_samples.reshape((len(posterior_samples), ) + submatrix_shape_ + (env.action_space.n, )) if FROZEN else posterior_samples.reshape((len(posterior_samples), ) + env.n_cell + (env.action_space.n, ))
+            mcmc = MCMC_Gibbs(variables=['para', 'z'], kernel_functions={'para': kernel, 'z': z_kernel}, num_samples=training_steps_with_burnin, initial_params={'para': posterior_samples[-1].reshape(-1), 'z': z_sample}, warmup_steps=np.int64(np.floor(training_steps*WARMUP_RATIO)), warup_settings=dict(target_prob=TARGET_ACCEPT_PROB, auto_init_stepsize=True))
+            posterior_samples = mcmc.run(idx={'para':FROZEN_NO, 'z': None})[-training_steps:]
+            # posterior_samples = posterior_samples.reshape((len(posterior_samples), ) + submatrix_shape_ + (env.action_space.n, )) #if FROZEN else posterior_samples.reshape((len(posterior_samples), ) + env.n_cell + (env.action_space.n, ))
         else:
-            mcmc = MCMC(num_samples=training_steps, kernel=kernel, initial_params=posterior_samples[-1].reshape(-1), warmup_steps=np.int64(np.floor(training_steps*WARMUP_RATIO)), warup_settings=dict(target_prob=0.7, auto_init_stepsize=True))
-            posterior_samples = mcmc.run(idx=FROZEN_NO).reshape((len(posterior_samples), ) + (-1, ) + (env.action_space.n, ))
+            mcmc = MCMC(num_samples=training_steps_with_burnin, kernel=kernel, initial_params=posterior_samples[-1].reshape(-1), warmup_steps=np.int64(np.floor(training_steps*WARMUP_RATIO)), warup_settings=dict(target_prob=TARGET_ACCEPT_PROB, auto_init_stepsize=True))
+            posterior_samples = mcmc.run(MCMC_SHOW_DISABLE=MCMC_SHOW_DISABLE)[-training_steps:]
+            # posterior_samples = posterior_samples.reshape((len(posterior_samples), ) + submatrix_shape_ + (env.action_space.n, )) #if FROZEN else posterior_samples.reshape((len(posterior_samples), ) + env.n_cell + (env.action_space.n, ))
         logdensities = mcmc.get_logdensities()
         proposed_logdensities = mcmc.get_proposed_logdensities()
         accept_probs = mcmc.get_accept_prob()
         return posterior_samples, accept_probs, mcmc, kernel, logdensities, proposed_logdensities
 
     else:
-        pyro_training_steps = 1 + training_steps
-        print(pyro_training_steps)
+        pyro_training_steps = 1 + training_steps_with_burnin
         if STOCHASTIC:
             raise NotImplementedError('pyro model for stochastic hasn\'t been implemented' )
         else:
             mcmc = MCMC_pyro(num_samples=pyro_training_steps, kernel=kernel, initial_params=posterior_samples[-1].reshape(-1), warmup_steps=np.int64(np.floor(pyro_training_steps*WARMUP_RATIO)), disable_progbar=MCMC_SHOW_DISABLE)
-        posterior_samples = mcmc.run()
-        posterior_samples = posterior_samples.reshape((-1, ) + submatrix_shape_ + (env.action_space.n, )) if FROZEN else posterior_samples.reshape((len(posterior_samples), ) + env.n_cell + (env.action_space.n, ))
+        posterior_samples = mcmc.run(MCMC_SHOW_DISABLE=MCMC_SHOW_DISABLE)[-training_steps:]
+        # posterior_samples = posterior_samples.reshape((-1, ) + submatrix_shape_ + (env.action_space.n, )) #if FROZEN else posterior_samples.reshape((len(posterior_samples), ) + env.n_cell + (env.action_space.n, ))
         # posterior_samples = mcmc.run().reshape((-1, ) + )
         return posterior_samples, accept_probs, mcmc, kernel, None, None
     
-def display_results(posterior_samples, model, accept_probs, logdensities=None, proposed_logdensities=None):
-    display_indices = min(len(posterior_samples) // 10 + 1, 1000)
-    model.plot_policy(paras=model.get_parameter()[-display_indices:].numpy(), title=f'policy_T{training_steps}_{time}', additional_info = env.R, save=save, show=show)
+def display_results(posterior_samples, model, accept_probs=None, logdensities=None, proposed_logdensities=None):
+    display_indices = min(len(posterior_samples) // 1 + 1, 1000)
+    plot_qtable(torch.mean(model.get_parameter()[:], 0))
+    values = torch.round(torch.max(torch.mean(model.get_parameter()[:], 0), -1).values, decimals=2)
+    model.plot_policy(paras=model.get_parameter()[-display_indices:].numpy(), title=f'policy_T{training_steps}_{time}', additional_info = values, save=save, show=show)
     # model.plot_value(paras=posterior_samples.numpy(), title=f'value_T{training_steps}_{time}')
-    plt.imshow(torch.round(torch.max(torch.mean(posterior_samples[-display_indices:], 0), -1).values, decimals=2))
-    plt.colorbar()
+    # plt.imshow(values)
+    # plt.colorbar()
     if show:
         plt.show()
+    # print('Q learnt', torch.mean(posterior_samples[-display_indices:], 0))
     data_plot = posterior_samples.numpy().reshape(posterior_samples.shape[0], -1)[:, OBSERVE_DATA_START:OBSERVE_DATA_END]#Change the indices of names and Q_star below as well
     f = mcp.plot_chain_panel(chains=data_plot, names=env.names[OBSERVE_DATA_START:OBSERVE_DATA_END],
                                                     settings=dict(add_pm2std=True, fig=dict(figsize=(10,10), dpi=250),
@@ -395,7 +419,7 @@ def display_results(posterior_samples, model, accept_probs, logdensities=None, p
                                                     plot=dict(color='k', label='trace')))
     ax = f.get_axes()
     for i, ai in enumerate(ax):
-        ai.axhline(y = Q_star.flatten()[OBSERVE_DATA_START:OBSERVE_DATA_END][i], linestyle=':', linewidth=5, color = 'g',  label = 'true q')
+        ai.axhline(y = Q_star[env.learnable_idx].flatten()[OBSERVE_DATA_START:OBSERVE_DATA_END][i], linestyle=':', linewidth=5, color = 'g',  label = 'true q')
         q = np.percentile(data_plot[:, i], [PLOT_THRESHOLD, 100 - PLOT_THRESHOLD])
         ai.set_ylim(q)  
     f.tight_layout()
@@ -426,7 +450,7 @@ def display_results(posterior_samples, model, accept_probs, logdensities=None, p
 
 
 if __name__ == '__main__':
-    from tqdm import tqdm
+    # from tqdm import tqdm
     import json
     from mcmcplot import mcmcplot as mcp
     from arviz import ess, plot_autocorr, plot_trace
@@ -436,12 +460,13 @@ if __name__ == '__main__':
     '''module import'''
     from Environment.GridWorld import *
     from Environment.Maze import *
+    from Environment.DeepSea import *
     from model import *
     from QLearning import *
     
     parser = argparse.ArgumentParser()
     parser.add_argument('-T', '--training_step', default=MCMC_T, type=int)
-    parser.add_argument('-t', '--time', default=datetime.datetime.now().strftime("%f"))
+    parser.add_argument('-t', '--time', default=datetime.datetime.now().strftime("%Y%m%d_%H%M"))
     parser.add_argument('-s', '--save', default=SAVE)
     parser.add_argument('-p', '--show', default=SHOW)
     parser.add_argument('-e', '--epsilon', default=EPSILON, type=float)
@@ -451,13 +476,13 @@ if __name__ == '__main__':
     parser.add_argument('--seed', default=SEED, type=int)
     parser.add_argument('--MCMC', default=True, action='store_false', help='Bool type')
     parser.add_argument('-g', '--Greedy', default=GREEDY, action='store_true', help='Bool type')
-    parser.add_argument('--Env', default=ENV_NAME)
+    parser.add_argument('--Env', default=ENV_NAME, type=str)
     parser.add_argument('--sto', default=False)
-    parser.add_argument('--online', default=False)
+    parser.add_argument('--online', default=False, action='store_true', help='Bool type')
     parser.add_argument('--auto', default=False, action='store_true', help='Bool type')
     parser.add_argument('--warmup', default=WARMUP_RATIO, type=float)
     parser.add_argument('--transform', default=TRANSFORM)
-    parser.add_argument('--precondition', default=False)
+    parser.add_argument('--precondition', default=False, action='store_true', help='Bool type')
     args = parser.parse_args()
     print(args)
     time = args.time
@@ -482,53 +507,73 @@ if __name__ == '__main__':
     use_precondition = args.precondition
     
     ADAPT_STEP_SIZE = True if WARMUP_RATIO > 0 else False
-    ADAPT_MASS_MATRIX = False #True if WARMUP_RATIO > 0 else False
+    ADAPT_MASS_MATRIX = True if WARMUP_RATIO > 0 else False
     KERNEL_NAME = 'NUTS'
+    EPISODES = 100
 
-    N_PARTICLE = training_steps + 1 
+    N_PARTICLE = training_steps 
+    training_steps_with_burnin = training_steps#int(training_steps * (1 + BURN_IN))
     random.seed(seed)
     pyro.set_rng_seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-    
+
     if env_name == 'GridWorld':
         env = GridWorld((1,2), obstacles=False, stochastic=STOCHASTIC)
         # env.plot_env()
-    if env_name == 'Maze':
+    elif env_name == 'Maze':
         env = Maze()
+    elif env_name == 'DeepSea':
+        env = DeepSea(depth=6)
+    else:
+        raise NotImplementedError('No env found for env_name', env_name)
     
     S = []
     if len(env.n_cell) == 1:
         S = [(i, ) for i in range(env.n_cell[0])]
     else:
-        for i in range(env.n_cell[0]):
-            for j in range(env.n_cell[1]):
-                S.append((i,j)) 
-    Q = np.ones(shape=(env.n_cell + (env.action_space.n, ))) / env.observation_space.n / env.action_space.n
+        if env_name == 'DeepSea':
+            for i in range(env.n_cell[0] - 1):
+                for j in range(env.n_cell[1]):
+                    S.append((i,j)) 
+        else:
+            for i in range(env.n_cell[0]):
+                for j in range(env.n_cell[1]):
+                    S.append((i,j)) 
+    Q = np.zeros(shape=(env.n_cell + (env.action_space.n, ))) / env.observation_space.n / env.action_space.n
     A = range(env.action_space.n)
+    # pi_star, Q_star, V_star = OfflineQLearning(Q, A, S, env, gamma=GAMMA, show=show, thresh=1e-3, alpha=1)
     pi_star, Q_star, V_star = DynamicProgramming(Q, A, S, env, gamma=GAMMA, show=show)
     dim = env.observation_space.n * env.action_space.n
-    model = Tabular(env=env, n_particle=N_PARTICLE, prior='normal', gamma=GAMMA, initial_tables=Q_star, idx=FROZEN_IDX)
+    # model = Tabular(env=env, n_particle=N_PARTICLE, prior='normal', mean=PRIOR_MEAN, std=PRIOR_SIGMA, gamma=GAMMA, initial_tables=Q_star, idx=FROZEN_IDX)
+    # model.plot_policy(paras=np.array([Q_star]), title=f'True Values/Policy by Dynamic Programming', additional_info = V_star, show=show)
     
     env.reset()
     results = []
     if ONLINE_LEARNING:
-        r_all_iter = []
+        dircty_top = f'../MCMC/offline/{env.n_cell[1]}/{time}'
+        file_path = f"{dircty_top}/T{training_steps}_Sto{STOCHASTIC}_{time}.json"
+        if save:
+            if not os.path.exists(dircty_top):
+                os.makedirs(dircty_top)
+        r_all_repeat = []
+        samples_all_repeat = []
         for repeat in range(REPEAT_EXPERIMENT):
+            epsilon = abc_epsilon
             STEPSIZE = INITIAL_STEPSIZE
             # model = Tabular(env=env, n_particle=N_PARTICLE, prior='normal', gamma=GAMMA)
-            model = Tabular(env=env, n_particle=N_PARTICLE, prior='normal', gamma=GAMMA, initial_tables=Q_star, idx=FROZEN_IDX)#For frozen all but one dimensions
-            r_all_epi = []
+            model = Tabular(env=env, n_particle=N_PARTICLE, prior='normal', mean=PRIOR_MEAN, std=PRIOR_SIGMA, gamma=GAMMA, idx=FROZEN_IDX)#For frozen all but one dimensions
+            r_all_epi = [] 
+            samples_all_ep = []
             obs = Buffer(['state0', 'state1', 'action', 'rewards', 'done'])
             s0, _ = env.reset()
-            posterior_samples = torch.tensor(model.get_parameter())
             for e in range(EPISODES):
                 s0, _ = env.reset()
-                para = model.sample_para()
-                print(f'Episode {e} in repeat {repeat}')
+                para = model.sample_para(burn_in=int(training_steps * BURN_IN))
+                plot_qtable(para, title=f'Sampled Q table for episode {e}')
+                print(f'Episode {e} in repeat {repeat} with epsilon={epsilon}')
                 R = 0
-                R_star = 0
-                h = 0
+                # h = 0
                 # while True: #Turn on h += 1
                 for h in tqdm(range(HORIZON)):
                     action = model.act(s0, para, greedy=GREEDY)
@@ -542,10 +587,21 @@ if __name__ == '__main__':
                     obs.insert({'state0': s0, 'state1': s1, 'action': int(action), 'rewards': r, 'done': done}, unique=UNIQUE_OBS)
                     s0 = s1
                     if done or ( h + 1)  % FROZEN_T == 0:
+                        # model.set_learnable_idx(obs)
+                        posterior_samples = torch.tensor(model.get_learnable_parameter())
+                        plot_obs(obs, env, env_name=ENV_NAME, title=f'Eploration path till ep {e}', additional_info=V_star)
+                        plt.show()
                         #MCMC
+                        if TRANSFORM:
+                            posterior_samples = TruncatedGaussianABCLikelihood.log_neg_transform(posterior_samples)
                         # posterior_samples, accept_probs = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env)[:2]
-                        posterior_samples, accept_probs, logdensities, proposed_logdensities = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env)[:4]
-                        model.set_parameter(posterior_samples, idx=FROZEN_IDX)
+                        mode_idx = torch.argmax(mcmc.logdensities) if 'mcmc' in vars() else None
+                        Model = get_MCMC_Model(obs=obs, model=model, env=env, epsilon=epsilon)
+                        posterior_samples, accept_probs, mcmc, kernel, logdensities, proposed_logdensities = MCMC_update(Model=Model, posterior_samples=posterior_samples, training_steps=training_steps, training_steps_with_burnin=training_steps_with_burnin, mode_idx=mode_idx, use_precondition=use_precondition, USE_AUTOGRAD=USE_AUTOGRAD)
+                        if TRANSFORM:
+                            posterior_samples = TruncatedGaussianABCLikelihood.neg_exp_transform(posterior_samples)
+                        # model.sample_random_tables(set=True)
+                        model.set_learnable_parameter(posterior_samples)
                         display_results(posterior_samples=posterior_samples, model=model, accept_probs=accept_probs, logdensities=logdensities, proposed_logdensities=proposed_logdensities)
 
                     if done:
@@ -553,55 +609,96 @@ if __name__ == '__main__':
                         print('Return', R)
                         break
                     # h += 1
+                epsilon *= 0.95
                 r_all_epi.append(R)
+                samples_all_ep.append(model.get_parameter().clone().detach())
+                explore_pct = [model.get_parameter().numpy()[:, i, i, 0] > model.get_parameter().numpy()[:, i, i, 1] for i in range(env.n_cell[0] - 1)]
+                explore_pct_all = np.sum([explore_pct[0], explore_pct[0] & explore_pct[1],  explore_pct[0] & explore_pct[1] & explore_pct[2],   explore_pct[0] & explore_pct[1] & explore_pct[2] & explore_pct[3],  explore_pct[0] & explore_pct[1] & explore_pct[2] & explore_pct[3] & explore_pct[4]], axis=-1)/len(posterior_samples) 
+                print('explore percentage', explore_pct_all)
                 if save:
-                    save_results(results=r_all_epi, folder='Returns', stochastic=STOCHASTIC, episode=e, training_steps=training_steps, greedy=GREEDY, epsilon=EPSILON, initial_stepsize=INITIAL_STEPSIZE, decreasing_factor=DECREASING_FACTOR, time=time, m_z=M_Z, repeat=repeat, episodic=True)
-            r_all_iter.append(r_all_epi)
+                    save_results(results=r_all_epi, folder='Returns', stochastic=STOCHASTIC, episode=e, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat, episodic=False)
+                    save_results(results=samples_all_ep, folder='Samples', stochastic=STOCHASTIC, episode=e, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat, episodic=False)
+                    save_results(results=obs, folder='Obs', stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat, episodic=False)
+            r_all_repeat.append(r_all_epi)
+            samples_all_repeat.append(samples_all_ep)
             if save:
-                save_results(results=r_all_iter, folder='Returns', stochastic=STOCHASTIC, episode=e, training_steps=training_steps, greedy=GREEDY, epsilon=EPSILON, initial_stepsize=INITIAL_STEPSIZE, decreasing_factor=DECREASING_FACTOR, time=time, m_z=M_Z, repeat=repeat)        
-        plt.plot(R)
+                save_results(results=r_all_repeat, folder='Returns', stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat)        
+                save_results(results=samples_all_repeat, folder='Samples', stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat)
+                save_results(results=obs, folder='Obs', stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat)
+            plot_return_vs_episodes(r_all_epi, repeat=repeat)
+        plot_return_vs_episodes_repeat(r_all_repeat)
         if show:
             plt.show()
             
     else:
         experiment_code = 1
-        file_path = f"../Results/E{experiment_code}/T{training_steps}_Sto{STOCHASTIC}_{time}.json"
+        dircty_top = f'../MCMC/offline/{env.n_cell[1]}/{time}/'
+        file_path = f"{dircty_top}/T{training_steps}_Sto{STOCHASTIC}_{time}.json"
+        if save:
+            if not os.path.exists(dircty_top):
+                os.makedirs(dircty_top)
         error_all = []
         block_accept = []
         epsilon_lst = [10, 1, 1e-1, 1e-2, 1e-3, 1e-4][2:3]
         data_percentage_lst = np.linspace(0.1, 1, 10)[-1:]
         traj_len_L = [0.5, 1, 2, 2.1, 2.2, 2.8]
         s_l = [1e-4, 1e-3, 1e-2, 1e-1]
-        for repeat in range(REPEAT_EXPERIMENT):
+        PRIOR_SIGMA_l = [0.5, 1, 2,3,4,5][4:5]
+        epsilon = abc_epsilon
+        for repeat in range(1):
             print('Repeat no. ', repeat)
             error_all_epsilon = []
             samples_all_stepsize = []
             H_change_all_stepsize = []
-            for EPSILON in epsilon_lst:
-            # for TRAJECTORY_LENGTH in traj_len_L:
+            explore_all_sigma = []
+            # for epsilon in epsilon_lst:
+            for PRIOR_SIGMA in PRIOR_SIGMA_l:
+                model = Tabular(env=env, n_particle=N_PARTICLE, prior='normal', mean=PRIOR_MEAN, std=PRIOR_SIGMA, gamma=GAMMA, idx=FROZEN_IDX)
                 print('MCMC Stepsize', STEPSIZE)
                 error_all_percentage = []
                 for data_percentage in data_percentage_lst:
-                    print(f'Experiment with epsilon={EPSILON}, %={data_percentage}')
-                    env.uniform_policy(data_percentage=data_percentage)
+                    print(f'Experiment with epsilon={epsilon}, %={data_percentage}, std={model.std}')
+                    env.uniform_policy(data_percentage=data_percentage, unique_verbose=True)
                     obs = env.uniform_obs
-                    posterior_samples = model.get_parameter()
+                    ##############
+                    #For diagnosis
+                    # obs = torch.load('../Obs/MCMC/094980/T200_Repeat1_StoFalse_M1200_GdyFalse_Sigma4.pt')
+                    # model.set_learnable_idx(obs)
+                    ##############
+                        
+                    posterior_samples = model.get_learnable_parameter()
                     # posterior_samples, accept_probs = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env)[:2]
                     # print(posterior_samples)
                     if TRANSFORM:
                         posterior_samples = TruncatedGaussianABCLikelihood.log_neg_transform(posterior_samples)
-                    posterior_samples, accept_probs, mcmc, kernel, logdensities, proposed_logdensities, = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env)
+                    # mode_idx = 40# torch.argmax(mcmc.logdensities) if 'mcmc' in vars() else None
+                    Model = get_MCMC_Model(obs=obs, model=model, env=env, epsilon=epsilon)
+                    posterior_samples, accept_probs, mcmc, kernel, logdensities, proposed_logdensities, = MCMC_update(Model=Model, posterior_samples=posterior_samples, env=env, trajectory_length=2*np.pi, training_steps_with_burnin=training_steps, training_steps=training_steps, USE_AUTOGRAD=USE_AUTOGRAD, WARMUP_RATIO=WARMUP_RATIO, MCMC_SHOW_DISABLE=MCMC_SHOW_DISABLE, ADAPT_STEP_SIZE=ADAPT_STEP_SIZE, ADAPT_MASS_MATRIX=ADAPT_MASS_MATRIX, kernel='NUTS')
                     # posterior_samples, accept_probs, mcmc, kernel, = MCMC_update(posterior_samples=posterior_samples, obs=obs, model=model, env=env)[:4]
                     if TRANSFORM:
                         posterior_samples = TruncatedGaussianABCLikelihood.neg_exp_transform(posterior_samples)
-                    model.set_parameter(posterior_samples, idx=FROZEN_IDX)
-                    display_results(posterior_samples=posterior_samples, model=model, accept_probs=accept_probs, logdensities=logdensities, proposed_logdensities=proposed_logdensities)
+                    # model.set_parameter(posterior_samples, idx=FROZEN_IDX)
+                    model.set_learnable_parameter(posterior_samples)
+                    # display_results(posterior_samples=posterior_samples, model=model, accept_probs=accept_probs, logdensities=logdensities, proposed_logdensities=proposed_logdensities)
                     average_over = min(100, len(posterior_samples))
-                    error_all_percentage.append(mean_squared_error(Q_star.flatten()[FROZEN_NO], torch.mean(posterior_samples[-average_over:].reshape(average_over, -1), axis=0)))
+                    if FROZEN:
+                        error_all_percentage.append(mean_squared_error(Q_star.flatten()[FROZEN_NO], torch.mean(posterior_samples[-average_over:].reshape(average_over, -1), axis=0)))
+                    else:
+                        try:
+                            error_all_percentage.append(mean_squared_error(Q_star[env.learnable_idx].flatten(), torch.mean(posterior_samples[-average_over:].reshape(average_over, -1), axis=0)))
+                        except:
+                            error_all_percentage.append(mean_squared_error(Q_star.flatten()[env.learnable_idx], torch.mean(posterior_samples[-average_over:].reshape(average_over, -1), axis=0)))
                     print('error_all_percentage', error_all_percentage)
-                samples_all_stepsize.append(posterior_samples)
+                # explore_pct = [model.get_parameter().numpy()[:, i, i, 0] > model.get_parameter().numpy()[:, i, i, 1] for i in range(env.n_cell[0] - 1)]
+                # explore_pct_all = np.sum([explore_pct[0], explore_pct[0] & explore_pct[1],  explore_pct[0] & explore_pct[1] & explore_pct[2],   explore_pct[0] & explore_pct[1] & explore_pct[2] & explore_pct[3],  explore_pct[0] & explore_pct[1] & explore_pct[2] & explore_pct[3] & explore_pct[4]], axis=-1)/len(posterior_samples) 
+                # print('explore percentage', explore_pct_all, 'explore individual', np.sum(explore_pct, axis=-1)/len(posterior_samples))
+                # explore_all_sigma.append(explore_pct_all)
+                # explore_all_sigma.append(torch.sum((posterior_samples[:, -2] > posterior_samples[:, 0])) / len(posterior_samples))
+
+                samples_all_stepsize.append(model.get_parameter().clone())
                 if kernel.original:
                     H_change_all_stepsize.append(kernel.H_change)
+                
                 # torch.save(posterior_samples, f'Untitled Folder/2DTransform{use_precondition}T{training_steps}Kernel{KERNEL_NAME}traj_len{kernel.traj_len}.pt')
                 # error_all_epsilon.append(error_all_percentage)
             # error_all.append(error_all_epsilon)
@@ -616,8 +713,11 @@ if __name__ == '__main__':
                 with open(file_path, "w") as file:
                     file.write(json_data)
                 print(f"Dictionary saved to {file_path}")
+                save_results(results=posterior_samples, folder=f'Samples_Sgm{PRIOR_SIGMA}_Epsln{epsilon}', dir=dircty_top, stochastic=STOCHASTIC, training_steps=training_steps, greedy=GREEDY, epsilon=epsilon, time=time, m_z=M_Z, repeat=repeat, episodic=False)
+
             if STOCHASTIC:
                 block_accept.append(mcmc.accept_prob['z'].numpy())
+            # print(explore_all_sigma)
         # plot_repeat(error_all, labels=epsilon_lst, label='Epsilon', x=data_percentage_lst, smooth=1, xlabel='data percentage', ylabel='MSE', title='MSE for offline learning vs DP')
         if STOCHASTIC:
             plot_block_accpt_prob(mcmc=mcmc, block_accept=np.array(block_accept))

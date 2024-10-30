@@ -10,6 +10,8 @@ from tqdm.notebook import tqdm
 from parameter import *
 from utils import *
 
+def clip(tensor):
+     return torch.clip(tensor,-1e9,1e9)
 
 class Kernel:
     """the class of all MCMC kernels"""
@@ -341,7 +343,7 @@ class HMC(Kernel):
         use_autograd: bool
             - If True, autograd is used to compute the gradient of the target density, otherwise the manually implemented gradient function is used specified in the model
         """
-        print('HMC stepsize', stepsize)
+        # print('HMC stepsize', stepsize)
         super(HMC, self).__init__(model=model, *args, **kwargs)  
         self.traj_len = traj_len 
         self.stepsize = stepsize
@@ -352,7 +354,7 @@ class HMC(Kernel):
         self.H_change = []
     
         self.set_L(num_steps=num_steps, traj_len=traj_len, stepsize=stepsize, set_L=True)
-
+        # print(f'HMC setting, traj_len{self.traj_len}, num_steps{self.L}, stepsize{self.stepsize}')
 
     def move(self, current_para, current_gradient):
         """see self.move_, with L=self.L, stepsize=self.stepsize"""
@@ -379,27 +381,27 @@ class HMC(Kernel):
         else:
             p0 = torch.normal(mean=torch.zeros(current_para.size()), std=self.mass)
 
-        p = p0 + stepsize * current_gradient * 0.5
+        p = clip(p0 + stepsize * current_gradient * 0.5)
         q = deepcopy(current_para)
         if full_para is None:
             for i in range(L):
                 q_move = torch.mv(self.precondition, p) if self.precondition is not None else p
-                q = q + stepsize * q_move
+                q = clip(q + stepsize * q_move)
                 if i != (L-1):
                     gradient, _ = self.gradient(parameter=q, info_dict=dict(), return_logtarget_density=False)
-                    p = p + stepsize * gradient
+                    p = clip(p + stepsize * gradient)
             proposed_gradient, proposed_logtarget_density, proposed_para_llh_info_dict, proposed_para_llh_grad_info_dict = self.gradient(parameter=q, info_dict=dict(), return_logtarget_density=True)
-            p = p + stepsize * proposed_gradient * 0.5
+            p = clip(p + stepsize * proposed_gradient * 0.5)
         else:
             for i in range(L):
                 q_move = torch.mv(self.precondition, p) if self.precondition is not None else p / self.mass
-                q = q + stepsize * q_move
+                q = clip(q + stepsize * q_move)
                 full_para[indices] = q
                 if i != (L-1):
                     gradient, _ = self.gradient(parameter=full_para, info_dict=dict(), return_logtarget_density=False)
                     p = p + stepsize * gradient[indices]
             proposed_gradient, proposed_logtarget_density, proposed_para_llh_info_dict, proposed_para_llh_grad_info_dict = self.gradient(parameter=full_para, info_dict=dict(), return_logtarget_density=True)
-            p = p + stepsize * proposed_gradient[indices] * 0.5
+            p = clip(p + stepsize * proposed_gradient[indices] * 0.5)
         p = -p
         self.momentum.append(p)
         q_info_dict = {"logdensities":proposed_logtarget_density, "gradient":proposed_gradient, "llh_info_dict":proposed_para_llh_info_dict, "llh_grad_info_dict":proposed_para_llh_grad_info_dict}
@@ -509,7 +511,8 @@ class HMC(Kernel):
         t0 = 10
         kappa = 0.75
         traj_len = 2 * np.pi if self.traj_len is None else self.traj_len
-        pbar = tqdm(range(iterations))
+        MCMC_SHOW_DISABLE = True
+        pbar = range(iterations) if MCMC_SHOW_DISABLE else tqdm(range(iterations))
         for i in pbar:
             L = self.set_L(num_steps=None, traj_len=traj_len, stepsize=eps, set_L=False)
             try:
@@ -529,8 +532,8 @@ class HMC(Kernel):
             logeps = mu - (m**0.5)/gamma * H_bar
             eps = np.exp(logeps)
             logeps_bar = m**(-kappa) * logeps + (1 - m**(-kappa)) * logeps_bar
-
-            pbar.set_description("Warmup: Most recent alpha {}, with stepsize {}".format(str(np.round(accept_prob.numpy(), 3)), str(np.round(eps, 3))))
+            if not MCMC_SHOW_DISABLE:
+                pbar.set_description("Warmup: Most recent alpha {}, with stepsize {}".format(str(np.round(accept_prob.numpy(), 3)), str(np.round(eps.numpy(), 5))))
 
         stepsize = np.exp(logeps_bar)
         if set_stepsize is True:   
@@ -677,7 +680,7 @@ class HMC_pyro(Kernel):
 class NUTS_pyro(Kernel):
     """The NUTS kernel for use in pyro"""
     def __init__(self, model, stepsize=0.5, precondition_matrix=None, adapt_step_size=False, *args, **kwargs):
-        print('NUTS stepsize', stepsize)
+        # print('NUTS stepsize', stepsize)
         super(NUTS_pyro, self).__init__(model=model, *args, **kwargs)
         self.stepsize = stepsize
         self.precondition_matrix = precondition_matrix
@@ -685,15 +688,13 @@ class NUTS_pyro(Kernel):
         self.kwargs = kwargs
         self.original = False  #flag to identify whether the kernel subclass is origin
         
-    def get_pyro_kernel(self, parameter_len, full_para=None):
+    def get_pyro_kernel(self, parameter_len):
         """return the HMC pyro kernel with input parameters specified during initialisation of the class
         parameter_len: len
             - the dimension of the sampling (parameter) space
         """
         pyro.clear_param_store()
-        self.full_para = full_para
-        pyro_model = lambda data: self.model.pyro_model(data=data, parameter_len=parameter_len, full_para=full_para)
-        print('pyro nuts', self.adapt_step_size, self.kwargs)
+        pyro_model = lambda data: self.model.pyro_model(data=data, parameter_len=parameter_len)
         self.pyro_kernel =  pyro.infer.mcmc.NUTS(model=pyro_model)#, step_size=self.stepsize, adapt_step_size=self.adapt_step_size, **self.kwargs)
         return self.pyro_kernel
 

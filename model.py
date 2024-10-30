@@ -38,24 +38,68 @@ def uniform_grid(low, high, bins=(10,10), include_low=1, verbose=False):
 
 class Buffer:
     def __init__(self, entry_keys, seed=SEED):
+        self.entry_keys = entry_keys
         self._buffers = {key: [] for key in entry_keys}
         self.unique_set = []
+        self._unique_buffers = {key: [] for key in entry_keys}
+        self._new_data_buffers = {key: [] for key in entry_keys}
+        
+    def init_new_data_buffer(self):
+        for k, v in self._new_data_buffers.items():
+            for vi in v:
+                self._unique_buffers[k].append(vi)
+                self._buffers[k].append(vi)
+        self._new_data_buffers = {key: [] for key in self.entry_keys}
 
-    def insert(self, items, unique=False, unique_verbose=True):
+    def insert(self, items, unique=False, unique_verbose=True, update_new_data=False):
         if set(items.keys()) != set(self._buffers.keys()):
             raise IndexError
         unique_check = list(items.values())
         unique_check.remove(items['state1'])
         unique_check = str(unique_check)
-        if unique and unique_check in self.unique_set:
-            return 
-        if unique_verbose:
-            print('New items added', unique_check)
-        for k, v in items.items():
-            self._buffers[k].append(v)
-            # if len(self._buffers[k]) > BUFFER_SIZE:
-            #     self._buffers[k].pop(0)
-        self.unique_set.append(unique_check)
+        if unique:
+            if unique_check in self.unique_set:
+                return False
+            self.unique_set.append(unique_check)
+            for k, v in items.items():
+                if update_new_data:
+                    self._new_data_buffers[k].append(v) 
+                else:   
+                    self._unique_buffers[k].append(v)
+                    self._buffers[k].append(v)
+            if unique_verbose:
+                print('New items added', unique_check)
+            return True
+        else:
+            if unique_check not in self.unique_set:
+                for k, v in items.items():
+                    self._unique_buffers[k].append(v)
+                if unique_verbose:
+                    print('New items explored', unique_check)
+            if update_new_data:
+                for k, v in items.items():
+                    self._new_data_buffers[k].append(v) 
+            else:   
+                for k, v in items.items():
+                    self._buffers[k].append(v)
+            return True
+        # if unique_check in self.unique_set:
+        #     if unique:
+        #         return False
+        # else:
+        #     self.unique_set.append(unique_check)
+        #     for k, v in items.items():
+        #         if update_new_data:
+        #             self._new_data_buffers[k].append(v)  
+        #         else:   
+        #             self._unique_buffers[k].append(v)
+        #     if unique_verbose:
+        #         print('New items added', unique_check)
+        #     # if len(self._buffers[k]) > BUFFER_SIZE:
+        #     #     self._buffers[k].pop(0)
+        # for k, v in items.items():
+        #     self._buffers[k].append(v)
+        # return True
         
     def get_minibatch(self, batch_size):
         if batch_size == 1:
@@ -73,7 +117,7 @@ class Buffer:
         return len(list(self._buffers.values())[0])
 
 class Tabular:
-    def __init__(self, env, n_particle, prior='normal', discrete=False, gamma=0.95, std=0.1, verbose=True, bins=(10,), initial_tables=None, idx=None):
+    def __init__(self, env, n_particle, prior='normal', discrete=False, gamma=0.95, std=0.1, mean=0, verbose=True, bins=(10,), initial_tables=None, initial_weights=None, idx=None):
         self.env = env
         self.discrete = discrete
         self.obs_size = env.observation_space.shape
@@ -92,18 +136,28 @@ class Tabular:
                 print("Action space size:", self.action_size)
         
         self.gamma = gamma
+        self.mean = mean
         self.std = std
-        self.n_particle = n_particle
-        self._weights = np.ones(n_particle) / n_particle
+        self.n_particle = n_particle if (initial_tables is None) else len(initial_tables)
+        self._weights = initial_weights
         if prior == 'normal':
-            random_tables = torch.normal(mean=0, std=1, size=((n_particle,) + self.bins + (self.action_size,)))
-            self.tables = torch.tensor(np.repeat(initial_tables[np.newaxis, ...], n_particle, axis=0), dtype=torch.float32) if ((initial_tables is not None) and FROZEN) else random_tables
+            self.random_tables = torch.normal(mean=mean, std=std, size=((n_particle,) + self.bins + (self.action_size,)))
+            self.tables = initial_tables if (initial_tables is not None) else self.random_tables
+            # self.tables = torch.tensor(np.repeat(initial_tables[np.newaxis, ...], n_particle, axis=0), dtype=torch.float32) if (initial_tables is not None) else self.random_tables
+            #diagnosis
+            # self.tables = torch.load('../Samples/MCMC/094980/T200_Repeat1_StoFalse_M1200_GdyFalse_Sigma4.pt')[-1][27]
             if idx is not None:
                 # last_samples = torch.load('2DT1050000HMC.pt')[-1]
                 for i in idx:
-                    self.tables[(slice(None), *i)] = torch.minimum(torch.normal(mean=-5, std=1, size=(n_particle, )), torch.zeros(n_particle))
+                    self.tables[(slice(None), *i)] = torch.minimum(torch.normal(mean=mean, std=std, size=(n_particle, )), torch.zeros(n_particle))
+            if env.goal_idx:
+                for n in range(n_particle):
+                    self.tables[n][env.goal_idx] = 0
+            if env.not_learnable_idx:
+                for n in range(n_particle):
+                    self.tables[n][env.not_learnable_idx] = 0
             if verbose:
-                print("Q table size:", self.tables[-1].shape)       
+                print("Q table size:", self.tables[-1].shape)     
         else:
             raise NotImplementedError(f'The prior method corresponds to {prior} has not been implemented')
 
@@ -135,22 +189,21 @@ class Tabular:
         """Discretize a sample as per given grid."""
         return tuple(int(np.digitize(s, g)) for s, g in zip(sample_state, self.state_grid))  
 
-    def sample_para(self, weights=None):
+    def sample_para(self, weights=None, burn_in=0):
         # i = random.choices(range(len(self.tables)), weights)
         # print('Best table', i)
         if weights is None:
-            return random.choice(self.tables)
-        return random.choices(self.tables, weights)
+            return random.choice( self.tables[ burn_in : ] )
+        return random.choices (self.tables[ burn_in : ], weights )
     
     # def q_value_with_linear_index(self, para, s, a):
         
 
     def q_value(self, table, s, a, full=True): 
+        if len(s) == 0:
+            return torch.tensor([])
         if not full:
-            assert self.initial_tables is not None
-            extend_table = torch.tensor(self.initial_tables, dtype=torch.float32).clone()
-            extend_table[FROZEN_IDX] = table
-            table = extend_table
+            table = self.fill_learnable_table(table)
         if hasattr(a, "__len__"):# multiple s, mutiple a 
             if len(table.shape) > len(s) + len(a):
                 return table[(slice(None), *s, a)]
@@ -159,13 +212,22 @@ class Tabular:
         if hasattr(s[0], "__len__"):
             return table[tuple(s) + (a, )]
         return table[s][a]
-
+    
+    def fill_learnable_table(self, table):
+        # table = table.reshape(self.env.learnable_shape + (self.action_size, ))
+        extend_table = torch.tensor(self.tables[0], dtype=torch.float32).clone().detach()
+        try:
+            extend_table[self.env.learnable_idx] = table
+        except:
+            table = table.reshape(extend_table[self.env.learnable_idx].shape)
+            extend_table[self.env.learnable_idx] = table
+        return extend_table
+    
     def v_value(self, table, s, full=True):
+        if len(s) == 0:
+            return torch.tensor([])
         if not full:
-            assert self.initial_tables is not None
-            extend_table = torch.tensor(self.initial_tables, dtype=torch.float32).clone()
-            extend_table[FROZEN_IDX] = table
-            table = extend_table
+            table = self.fill_learnable_table(table)
         if len(table.shape) > len(s) + 1:
             return torch.max(table[(slice(None), *s)], 1).values
         if hasattr(s[0], "__len__"):
@@ -188,9 +250,25 @@ class Tabular:
         reward = obs['rewards'][-1]
         lld = stats.norm.pdf(reward, loc=sample, scale=self.std)
         return np.prod(lld)
+    
+    def sample_random_tables(self, set=False):
+        self.random_tables = torch.normal(mean=self.mean, std=self.std, size=((self.n_particle,) + self.bins + (self.action_size,)))
+        if set:
+            self.tables = self.random_tables        
+
+    def set_learnable_idx(self, obs):
+        index_arrays = []
+        all_obs = np.array(list(obs._unique_buffers.values())).T
+        for s0, _, a, _, _ in list(all_obs):
+            index_arrays.append(np.array(s0 + (a,)))
+        self.env.learnable_idx = tuple(torch.tensor(index_arrays).T)
+        self.env.names = index_arrays
 
     def get_parameter(self):
         return self.tables
+    
+    def get_learnable_parameter(self):
+        return self.tables[(slice(None),  *self.env.learnable_idx)]
 
     def set_parameter(self, new_para, idx=None):
         if idx is None:
@@ -199,8 +277,21 @@ class Tabular:
             for i in idx:
                 self.tables[(slice(None), *i)] = new_para[(slice(None), *i)]
 
-    def set_weights(self, new_weights):
-        self._weights = new_weights
+    def set_learnable_parameter(self, new_para):
+        # for i in self.env.learnable_idx:
+        #     self.tables[(slice(None), *i)] = new_para[(slice(None), *i)]
+        try:
+            self.tables[(slice(None),  *self.env.learnable_idx) ] = new_para
+        except:
+            shape = self.tables[(slice(None),  *self.env.learnable_idx)].shape
+            new_para = new_para.reshape(shape)
+            self.tables[(slice(None),  *self.env.learnable_idx) ] = new_para
+    
+    def set_weights(self, new_weights, log=False):
+        if log:
+            self._weights = torch.exp(new_weights)
+        else:
+            self._weights = new_weights
 
     def optimal_parameter(self):
         return self.get_parameter()[np.argmax(self._weights)]
@@ -234,7 +325,7 @@ class Tabular:
             s0 = np.array(s0).astype('int32')
             s1 = np.array(s1).astype('int32')
         S0, S1 = np.meshgrid(s0, s1)
-        print('Value', '\n', np.round(para, 1))
+        # print('Value', '\n', np.round(para, 1))
         # plot_3d(S0, S1, para, title=title, xlabel=xlabel, ylabel=ylabel, zlabel=zlabel)
 
     def plot_policy(self, paras=[], title='Policy for each state', xlabel=None, ylabel=None, zlabel='Policy', show=False, additional_info=[], save=False):
@@ -246,7 +337,7 @@ class Tabular:
             s0, s1 = uniform_grid(high=self.env.observation_space_high, low=self.env.observation_space_low, bins=self.bins, include_low=0)
         
         S0, S1 = np.meshgrid(s0, s1)
-        print('policy:', '\n',  para)
+        # print('policy:', '\n',  para)
         para = para
         plot_2d(s0, s1, para, env_name=self.env.env_name, action_dim=self.action_size, title=title, xlabel=xlabel, ylabel=ylabel, zlabel=zlabel, show=show, additional_info=additional_info, save=save)
         # plot_3d(S0, S1, para.T, title=title, xlabel=xlabel, ylabel=ylabel, zlabel=zlabel, show=show)
