@@ -265,7 +265,7 @@ if __name__ == '__main__':
     parser.add_argument('--Env', default=ENV_NAME)
     parser.add_argument('--algorithm', default='PSRL', type=str)
     parser.add_argument('--Env_d', default=10, type=int)
-    parser.add_argument('--episode', default=100, type=int)
+    parser.add_argument('--episode', default=1e6, type=int)
     parser.add_argument('--load', default=False, action='store_true', help='Bool type')
     parser.add_argument('--load_path', type=str, default='')
     parser.add_argument('--sample_path', type=str, default='')
@@ -285,7 +285,7 @@ if __name__ == '__main__':
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-    
+    print(args)
     if load:
         load_path_info = load_path.split('/')
         env_d, time, initial_repeat = load_path_info
@@ -296,9 +296,9 @@ if __name__ == '__main__':
     
     dircty=''
     dircty_top = ''
-    env_d_l = [15, 20, 25, 30, 35, 40, 45, 50]
-    skip = env_d_l.index(int(env_d)) if load else 2
-    ep_l = [40000, 80000, 150000, 250000, 260000, 280000, 300000, 400000][skip:]
+    env_d_l = [22, 23]
+    skip = env_d_l.index(int(env_d)) if load else 0
+    ep_l = [1400000, 2000000, 150000, 2500000, 2600000, 2800000, 3000000, 4000000][skip:]
     for idx, env_d in enumerate(env_d_l[skip:]):
         print(f'Running {env_d} depth with {ep_l[idx]} episodes')
         if env_name == 'GridWorld':
@@ -401,9 +401,9 @@ if __name__ == '__main__':
 
                 psrl_transitions, psrl_rewards = agent.sample_model()
                 psrl_policy = agent.plan(psrl_transitions, psrl_rewards)
-                ep = len(agent.return_l)
-                # for episode in range(EPISODES):
-                while True:
+                ep_ = len(agent.return_l)
+                for ep in range(ep_, EPISODES):
+                # while True:
                     # PSRL planning
                     psrl_transitions, psrl_rewards = agent.sample_model()
                     psrl_policy = agent.plan(psrl_transitions, psrl_rewards)
@@ -417,7 +417,8 @@ if __name__ == '__main__':
                         s0 = s1
                         R += r
                     agent.return_l.append(R)
-                    if ep % 100 == 0:
+                    # ep += 1
+                    if ep % 1000 == 0:
                         print(f'episodes {ep} with average return {sum(agent.return_l)/ep}')
                         if save:
                             repeat_path = f'{dircty_top}R{repeat}/'
@@ -429,8 +430,7 @@ if __name__ == '__main__':
                             torch.save(agent.reward_counts, f'{repeat_path}R_count.pt')
                             torch.save(agent.rewards, f'{repeat_path}Rewards.pt')
                     sys.stdout.flush()
-                    ep += 1
-                    if sum(agent.return_l)/ep > 0.12:
+                    if  ep > 0 and sum(agent.return_l)/ep > 0.12:
                         print('===================================')
                         print('\n', '\n')
                         #0.12L + X = 0.49 (L + X) -> 0.37L = 0.51X -> X = 0.37/0.51 L = 0.72 L
@@ -472,6 +472,7 @@ if __name__ == '__main__':
 
             # plot_return_vs_episodes(agent.return_l, repeat=repeat, save=save, figure_path=dircty, show=show)
 
-            plot_return_vs_episodes_repeat(r_all_repeat, save=save, figure_path=dircty_top, show=show, smooth=1)
+            plot_return_vs_episodes_repeat(append_rewards(r_all_repeat), save=save, figure_path=dircty_top, show=show, smooth=1)
         if show:
             plt.show()
+        load = False

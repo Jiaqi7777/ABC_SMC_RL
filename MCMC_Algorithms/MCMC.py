@@ -98,7 +98,8 @@ class MCMC:
             except NotImplementedError:
                 print("Warmup is not implemented for the current kernel. Skip to sampling...")
 
-        self.samples[0] = current_para
+        self.samples.append(current_para)
+        # self.samples[0] = current_para
         # self.logdensities[0] = current_logtarget_density
         # self.proposed_logdensities[0] = current_logtarget_density
 
@@ -107,7 +108,7 @@ class MCMC:
             accept_prob, proposed_para, proposed_para_info_dict  = self.kernel.propose_accept(current_para=current_para,
                                                                          current_para_info_dict=current_para_info_dict, indices=idx)
 
-            if np.random.uniform(0, 1) < accept_prob:
+            if accept_prob >=1 or np.random.uniform(0, 1) <= accept_prob:
                 current_para = proposed_para
                 current_para_info_dict = proposed_para_info_dict
                 self.accepted += 1
@@ -115,12 +116,11 @@ class MCMC:
             if not MCMC_SHOW_DISABLE:
                 pbar.set_description("Acceptance probability {}".format(np.round(self.accepted/(i+1), 2)))
 
-            self.samples[i + 1] = current_para
-            self.proposed_samples[i+1] = proposed_para
-            self.logdensities[i + 1] = current_para_info_dict["logdensities"]
-            self.proposed_logdensities[i + 1] = proposed_para_info_dict["logdensities"]
-            self.accept_prob[i + 1] = accept_prob
-
+            self.samples.append(current_para)
+            # self.proposed_samples[i+1] = proposed_para
+            # self.logdensities[i + 1] = current_para_info_dict["logdensities"]
+            # self.proposed_logdensities[i + 1] = proposed_para_info_dict["logdensities"]
+            # self.accept_prob[i + 1] = accept_prob
         return self.samples
     
     def warmup(self, init_para, init_para_info_dict=dict()):
@@ -148,7 +148,7 @@ class MCMC:
         return self.accept_prob
     
     def reset_stat(self):
-        self.samples = torch.zeros((self.num_samples+1, self.params_dim))
+        self.samples = []#torch.zeros((self.num_samples+1, self.params_dim))
         self.logdensities = torch.zeros(self.num_samples + 1)
         self.proposed_samples = torch.zeros((self.num_samples + 1, self.params_dim))
         self.proposed_logdensities = torch.zeros(self.num_samples + 1)
@@ -352,6 +352,8 @@ def MCMC_update(Model, posterior_samples, env, training_steps_with_burnin, train
             # kernel = HMC(model=Model, stepsize=stepsize, use_autograd=USE_AUTOGRAD, mass=MASS, precondition_matrix=precondition_matrix)
             if kernel == 'HMC':
                 kernel = HMC(model=Model, stepsize=stepsize, num_steps=num_steps, use_autograd=USE_AUTOGRAD, mass=MASS, precondition_matrix=precondition_matrix)
+            if kernel =='IntegratorSnippets':
+                kernel = IntegratorSnippets(model=Model, stepsize=stepsize, num_steps=num_steps, precondition_matrix=precondition_matrix)
             if kernel == 'NUTS':
                 kernel = NUTS_pyro(model=Model, stepsize=stepsize, full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB, precondition_matrix=precondition_matrix)
         else:
@@ -362,6 +364,8 @@ def MCMC_update(Model, posterior_samples, env, training_steps_with_burnin, train
             # kernel = HMC_pyro(model=Model, stepsize=stepsize, full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB, trajectory_length=trajectory_length)
             if kernel == 'HMC':
                 kernel = HMC(model=Model, stepsize=stepsize, num_steps=num_steps, use_autograd=USE_AUTOGRAD, mass=MASS, traj_len=trajectory_length)
+            if kernel =='IntegratorSnippets':
+                kernel = IntegratorSnippets(model=Model, stepsize=stepsize, num_steps=num_steps, use_autograd=USE_AUTOGRAD, mass=MASS, traj_len=trajectory_length)
             if kernel == 'NUTS':
                 kernel = NUTS_pyro(model=Model, stepsize=stepsize, full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB)
 

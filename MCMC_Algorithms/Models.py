@@ -415,6 +415,28 @@ class DeterministicSRModel():
         logtarget_density = logtarget_density.detach()
         return logtarget_density, gradient, llh_info_dict
     
+    def llh_auto_gradient(self, parameter):
+        """compute the gradient of the log target density with respect to the parameter and return the gradient, using automatic differentiation with pytorch
+        parameter: torch.tensor (no gradient needed)
+            - the parameter the gradient is computed at
+        return:
+            - logtarget_density: torch.tensor
+                - the log target density of the target density with respect to the input parameter
+            - gradient: torch.tensor
+                - the gradient of the log target density with respect to and at the input parameter
+            - llh_info_dict: dict
+                - a dictionary of info output by the abclikelihood.llh function
+        """
+        parameter = parameter.clone()
+        parameter.requires_grad = True
+        llh, llh_info_dict = self.llh(parameter=parameter, llh_info_dict=dict()) # must use the llh_transform_fn to compute the density
+        llh.backward()
+        gradient = parameter.grad.clone()
+        parameter.grad.zero_()
+        parameter.requires_grad = False
+        llh = llh.detach()
+        return llh, gradient, llh_info_dict
+    
     def logtarget_hessian(self, parameter, llh_info_dict=dict(), llh_grad_info_dict=dict()):
         """compute the hessian of the log target density with respect to the parameter and return the hessian, using explicit derivation of the hessian
         parameter: torch.tensor

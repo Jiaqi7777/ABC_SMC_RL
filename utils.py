@@ -8,7 +8,17 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from matplotlib.colors import Normalize
 import torch
 from parameter import *
-
+plt.rcParams.update({
+    'font.family': 'serif',
+    'font.serif': ['Times New Roman'],
+    'axes.labelsize': 24,    # Font size for axis labels
+    'axes.titlesize': 16,    # Font size for titles
+    'legend.fontsize': 12,   # Font size for legend
+    'xtick.labelsize': 12,   # Font size for x-tick labels
+    'ytick.labelsize': 12,   # Font size for y-tick labels
+    'figure.titlesize': 18,   # Font size for figure title
+    'text.usetex': True,  
+})
 def argmaxs(arr):
     mask = arr == arr.max()
     return random.choice(np.array(range(len(arr)))[mask])
@@ -387,29 +397,33 @@ def load_return(depth, adaptive=False):
         return False
     return loaded_files
 
-def display_smc_results_notebook(samples, n=0, smooth=1, Q_star=None, figure_path=None, save=False, episode='', repeat='', show=False):
+def display_smc_results_notebook(samples, n=0, smooth=1, Q_star=None, figure_path=None, save=False, episode='', repeat='', show=False, cell_n=2, cell_idx=0, cell_idx_x=None, ylim=4):
     figure_name = f'E{episode}R{repeat}SMCSamples'
-    len_sample = len(samples)
+    len_sample = len(samples) - smooth + 1
     subsample_int = 1
     samples = np.apply_along_axis(lambda m: np.convolve(m, np.ones(smooth)/smooth, mode='valid'), axis=0, arr=samples)
     samples = samples[n::subsample_int]
     dim = samples.shape
+    print(dim)
     means = np.mean(samples, axis=1)
 #     means = np.apply_along_axis(lambda m: np.convolve(m, np.ones(smooth)/smooth, mode='valid'), axis=0, arr=means)
     stds = np.std(samples, axis=1)
 #     stds = np.apply_along_axis(lambda m: np.convolve(m, np.ones(smooth)/smooth, mode='valid'), axis=0, arr=stds)
     upbd = means + stds
     lwbd = means - stds
-    cell = dim[2]//1
+    cell = (dim[2] - 1 )//cell_n
+    if cell_idx_x is None:
+        cell_idx_x = cell_idx
 #     for a in [0, 1]:
 #     print('action', a)
-    fig2, ax2 = plt.subplots(cell - 1, cell-1, figsize=(dim[2]*3, dim[3]*3))
-    for i in range(cell * 0, cell * 1-1):
-        for k in range(cell * 0, i+1):
+    fig2, ax2 = plt.subplots(cell, cell, figsize=(cell*4, cell*4))
+    for i in range(cell * cell_idx, cell * (cell_idx + 1)):
+        horizon_lim = i + 1 if cell_idx == cell_idx_x else cell * (cell_idx_x + 1)
+        for k in range(cell * (cell_idx_x), horizon_lim):
             for a in [0, 1]:
-                ax2[i%cell, k%cell].set_ylim(-4, 4)
-                ax2[i%cell, k%cell].plot(range(n, len_sample-smooth+1)[::subsample_int], means[:, i, k, a], label=f'Action {a}')
-                ax2[i%cell, k%cell].fill_between(range(n, len_sample-smooth+1)[::subsample_int], lwbd[:, i, k, a], upbd[:, i, k, a], alpha=0.5)
+                ax2[i%cell, k%cell].set_ylim(*ylim)#set_ylim(np.min(samples) * 0.8, np.max(samples)* 0.8)
+                ax2[i%cell, k%cell].plot(range(n, len_sample)[::subsample_int], means[:, i, k, a], label=f'Action {a}')
+                ax2[i%cell, k%cell].fill_between(range(n, len_sample)[::subsample_int], lwbd[:, i, k, a], upbd[:, i, k, a], alpha=0.5)
 #                 for j in range(dim[1]//2):
                     # ax2[i,k].scatter(range(dim[0]), samples[:, j, i, k, 0], label=f"right {j}", alpha=smc._weights_history[:,j])
                     # ax2[i,k].plot(range(dim[0]), samples[:, j, i, k, 0], linestyle='--')
@@ -421,19 +435,23 @@ def display_smc_results_notebook(samples, n=0, smooth=1, Q_star=None, figure_pat
                 ax2[i % cell, k % cell].hlines(Q_star[i, k, 1], xmin=n, xmax=len_sample, linestyle="--", label="Ground Truth Action 1", color="Orange")
 #                 ax2[i,k].hlines(Q_star[i, k, 1], xmin=n, xmax=len_sample-1, linestyle="--", label="true left", color="purple")
             ax2[i%cell, k%cell].set_title([i, k])
-    for i in range(cell * 0, cell * 1 - 1):
-        for k in range(i+1, cell - 1):
-            for spine in ax2[i, k].spines.values():
-                spine.set_visible(False)
-            ax2[i, k].set_xticks([])  # Remove x-axis ticks
-            ax2[i, k].set_yticks([])  # Remove y-axis ticks
-            ax2[i, k].set_xlabel('')  # Remove x-axis label
-            ax2[i, k].set_ylabel('')  
-        handles, labels = ax2[i%cell, k%cell].get_legend_handles_labels()
+    if cell_idx == cell_idx_x:
+        for i in range(cell * 0, cell * 1):
+            for k in range(i+1, cell):
+                for spine in ax2[i, k].spines.values():
+                    spine.set_visible(False)
+                ax2[i, k].set_xticks([])  # Remove x-axis ticks
+                ax2[i, k].set_yticks([])  # Remove y-axis ticks
+                ax2[i, k].set_xlabel('')  # Remove x-axis label
+                ax2[i, k].set_ylabel('')  
+    handles, labels = ax2[i%cell, k%cell].get_legend_handles_labels()
     ax2[i%cell, k%cell].legend(handles, labels, bbox_to_anchor=(0.9, 1.5), loc='right')
-    fig2.text(0.5, 0.08, r'\textbf{Training Steps}', ha='center', va='center', fontsize=20, fontweight='bold')
-    fig2.text(0.08, 0.5, r'\textbf{Particle Values }$\mathbf{\theta}$', ha='center', va='center', rotation='vertical', fontsize=20, fontweight='bold')
-  #     plt.tight_layout(rect=[0, 1, 1, 0.95])  # Adjust for suptitle and axis labels
+    fig2.text(0.5, 0.08, r'\textbf{Episodes}', ha='center', va='center', fontsize=20, fontweight='bold')
+    fig2.text(0.1, 0.5, r'\textbf{Particle Values }$\mathbf{\theta}$', ha='center', va='center', rotation='vertical', fontsize=20, fontweight='bold')
+#     plt.tight_layout(rect=[0, 1, 1, 0.95])  # Adjust for suptitle and axis labels
+
+
+    plt.show()
 
 
     plt.show()
