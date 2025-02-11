@@ -376,15 +376,15 @@ class DeterministicSRModel():
         """compute the logprior"""
         return self.prior.logprior(parameter=parameter)
 
-    def llh(self, parameter, llh_info_dict=dict()):
+    def llh(self, parameter, llh_info_dict=dict(), epsilon=None):
         """compute the loglikelihood given the abclikelihood and return the loglikelihood with the llh_info_dict"""
-        llh, llh_info_dict = self.abclikelihood.llh(data=self.data, parameter=parameter, llh_info_dict=llh_info_dict, llh_transform_fn=self.llh_transform_fn)
+        llh, llh_info_dict = self.abclikelihood.llh(data=self.data, parameter=parameter, llh_info_dict=llh_info_dict, llh_transform_fn=self.llh_transform_fn, epsilon=epsilon)
         return llh, llh_info_dict
 
-    def logtarget_density(self, parameter, llh_info_dict=dict()):
+    def logtarget_density(self, parameter, llh_info_dict=dict(), epsilon=None):
         """compute the log target density (logprior + llh) given the abclikelihood and prior and return the log target density with the llh_info_dict"""
         logprior = self.logprior(parameter=parameter)
-        llh, llh_info_dict = self.llh(parameter=parameter, llh_info_dict=llh_info_dict)
+        llh, llh_info_dict = self.llh(parameter=parameter, llh_info_dict=llh_info_dict, epsilon=epsilon)
         return logprior + llh, llh_info_dict
     
     def logtarget_gradient(self, parameter, llh_info_dict=dict()):
@@ -502,15 +502,15 @@ class DeterministicSRModelSMC(DeterministicSRModel):
         llh_transform_fn = self.llh_transform_fn_old if len(self.new_data) == 0 else self.llh_transform_fn_new
         return self.abclikelihood.llh(data=data, parameter=parameter, llh_transform_fn=llh_transform_fn, epsilon=epsilon)
     
-    def llh(self, parameter, new_epsilon=None, llh_info_dict=dict()):
+    def llh(self, parameter, epsilon=None, llh_info_dict=dict()):
         """compute the loglikelihood given the abclikelihood and return the loglikelihood with the llh_info_dict"""
-        if new_epsilon is None:
-            new_epsilon = self.new_epsilon
+        if epsilon is None:
+            epsilon = self.new_epsilon
         old_epsilon = self.new_epsilon if len(self.new_data) == 0 else self.abclikelihood.epsilon 
         # print('old', self.abclikelihood.epsilon)
         old_llh, _ = self.abclikelihood.llh(data=self.old_data, parameter=parameter, llh_transform_fn=self.llh_transform_fn_old, epsilon=old_epsilon)
-        # print('new', new_epsilon, self.new_data)
-        new_llh, _ = self.abclikelihood.llh(data=self.new_data, parameter=parameter, llh_transform_fn=self.llh_transform_fn_new, epsilon=new_epsilon)
+        # print('new', epsilon, self.new_data)
+        new_llh, _ = self.abclikelihood.llh(data=self.new_data, parameter=parameter, llh_transform_fn=self.llh_transform_fn_new, epsilon=epsilon)
         return old_llh + new_llh, llh_info_dict
     
     def logtarget_gradient(self, parameter, new_epsilon=None, llh_info_dict=dict()):

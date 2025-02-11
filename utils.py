@@ -397,12 +397,12 @@ def load_return(depth, adaptive=False):
         return False
     return loaded_files
 
-def display_smc_results_notebook(samples, n=0, smooth=1, Q_star=None, figure_path=None, save=False, episode='', repeat='', show=False, cell_n=2, cell_idx=0, cell_idx_x=None, ylim=4):
+def display_smc_results_notebook(samples, n_0=0, n_1=None, smooth=1, Q_star=None, figure_path=None, save=False, episode='', repeat='', show=False, cell_n=2, cell_idx=0, cell_idx_x=None, ylim=4):
     figure_name = f'E{episode}R{repeat}SMCSamples'
     len_sample = len(samples) - smooth + 1
     subsample_int = 1
     samples = np.apply_along_axis(lambda m: np.convolve(m, np.ones(smooth)/smooth, mode='valid'), axis=0, arr=samples)
-    samples = samples[n::subsample_int]
+    samples = samples[n_0:n_1:subsample_int]
     dim = samples.shape
     print(dim)
     means = np.mean(samples, axis=1)
@@ -416,14 +416,15 @@ def display_smc_results_notebook(samples, n=0, smooth=1, Q_star=None, figure_pat
         cell_idx_x = cell_idx
 #     for a in [0, 1]:
 #     print('action', a)
+    n_1 = len_sample if n_1 is None else min(len_sample, n_1)
     fig2, ax2 = plt.subplots(cell, cell, figsize=(cell*4, cell*4))
     for i in range(cell * cell_idx, cell * (cell_idx + 1)):
         horizon_lim = i + 1 if cell_idx == cell_idx_x else cell * (cell_idx_x + 1)
         for k in range(cell * (cell_idx_x), horizon_lim):
             for a in [0, 1]:
                 ax2[i%cell, k%cell].set_ylim(*ylim)#set_ylim(np.min(samples) * 0.8, np.max(samples)* 0.8)
-                ax2[i%cell, k%cell].plot(range(n, len_sample)[::subsample_int], means[:, i, k, a], label=f'Action {a}')
-                ax2[i%cell, k%cell].fill_between(range(n, len_sample)[::subsample_int], lwbd[:, i, k, a], upbd[:, i, k, a], alpha=0.5)
+                ax2[i%cell, k%cell].plot(range(n_0, n_1)[::subsample_int], means[:, i, k, a], label=f'Action {a}')
+                ax2[i%cell, k%cell].fill_between(range(n_0, n_1)[::subsample_int], lwbd[:, i, k, a], upbd[:, i, k, a], alpha=0.5)
 #                 for j in range(dim[1]//2):
                     # ax2[i,k].scatter(range(dim[0]), samples[:, j, i, k, 0], label=f"right {j}", alpha=smc._weights_history[:,j])
                     # ax2[i,k].plot(range(dim[0]), samples[:, j, i, k, 0], linestyle='--')
@@ -431,8 +432,8 @@ def display_smc_results_notebook(samples, n=0, smooth=1, Q_star=None, figure_pat
 #                     ax2[i%cell, k%cell].plot(range(n, len_sample)[::subsample_int], samples[:, j, i, k, a], linestyle='-', alpha=0.6)
             if Q_star is not None:
                 # Assuming Q_star[i, k, :] has two values and you want different labels for each
-                ax2[i % cell, k % cell].hlines(Q_star[i, k, 0], xmin=n, xmax=len_sample, linestyle="--", label="Ground Truth Action 0", color="Blue")
-                ax2[i % cell, k % cell].hlines(Q_star[i, k, 1], xmin=n, xmax=len_sample, linestyle="--", label="Ground Truth Action 1", color="Orange")
+                ax2[i % cell, k % cell].hlines(Q_star[i, k, 0], xmin=n_0, xmax=n_1, linestyle="--", label="Ground Truth Action 0", color="Blue")
+                ax2[i % cell, k % cell].hlines(Q_star[i, k, 1], xmin=n_0, xmax=n_1, linestyle="--", label="Ground Truth Action 1", color="Orange")
 #                 ax2[i,k].hlines(Q_star[i, k, 1], xmin=n, xmax=len_sample-1, linestyle="--", label="true left", color="purple")
             ax2[i%cell, k%cell].set_title([i, k])
     if cell_idx == cell_idx_x:
@@ -453,8 +454,6 @@ def display_smc_results_notebook(samples, n=0, smooth=1, Q_star=None, figure_pat
 
     plt.show()
 
-
-    plt.show()
     
 def first_index_exceeding_average(arr_of_lists, threshold=0.5):
     # Check if the input is a single list
@@ -589,3 +588,29 @@ def plot_return(input_r):
         plt.title('Average Return vs Episode')
         plt.legend()
         plt.show()
+        
+def plot_particle(particle_feature, title='', ref=None):
+    plt.grid(True, which="both", ls="--", linewidth=0.5)
+    for i in range(len(particle_feature[0])):
+        plt.plot(particle_feature[:, i], label=i)
+        if ref is not None:
+            plt.vlines(ref, ymin=torch.min(particle_feature), ymax=torch.max(particle_feature), color='r')
+    plt.legend()
+    plt.title(title)
+    plt.show()
+    
+def last_match_index(lst, target):
+    """
+    Returns the index (counting from the last) of the first occurrence of 'target' in the list.
+    
+    Parameters:
+    - lst (list): The list to search in.
+    - target (any): The value to find.
+    
+    Returns:
+    - int: The index from the end (1-based), or -1 if not found.
+    """
+    for i, val in enumerate(reversed(lst), start=1):
+        if val == target:
+            return i  # Index counting from the end
+    return -1  # Not found

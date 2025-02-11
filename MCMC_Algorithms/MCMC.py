@@ -321,7 +321,7 @@ def get_MCMC_Model(obs, model, env, epsilon):
     return Model
 
 #MCMC
-def MCMC_update(Model, posterior_samples, env, training_steps_with_burnin, training_steps, mode_idx=None, use_precondition=False, stepsize=STEPSIZE, USE_AUTOGRAD=False, WARMUP_RATIO=WARMUP_RATIO, MCMC_SHOW_DISABLE=MCMC_SHOW_DISABLE, ADAPT_STEP_SIZE=False, ADAPT_MASS_MATRIX=False, kernel='NUTS', num_steps=None, precondition_matrix=None, trajectory_length=None):
+def MCMC_update(Model, posterior_samples, env, training_steps_with_burnin, training_steps, mode_idx=None, use_precondition=False, stepsize=STEPSIZE, USE_AUTOGRAD=False, WARMUP_RATIO=WARMUP_RATIO, MCMC_SHOW_DISABLE=MCMC_SHOW_DISABLE, ADAPT_STEP_SIZE=False, ADAPT_MASS_MATRIX=False, kernel='NUTS', num_steps=None, precondition_matrix=None, trajectory_length=None, mass=MASS):
     def fn(parameter):
         current_logtarget_density, _ = Model.logtarget_density(parameter=parameter, llh_info_dict=dict())
         return current_logtarget_density
@@ -349,11 +349,11 @@ def MCMC_update(Model, posterior_samples, env, training_steps_with_burnin, train
             #kernel = RandomWalk(model=Model, stepsize=stepsize, covariance_matrix=precondition_matrix)
             #kernel = MALA(model=Model, stepsize=stepsize, precondition_matrix=precondition_matrix)
             #kernel = MALA(model=Model, stepsize=stepsize, use_autograd=USE_AUTOGRAD, precondition_matrix=precondition_matrix)
-            # kernel = HMC(model=Model, stepsize=stepsize, use_autograd=USE_AUTOGRAD, mass=MASS, precondition_matrix=precondition_matrix)
+            # kernel = HMC(model=Model, stepsize=stepsize, use_autograd=USE_AUTOGRAD, mass=mass, precondition_matrix=precondition_matrix)
             if kernel == 'HMC':
-                kernel = HMC(model=Model, stepsize=stepsize, num_steps=num_steps, use_autograd=USE_AUTOGRAD, mass=MASS, precondition_matrix=precondition_matrix)
+                kernel = HMC(model=Model, stepsize=stepsize, num_steps=num_steps, use_autograd=USE_AUTOGRAD, mass=mass, precondition_matrix=precondition_matrix)
             if kernel =='IntegratorSnippets':
-                kernel = IntegratorSnippets(model=Model, stepsize=stepsize, num_steps=num_steps, precondition_matrix=precondition_matrix)
+                kernel = IntegratorSnippets(model=Model, stepsize=stepsize, num_steps=num_steps, use_autograd=USE_AUTOGRAD, mass=mass, precondition_matrix=precondition_matrix)
             if kernel == 'NUTS':
                 kernel = NUTS_pyro(model=Model, stepsize=stepsize, full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB, precondition_matrix=precondition_matrix)
         else:
@@ -363,9 +363,9 @@ def MCMC_update(Model, posterior_samples, env, training_steps_with_burnin, train
             #kernel = MALA(model=Model, stepsize=stepsize, use_autograd=USE_AUTOGRAD)
             # kernel = HMC_pyro(model=Model, stepsize=stepsize, full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB, trajectory_length=trajectory_length)
             if kernel == 'HMC':
-                kernel = HMC(model=Model, stepsize=stepsize, num_steps=num_steps, use_autograd=USE_AUTOGRAD, mass=MASS, traj_len=trajectory_length)
+                kernel = HMC(model=Model, stepsize=stepsize, num_steps=num_steps, use_autograd=USE_AUTOGRAD, mass=mass, traj_len=trajectory_length)
             if kernel =='IntegratorSnippets':
-                kernel = IntegratorSnippets(model=Model, stepsize=stepsize, num_steps=num_steps, use_autograd=USE_AUTOGRAD, mass=MASS, traj_len=trajectory_length)
+                kernel = IntegratorSnippets(model=Model, stepsize=stepsize, num_steps=num_steps, use_autograd=USE_AUTOGRAD, mass=mass, traj_len=trajectory_length)
             if kernel == 'NUTS':
                 kernel = NUTS_pyro(model=Model, stepsize=stepsize, full_mass=FULL_MASS, adapt_step_size=ADAPT_STEP_SIZE, adapt_mass_matrix=ADAPT_MASS_MATRIX, target_accept_prob=TARGET_ACCEPT_PROB)
 

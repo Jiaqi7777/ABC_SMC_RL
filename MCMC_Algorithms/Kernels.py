@@ -577,11 +577,20 @@ class HMC(Kernel):
             return num_steps
         
 class IntegratorSnippets(HMC):
-    def __init__(self, model, traj_len=2*np.pi, num_steps=None, stepsize=0.5, mass=1., precondition_matrix=None, use_autograd=True, *args, **kwargs):
+    def __init__(self, model, traj_len=2*np.pi, num_steps=None, stepsize=0.5, mass=0.1, precondition_matrix=None, use_autograd=True, *args, **kwargs):
         """see HMC"""
         super(IntegratorSnippets, self).__init__(model=model, traj_len=traj_len, num_steps=num_steps, stepsize=stepsize, mass=mass, precondition_matrix=precondition_matrix, use_autograd=use_autograd, *args, **kwargs)
         
-    def move_(self, current_para, current_gradient, L=1, stepsize=0.01, full_para=None, indices=None):
+    def sample_aux(self, current_para, full_para=None, indices=None):
+        if self.precondition is not None:
+            if full_para is not None:
+                self.precondition = self.precondition[indices][:, indices]
+            p0 = torch.distributions.multivariate_normal.MultivariateNormal(loc=torch.zeros(current_para.size()), precision_matrix=self.precondition).sample()
+        else:
+            p0 = torch.normal(mean=torch.zeros(current_para.size()), std=self.mass)
+        return p0
+    
+    def move_(self, current_para, current_gradient, L=1, stepsize=0.1, full_para=None, indices=None):
         """
         L: int
             - number of Leapfrog steps
@@ -595,12 +604,7 @@ class IntegratorSnippets(HMC):
             - q_info_dict: dict
                 - the info dict returned by the log likelihood function at q, see Kernel().gradient
         """
-        if self.precondition is not None:
-            if full_para is not None:
-                self.precondition = self.precondition[indices][:, indices]
-            p0 = torch.distributions.multivariate_normal.MultivariateNormal(loc=torch.zeros(current_para.size()), precision_matrix=self.precondition).sample()
-        else:
-            p0 = torch.normal(mean=torch.zeros(current_para.size()), std=self.mass)
+        p0 = self.sample_aux(current_para, full_para=full_para, indices=indices)
         
         p = clip(p0 + stepsize * current_gradient * 0.5)
         q = deepcopy(current_para)
@@ -608,23 +612,30 @@ class IntegratorSnippets(HMC):
         
         ps = [p]
         qs = [q]
+        gs = [current_gradient]
+        # self.gradient_single_dim(3, q, [1, 2])
         if full_para is None:
             for i in range(L):
-                q_move = torch.mv(self.precondition, p) if self.precondition is not None else p
-                q = clip(q + stepsize * q_move)
-                if i != (L-1):
-                    gradient, _ = self.gradient(parameter=q, info_dict=dict(), return_logtarget_density=False)
-                    llh_grad = self.model.llh_auto_gradient(parameter=q)[1]
-                    # print(llh_grad.reshape(3, 2)[(0, 1, 2, 2), (0, 1, 0, 1)])
-                    print('q', q.reshape(3, 2)[(0, 1), (1, 0)])
-                    print(llh_grad.reshape(3, 2)[(0, 1), (1, 0)])
-                    p = clip(p + stepsize * gradient)
-                # print(q_move, q, p)
                 ps.append(p)
+                q_move = torch.mv(self.precondition, p) if self.precondition is not None else p / self.mass         
+                q = clip(q + stepsize * q_move)
+                gradient, _ = self.gradient(parameter=q, info_dict=dict(), return_logtarget_density=False)
+                llh_grad = self.model.llh_auto_gradient(parameter=q)[1]
+                gs.append(llh_grad)
+                if False:
+                    print('-------------------')
+                    print('q_move', p.reshape(3, 2)[(0, 1, 2, 2), (0, 1, 0, 1)])
+                    print(stepsize * gradient.reshape(3, 2)[(0, 1, 2, 2), (0, 1, 0, 1)])
+                    print('llh gradient', llh_grad.reshape(3, 2)[(0, 1, 2, 2), (0, 1, 0, 1)])
+                    # print('gradient', gradient.reshape(3, 2)[(0, 1, 2, 2), (0, 1, 0, 1)])
+                    print('q', q.reshape(3, 2)[(0, 1, 2, 2), (0, 1, 0, 1)])
+                    # print('q', q.reshape(3, 2)[(0, 1), (1, 0)])
+                    # print(gradient.reshape(3, 2)[(0, 1), (1, 0)])
+                if i != (L-1):
+                    p = clip(p + stepsize * gradient)
                 qs.append(q)
             proposed_gradient, proposed_logtarget_density, proposed_para_llh_info_dict, proposed_para_llh_grad_info_dict = self.gradient(parameter=q, info_dict=dict(), return_logtarget_density=True)
             p = clip(p + stepsize * proposed_gradient * 0.5)
-            sd
         else:
             for i in range(L):
                 q_move = torch.mv(self.precondition, p) if self.precondition is not None else p / self.mass
@@ -642,20 +653,41 @@ class IntegratorSnippets(HMC):
         q_info_dict = {"logdensities":proposed_logtarget_density, "gradient":proposed_gradient, "llh_info_dict":proposed_para_llh_info_dict, "llh_grad_info_dict":proposed_para_llh_grad_info_dict}
         return torch.stack(qs), p0, torch.stack(ps), q_info_dict
     
+    def gradient_single_dim(self, parameter_idx, parameter, ref_idx=None):
+        """compute the gradient of the target density with respect to the parameter
+        parameter: torch.tensor
+            - the parameter to compute the gradient
+        return:
+            - gradient: torch.tensor
+                - the gradient of the target density
+        """
+        grad = []
+        p_l = np.linspace(-60, 30, 1000)
+        p_ref_l = []
+        ref_line = []
+        for p in p_l:
+            parameter[parameter_idx] = p
+            grad.append(self.model.llh_auto_gradient(parameter)[1][parameter_idx])
+            if p >= parameter[ref_idx[0]] and p <= parameter[ref_idx[1]]:
+                p_ref_l.append(p)
+                ref_line.append((parameter[ref_idx[0]] - p) / self.model.abclikelihood.epsilon ** 2)
+        plt.plot(p_l, grad)
+        colormap = plt.cm.plasma
+        if ref_idx is not None:
+            plt.plot(p_ref_l, ref_line, '--')
+            for ri in ref_idx:
+                plt.vlines(parameter[ri], np.min(grad), np.max(grad), label=str(ri), color=colormap(ri/max(ref_idx)), linestyles='dashed')
+        plt.legend()
+        plt.show()
+        return grad
+    
     def propose_accept_(self, current_para, L=1, stepsize=0.01, current_para_info_dict=dict(), indices=None):
         current_gradient, current_logtarget_density, *_ = self.gradient(parameter=current_para, info_dict=current_para_info_dict, return_logtarget_density=True)
         self._precondition = self.negative_inverse_hessian(parameter=current_para, info_dict=current_para_info_dict)
 
         proposed_para, p0, proposed_aux, _ = self.move_(current_para=current_para, current_gradient=current_gradient, L=L, stepsize=stepsize)
         H = torch.stack([self.hamiltonian(q=q, p=p) for q, p in zip(proposed_para, proposed_aux)])
-        return 1, [proposed_para, H], {}
-    
-    def sample_aux(self, current_para):
-        if self.precondition is not None:
-            p0 = torch.distributions.multivariate_normal.MultivariateNormal(loc=torch.zeros(current_para.size()), precision_matrix=self.precondition).sample()
-        else:
-            p0 = torch.normal(mean=torch.zeros(current_para.size()), std=self.mass)
-        return p0
+        return 1, [proposed_para, H, proposed_aux], {}
     
     def log_aux_density(self, p, precondition=None):
         p_logdensity = - torch.distributions.multivariate_normal.MultivariateNormal(loc=torch.zeros(p.size()[0]), precision_matrix=precondition).log_prob(p) if precondition is not None else 0.5 * torch.dot(p, p)
