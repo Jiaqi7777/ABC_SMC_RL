@@ -496,10 +496,14 @@ class DeterministicSRModelSMC(DeterministicSRModel):
         self.llh_transform_grad_fn_new = llh_transform_grad_fn_new
         self.new_epsilon = new_epsilon
         
-    def llh_new(self, parameter, epsilon):
+    def llh_new(self, parameter, epsilon, old=False):
         # print('llh new')
-        data = self.old_data if len(self.new_data) == 0 else self.new_data
-        llh_transform_fn = self.llh_transform_fn_old if len(self.new_data) == 0 else self.llh_transform_fn_new
+        if old:
+            data = self.old_data
+            llh_transform_fn = self.llh_transform_fn_old
+        else:
+            data = self.old_data if len(self.new_data) == 0 else self.new_data
+            llh_transform_fn = self.llh_transform_fn_old if len(self.new_data) == 0 else self.llh_transform_fn_new
         return self.abclikelihood.llh(data=data, parameter=parameter, llh_transform_fn=llh_transform_fn, epsilon=epsilon)
     
     def llh(self, parameter, epsilon=None, llh_info_dict=dict()):
