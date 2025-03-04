@@ -4,11 +4,22 @@ import pickle
 from functools import partial
 import os
 import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from matplotlib.colors import Normalize
 import torch
 from parameter import *
-
+plt.rcParams.update({
+    'font.family': 'serif',
+    'font.serif': ['Times New Roman'],
+    'axes.labelsize': 24,    # Font size for axis labels
+    'axes.titlesize': 16,    # Font size for titles
+    'legend.fontsize': 12,   # Font size for legend
+    'xtick.labelsize': 12,   # Font size for x-tick labels
+    'ytick.labelsize': 12,   # Font size for y-tick labels
+    'figure.titlesize': 18,   # Font size for figure title
+    'text.usetex': True,  
+})
 def argmaxs(arr):
     mask = arr == arr.max()
     return random.choice(np.array(range(len(arr)))[mask])
@@ -387,29 +398,34 @@ def load_return(depth, adaptive=False):
         return False
     return loaded_files
 
-def display_smc_results_notebook(samples, n=0, smooth=1, Q_star=None, figure_path=None, save=False, episode='', repeat='', show=False):
+def display_smc_results_notebook(samples, n_0=0, n_1=None, smooth=1, Q_star=None, figure_path=None, save=False, episode='', repeat='', show=False, cell_n=2, cell_idx=0, cell_idx_x=None, ylim=4):
     figure_name = f'E{episode}R{repeat}SMCSamples'
-    len_sample = len(samples)
+    len_sample = len(samples) - smooth + 1
     subsample_int = 1
     samples = np.apply_along_axis(lambda m: np.convolve(m, np.ones(smooth)/smooth, mode='valid'), axis=0, arr=samples)
-    samples = samples[n::subsample_int]
+    samples = samples[n_0:n_1:subsample_int]
     dim = samples.shape
+    print(dim)
     means = np.mean(samples, axis=1)
 #     means = np.apply_along_axis(lambda m: np.convolve(m, np.ones(smooth)/smooth, mode='valid'), axis=0, arr=means)
     stds = np.std(samples, axis=1)
 #     stds = np.apply_along_axis(lambda m: np.convolve(m, np.ones(smooth)/smooth, mode='valid'), axis=0, arr=stds)
     upbd = means + stds
     lwbd = means - stds
-    cell = dim[2]//1
+    cell = (dim[2] - 1 )//cell_n
+    if cell_idx_x is None:
+        cell_idx_x = cell_idx
 #     for a in [0, 1]:
 #     print('action', a)
-    fig2, ax2 = plt.subplots(cell - 1, cell-1, figsize=(dim[2]*3, dim[3]*3))
-    for i in range(cell * 0, cell * 1-1):
-        for k in range(cell * 0, i+1):
+    n_1 = len_sample if n_1 is None else min(len_sample, n_1)
+    fig2, ax2 = plt.subplots(cell, cell, figsize=(cell*4, cell*4))
+    for i in range(cell * cell_idx, cell * (cell_idx + 1)):
+        horizon_lim = i + 1 if cell_idx == cell_idx_x else cell * (cell_idx_x + 1)
+        for k in range(cell * (cell_idx_x), horizon_lim):
             for a in [0, 1]:
-                ax2[i%cell, k%cell].set_ylim(-4, 4)
-                ax2[i%cell, k%cell].plot(range(n, len_sample-smooth+1)[::subsample_int], means[:, i, k, a], label=f'Action {a}')
-                ax2[i%cell, k%cell].fill_between(range(n, len_sample-smooth+1)[::subsample_int], lwbd[:, i, k, a], upbd[:, i, k, a], alpha=0.5)
+                ax2[i%cell, k%cell].set_ylim(*ylim)#set_ylim(np.min(samples) * 0.8, np.max(samples)* 0.8)
+                ax2[i%cell, k%cell].plot(range(n_0, n_1)[::subsample_int], means[:, i, k, a], label=f'Action {a}')
+                ax2[i%cell, k%cell].fill_between(range(n_0, n_1)[::subsample_int], lwbd[:, i, k, a], upbd[:, i, k, a], alpha=0.5)
 #                 for j in range(dim[1]//2):
                     # ax2[i,k].scatter(range(dim[0]), samples[:, j, i, k, 0], label=f"right {j}", alpha=smc._weights_history[:,j])
                     # ax2[i,k].plot(range(dim[0]), samples[:, j, i, k, 0], linestyle='--')
@@ -417,26 +433,28 @@ def display_smc_results_notebook(samples, n=0, smooth=1, Q_star=None, figure_pat
 #                     ax2[i%cell, k%cell].plot(range(n, len_sample)[::subsample_int], samples[:, j, i, k, a], linestyle='-', alpha=0.6)
             if Q_star is not None:
                 # Assuming Q_star[i, k, :] has two values and you want different labels for each
-                ax2[i % cell, k % cell].hlines(Q_star[i, k, 0], xmin=n, xmax=len_sample, linestyle="--", label="Ground Truth Action 0", color="Blue")
-                ax2[i % cell, k % cell].hlines(Q_star[i, k, 1], xmin=n, xmax=len_sample, linestyle="--", label="Ground Truth Action 1", color="Orange")
+                ax2[i % cell, k % cell].hlines(Q_star[i, k, 0], xmin=n_0, xmax=n_1, linestyle="--", label="Ground Truth Action 0", color="Blue")
+                ax2[i % cell, k % cell].hlines(Q_star[i, k, 1], xmin=n_0, xmax=n_1, linestyle="--", label="Ground Truth Action 1", color="Orange")
 #                 ax2[i,k].hlines(Q_star[i, k, 1], xmin=n, xmax=len_sample-1, linestyle="--", label="true left", color="purple")
             ax2[i%cell, k%cell].set_title([i, k])
-    for i in range(cell * 0, cell * 1 - 1):
-        for k in range(i+1, cell - 1):
-            for spine in ax2[i, k].spines.values():
-                spine.set_visible(False)
-            ax2[i, k].set_xticks([])  # Remove x-axis ticks
-            ax2[i, k].set_yticks([])  # Remove y-axis ticks
-            ax2[i, k].set_xlabel('')  # Remove x-axis label
-            ax2[i, k].set_ylabel('')  
-        handles, labels = ax2[i%cell, k%cell].get_legend_handles_labels()
+    if cell_idx == cell_idx_x:
+        for i in range(cell * 0, cell * 1):
+            for k in range(i+1, cell):
+                for spine in ax2[i, k].spines.values():
+                    spine.set_visible(False)
+                ax2[i, k].set_xticks([])  # Remove x-axis ticks
+                ax2[i, k].set_yticks([])  # Remove y-axis ticks
+                ax2[i, k].set_xlabel('')  # Remove x-axis label
+                ax2[i, k].set_ylabel('')  
+    handles, labels = ax2[i%cell, k%cell].get_legend_handles_labels()
     ax2[i%cell, k%cell].legend(handles, labels, bbox_to_anchor=(0.9, 1.5), loc='right')
-    fig2.text(0.5, 0.08, r'\textbf{Training Steps}', ha='center', va='center', fontsize=20, fontweight='bold')
-    fig2.text(0.08, 0.5, r'\textbf{Particle Values }$\mathbf{\theta}$', ha='center', va='center', rotation='vertical', fontsize=20, fontweight='bold')
-  #     plt.tight_layout(rect=[0, 1, 1, 0.95])  # Adjust for suptitle and axis labels
+    fig2.text(0.5, 0.08, r'\textbf{Episodes}', ha='center', va='center', fontsize=20, fontweight='bold')
+    fig2.text(0.1, 0.5, r'\textbf{Particle Values }$\mathbf{\theta}$', ha='center', va='center', rotation='vertical', fontsize=20, fontweight='bold')
+#     plt.tight_layout(rect=[0, 1, 1, 0.95])  # Adjust for suptitle and axis labels
 
 
     plt.show()
+
     
 def first_index_exceeding_average(arr_of_lists, threshold=0.5):
     # Check if the input is a single list
@@ -571,3 +589,190 @@ def plot_return(input_r):
         plt.title('Average Return vs Episode')
         plt.legend()
         plt.show()
+        
+def plot_particle(particle_feature, title='', ref=None):
+    plt.grid(True, which="both", ls="--", linewidth=0.5)
+    for i in range(len(particle_feature[0])):
+        plt.plot(particle_feature[:, i], label=i)
+        if ref is not None:
+            plt.vlines(ref, ymin=torch.min(particle_feature), ymax=torch.max(particle_feature), color='r')
+    plt.legend()
+    plt.title(title)
+    plt.show()
+    
+def last_match_index(lst, target):
+    """
+    Returns the index (counting from the last) of the first occurrence of 'target' in the list.
+    
+    Parameters:
+    - lst (list): The list to search in.
+    - target (any): The value to find.
+    
+    Returns:
+    - int: The index from the end (1-based), or -1 if not found.
+    """
+    for i, val in enumerate(reversed(lst)):
+        if val == target:
+            return i  # Index counting from the end
+    return -1  # Not found
+
+def last_mismatch_index_value(lst, target):
+    """
+    Returns the index (counting from the last) of the first occurrence of 'target' in the list.
+    
+    Parameters:
+    - lst (list): The list to search in.
+    - target (any): The value to find.
+    
+    Returns:
+    - int: The index from the end (1-based), or -1 if not found.
+    """
+    for i, val in enumerate(reversed(lst)):
+        if val != target:
+            print(lst, i, val, target)
+            return i, val  # Index counting from the end
+    return -1, None  # Not found
+
+def find_match_segments(arr1, arr2):
+    if len(arr1) != len(arr2):
+        raise ValueError("Both arrays must have the same length")
+    
+    equal_segments = []
+    not_equal_segments = []
+    
+    i = 0
+    while i < len(arr1):
+        if arr1[i] == arr2[i]:
+            start = i
+            while i < len(arr1) and arr1[i] == arr2[i]:
+                i += 1
+            equal_segments.append((start, i))
+        else:
+            start = i
+            while i < len(arr1) and arr1[i] != arr2[i]:
+                i += 1
+            not_equal_segments.append((max(start - 1, 0), i + 1))
+    
+    return equal_segments, not_equal_segments
+
+def normalize_and_plot(arr, segments, normalize=False):
+    """
+    Normalizes values between sharp increases and their match points and plots the result.
+    
+    Parameters:
+    - arr: 1D numpy array
+    - segments: List of (start, end) tuples where normalization is applied.
+    """
+    arr = np.array(arr, dtype=float)
+    normalized_arr = np.full_like(arr, np.nan)  # Initialize with NaNs for spacing
+
+    # Normalize and store only the valid segments
+    for start, end in segments:
+        segment = arr[start:end]
+        if normalize and len(segment) >= 1:
+#             segment -= segment[-1] 
+            segment /= segment[0]# Normalize by the first value in the segment
+#         segment = arr[start:end]/arr[start]
+        normalized_arr[start:end] = segment  # Keep the same horizontal space
+    return normalized_arr
+    # Plot results
+    plt.figure(figsize=(10, 5))
+    plt.plot(normalized_arr, marker='o', linestyle='-', color='b', label="Normalized Data")
+    plt.xlabel("Index")
+    plt.ylabel("Normalized Value")
+    plt.title("Normalized Data Between Sharp Increases and Match Points")
+    plt.legend()
+    plt.show()
+    
+def calculate_ess(weights):
+    weights = np.array(weights)
+    ess = np.sum(weights) ** 2 / np.sum(weights ** 2)
+    return ess
+
+def plot_metric(time, T=2, plot_range=200):
+    prefix = f'../SMC/0adaptive/5/{time}/R0/'
+    comp_ep = torch.load(f'{prefix}Epsilon{time}_T{T}_StoFalse_M10_GdyFalse_Sigma4.pt')[:]
+    comp_ep_old = torch.load(f'{prefix}EpsilonOld{time}_T{T}_StoFalse_M10_GdyFalse_Sigma4.pt')[:]
+
+    comp_w = torch.load(f'{prefix}Weights{time}_T{T}_StoFalse_M10_GdyFalse_Sigma4.pt')[1:]
+    comp_ess = [calculate_ess(w) for w in comp_w]
+    # comp_samples = torch.load(f'{prefix}Samples{time}_T{T}_StoFalse_M10_GdyFalse_Sigma4.pt')[1:plot_range]
+    comp_be = torch.load(f'{prefix}BellmanErr_T{T}_StoFalse_M10_GdyFalse_Sigma4.pt')[:plot_range]
+    comp_ep = comp_ep[:plot_range]
+    comp_be = comp_be[:plot_range]
+    comp_ess = comp_ess[:plot_range]
+    time = range(len(comp_ep))
+    metric1 = comp_ep
+    # metric2 = comp_samples[:, :,3,0,1]
+    metric3 = np.tan(time)
+
+    fig = plt.figure(figsize=(10, 10))
+    gs = gridspec.GridSpec(3, 1, height_ratios=[1, 1, 1], hspace=0.3)
+
+    # Create subplots
+    ax1 = plt.subplot(gs[1])
+    # ax2 = plt.subplot(gs[3])
+    ax3 = plt.subplot(gs[2])
+    ax4 = plt.subplot(gs[0])
+    segments, segments_peak = find_match_segments(comp_ep, comp_ep_old)#find_sharp_increases_and_match_points(comp_ep, 1.1)
+    print(segments, segments_peak)
+
+    # Plot each metric on a separate subplot
+    ax1.plot(normalize_and_plot(comp_ep, segments), label='Reduced Epsilon')
+    ax1.plot(normalize_and_plot(comp_ep, segments_peak), label='Increased Epsilon')
+    ax1.plot(comp_ep_old, alpha=0.2, color='green')
+    ax1.set_ylabel('Epsilon')
+    # ax1.set_xticks([])
+    ax1.legend()
+    ax1.grid(True)
+
+    # m2 = torch.mean(metric2, axis=1)
+    # std2 = torch.std(metric2, axis=1)
+    # ax2.plot(time, m2)
+    # # ax2.hlines(0, len(comp_samples), 0.99, color='r', alpha=0.5, linestyle='-.', label='Ground Truth')
+    # # ax2.fill_between(time, torch.max(metric2, axis=1).values, torch.min(metric2, dim=1).values, alpha=0.5)
+    # ax2.fill_between(time, m2-3 * std2, m2+3 * std2, alpha=0.5)
+    # ax2.set_ylabel('Particles')
+    # ax2.grid(True)
+    # ax2.legend()
+
+
+    be_line = ax4.plot(normalize_and_plot(comp_be, segments, True), label='Bellman Error', color='orange')
+
+    ax42 = ax4.twinx()
+    ep_line = ax42.plot(comp_ep[:], alpha=0.5, label='Epsilon')
+    for start, end in segments_peak:
+        # Add horizontal dotted line connecting start and end
+        ax42.hlines(y=comp_ep[start], xmin=start, xmax=end-1, colors='r', linestyles='dotted')
+
+    ax4.set_ylabel('Bellman Error')
+
+    # ax4lines = [be_line[0], ep_line[0]]
+    # ax4labels = [line.get_label() for line in ax4lines]
+    # ax4.legend(ax4lines, ax4labels, loc='upper right')
+    # ax4.grid(True)
+
+    ax3.plot(time, comp_ess, label='ESS')
+    ax3.set_ylabel('ESS')
+    ax3.plot(comp_ep[:], alpha=0.5, label='Epsilon')
+    ax3.legend()
+    ax3.grid(True)
+    ax3.set_xlabel('Training Steps')
+    # Add a title to the figure
+    # fig.suptitle('Parallel Plots for Several Metrics')
+    # plt.savefig('../Figures/epsilon.png', dpi=300, bbox_inches='tight')
+    # Display the plot
+    plt.show()
+    
+def plt_font():
+    plt.rcParams.update({
+    'font.family': 'serif',
+    'font.serif': ['Times New Roman'],
+    'axes.labelsize': 24,    # Font size for axis labels
+    'axes.titlesize': 16,    # Font size for titles
+    'legend.fontsize': 12,   # Font size for legend
+    'xtick.labelsize': 12,   # Font size for x-tick labels
+    'ytick.labelsize': 12,   # Font size for y-tick labels
+    'figure.titlesize': 18,   # Font size for figure title
+    'text.usetex': True,  
+})

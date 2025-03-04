@@ -376,15 +376,15 @@ class DeterministicSRModel():
         """compute the logprior"""
         return self.prior.logprior(parameter=parameter)
 
-    def llh(self, parameter, llh_info_dict=dict()):
+    def llh(self, parameter, llh_info_dict=dict(), epsilon=None):
         """compute the loglikelihood given the abclikelihood and return the loglikelihood with the llh_info_dict"""
-        llh, llh_info_dict = self.abclikelihood.llh(data=self.data, parameter=parameter, llh_info_dict=llh_info_dict, llh_transform_fn=self.llh_transform_fn)
+        llh, llh_info_dict = self.abclikelihood.llh(data=self.data, parameter=parameter, llh_info_dict=llh_info_dict, llh_transform_fn=self.llh_transform_fn, epsilon=epsilon)
         return llh, llh_info_dict
 
-    def logtarget_density(self, parameter, llh_info_dict=dict()):
+    def logtarget_density(self, parameter, llh_info_dict=dict(), epsilon=None):
         """compute the log target density (logprior + llh) given the abclikelihood and prior and return the log target density with the llh_info_dict"""
         logprior = self.logprior(parameter=parameter)
-        llh, llh_info_dict = self.llh(parameter=parameter, llh_info_dict=llh_info_dict)
+        llh, llh_info_dict = self.llh(parameter=parameter, llh_info_dict=llh_info_dict, epsilon=epsilon)
         return logprior + llh, llh_info_dict
     
     def logtarget_gradient(self, parameter, llh_info_dict=dict()):
@@ -414,6 +414,28 @@ class DeterministicSRModel():
         parameter.requires_grad = False
         logtarget_density = logtarget_density.detach()
         return logtarget_density, gradient, llh_info_dict
+    
+    def llh_auto_gradient(self, parameter):
+        """compute the gradient of the log target density with respect to the parameter and return the gradient, using automatic differentiation with pytorch
+        parameter: torch.tensor (no gradient needed)
+            - the parameter the gradient is computed at
+        return:
+            - logtarget_density: torch.tensor
+                - the log target density of the target density with respect to the input parameter
+            - gradient: torch.tensor
+                - the gradient of the log target density with respect to and at the input parameter
+            - llh_info_dict: dict
+                - a dictionary of info output by the abclikelihood.llh function
+        """
+        parameter = parameter.clone()
+        parameter.requires_grad = True
+        llh, llh_info_dict = self.llh(parameter=parameter, llh_info_dict=dict()) # must use the llh_transform_fn to compute the density
+        llh.backward()
+        gradient = parameter.grad.clone()
+        parameter.grad.zero_()
+        parameter.requires_grad = False
+        llh = llh.detach()
+        return llh, gradient, llh_info_dict
     
     def logtarget_hessian(self, parameter, llh_info_dict=dict(), llh_grad_info_dict=dict()):
         """compute the hessian of the log target density with respect to the parameter and return the hessian, using explicit derivation of the hessian
@@ -474,21 +496,25 @@ class DeterministicSRModelSMC(DeterministicSRModel):
         self.llh_transform_grad_fn_new = llh_transform_grad_fn_new
         self.new_epsilon = new_epsilon
         
-    def llh_new(self, parameter, epsilon):
+    def llh_new(self, parameter, epsilon, old=False):
         # print('llh new')
-        data = self.old_data if len(self.new_data) == 0 else self.new_data
-        llh_transform_fn = self.llh_transform_fn_old if len(self.new_data) == 0 else self.llh_transform_fn_new
+        if old:
+            data = self.old_data
+            llh_transform_fn = self.llh_transform_fn_old
+        else:
+            data = self.old_data if len(self.new_data) == 0 else self.new_data
+            llh_transform_fn = self.llh_transform_fn_old if len(self.new_data) == 0 else self.llh_transform_fn_new
         return self.abclikelihood.llh(data=data, parameter=parameter, llh_transform_fn=llh_transform_fn, epsilon=epsilon)
     
-    def llh(self, parameter, new_epsilon=None, llh_info_dict=dict()):
+    def llh(self, parameter, epsilon=None, llh_info_dict=dict()):
         """compute the loglikelihood given the abclikelihood and return the loglikelihood with the llh_info_dict"""
-        if new_epsilon is None:
-            new_epsilon = self.new_epsilon
+        if epsilon is None:
+            epsilon = self.new_epsilon
         old_epsilon = self.new_epsilon if len(self.new_data) == 0 else self.abclikelihood.epsilon 
         # print('old', self.abclikelihood.epsilon)
         old_llh, _ = self.abclikelihood.llh(data=self.old_data, parameter=parameter, llh_transform_fn=self.llh_transform_fn_old, epsilon=old_epsilon)
-        # print('new', new_epsilon, self.new_data)
-        new_llh, _ = self.abclikelihood.llh(data=self.new_data, parameter=parameter, llh_transform_fn=self.llh_transform_fn_new, epsilon=new_epsilon)
+        # print('new', epsilon, self.new_data)
+        new_llh, _ = self.abclikelihood.llh(data=self.new_data, parameter=parameter, llh_transform_fn=self.llh_transform_fn_new, epsilon=epsilon)
         return old_llh + new_llh, llh_info_dict
     
     def logtarget_gradient(self, parameter, new_epsilon=None, llh_info_dict=dict()):
