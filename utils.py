@@ -8,6 +8,7 @@ import matplotlib.gridspec as gridspec
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from matplotlib.colors import Normalize
 import torch
+import seaborn as sns
 from parameter import *
 plt.rcParams.update({
     'font.family': 'serif',
@@ -655,6 +656,47 @@ def find_match_segments(arr1, arr2):
     
     return equal_segments, not_equal_segments
 
+def split_not_equal_segments(not_equal_segments, arr1):
+    increasing_segments = []
+    rest_segments = []
+    
+    for start, end in not_equal_segments:
+        increasing = []
+        rest = []
+        prev = float('-inf')
+        for i in range(start, end):
+            if arr1[i] > prev:
+                increasing.append(i)
+                prev = arr1[i]
+            else:
+                rest.append(i)
+        if increasing:
+            increasing_segments.append((increasing[0], increasing[-1] + 1))
+        if rest:
+            rest_segments.append((rest[0], rest[-1] + 1))
+    
+    return increasing_segments, rest_segments
+
+def split_rest_segments(rest_segments, arr1):
+    decreasing_segments = []
+    not_decreasing = []
+    for start, end in rest_segments:
+        decreasing = []
+        rest = []
+        prev = float('inf')
+        for i in range(start, end):
+            if arr1[i] < prev:
+                decreasing.append(i)
+                prev = arr1[i]
+            else:
+                rest.append(i)
+        if decreasing:
+            decreasing_segments.append((max(decreasing[0], 0), decreasing[-1] + 1))
+        if rest:
+            not_decreasing.append((rest[0], rest[-1] + 1))
+    
+    return decreasing_segments, not_decreasing
+
 def normalize_and_plot(arr, segments, normalize=False):
     """
     Normalizes values between sharp increases and their match points and plots the result.
@@ -689,42 +731,54 @@ def calculate_ess(weights):
     ess = np.sum(weights) ** 2 / np.sum(weights ** 2)
     return ess
 
-def plot_metric(time, T=2, plot_range=200):
-    prefix = f'../SMC/0adaptive/5/{time}/R0/'
+def plot_metric(time, T=2, plot_range=110):
+    sns.set_palette('colorblind')
+#     sns.color_palette("coolwarm")
+    
+    prefix = f'../SMC/0adaptive/5illustration/{time}/R0/'
     comp_ep = torch.load(f'{prefix}Epsilon{time}_T{T}_StoFalse_M10_GdyFalse_Sigma4.pt')[:]
     comp_ep_old = torch.load(f'{prefix}EpsilonOld{time}_T{T}_StoFalse_M10_GdyFalse_Sigma4.pt')[:]
 
     comp_w = torch.load(f'{prefix}Weights{time}_T{T}_StoFalse_M10_GdyFalse_Sigma4.pt')[1:]
     comp_ess = [calculate_ess(w) for w in comp_w]
     # comp_samples = torch.load(f'{prefix}Samples{time}_T{T}_StoFalse_M10_GdyFalse_Sigma4.pt')[1:plot_range]
-    comp_be = torch.load(f'{prefix}BellmanErr_T{T}_StoFalse_M10_GdyFalse_Sigma4.pt')[:plot_range]
-    comp_ep = comp_ep[:plot_range]
-    comp_be = comp_be[:plot_range]
-    comp_ess = comp_ess[:plot_range]
+    comp_be = torch.load(f'{prefix}BellmanErr_T{T}_StoFalse_M10_GdyFalse_Sigma4.pt')[:]
+    comp_ep = comp_ep[:plot_range][::2]
+    comp_ep_old = comp_ep_old[:plot_range][::2]
+    comp_be = comp_be[:plot_range][::2]
+    comp_ess = comp_ess[:plot_range][::2]
     time = range(len(comp_ep))
     metric1 = comp_ep
-    # metric2 = comp_samples[:, :,3,0,1]
-    metric3 = np.tan(time)
-
-    fig = plt.figure(figsize=(10, 10))
+    print(len(comp_be), comp_w.shape, len(comp_ess), len(comp_ep_old), len(comp_ep))
+    fig = plt.figure(figsize=(5, 5))
     gs = gridspec.GridSpec(3, 1, height_ratios=[1, 1, 1], hspace=0.3)
-
+    sns.set_palette('colorblind')
     # Create subplots
     ax1 = plt.subplot(gs[1])
     # ax2 = plt.subplot(gs[3])
     ax3 = plt.subplot(gs[2])
     ax4 = plt.subplot(gs[0])
     segments, segments_peak = find_match_segments(comp_ep, comp_ep_old)#find_sharp_increases_and_match_points(comp_ep, 1.1)
+    increasing_segments, rest_segments = split_not_equal_segments(segments, comp_ep_old)
+    increasing_stage2_segments, _ = split_not_equal_segments(segments_peak, comp_ep_old)
+    decreasing_segments, _ = split_rest_segments(segments, comp_ep_old)
     print(segments, segments_peak)
-
+    print(rest_segments)
     # Plot each metric on a separate subplot
-    ax1.plot(normalize_and_plot(comp_ep, segments), label='Reduced Epsilon')
-    ax1.plot(normalize_and_plot(comp_ep, segments_peak), label='Increased Epsilon')
-    ax1.plot(comp_ep_old, alpha=0.2, color='green')
-    ax1.set_ylabel('Epsilon')
+    #     ax1.plot(normalize_and_plot(comp_ep, rest_segments), linestyle='-', label='Stage III')
+    ep_tild_x, ep_tild = normalize_and_plot(comp_ep, segments_peak, start_plot=0, return_x=True)
+    ax1.plot(ep_tild_x, ep_tild, linestyle=(0, (5, 4)), label=r'$\tilde{\epsilon}$')
+    #     ax1.plot(normalize_and_plot(comp_ep_old, increasing_segments + increasing_stage2_segments), label='Adaptive increase')
+    #     ax1.plot(normalize_and_plot(comp_ep_old, segments_peak), alpha=0.2, color='green', label='Epsilon For Previous Data')
+    ax1.plot(comp_ep_old, label=r'$\epsilon$')
+    ax1.plot(0, comp_ep_old[0], color='r', marker='*')
+    for start, end in segments[:-1]:
+        if end > start :
+            ax1.plot(end-1, comp_ep_old[end-1], color='r', marker='*')
+    ax1.set_ylabel(r'\textbf{Epsilon}')
     # ax1.set_xticks([])
-    ax1.legend()
-    ax1.grid(True)
+    ax1.legend(loc='upper right', frameon=False)
+    ax1.grid(True, linestyle='--', alpha=0.3)
 
     # m2 = torch.mean(metric2, axis=1)
     # std2 = torch.std(metric2, axis=1)
@@ -737,42 +791,49 @@ def plot_metric(time, T=2, plot_range=200):
     # ax2.legend()
 
 
-    be_line = ax4.plot(normalize_and_plot(comp_be, segments, True), label='Bellman Error', color='orange')
-
+    be_line = ax4.plot(normalize_and_plot(comp_be, decreasing_segments, True), label='Bellman Error', color='black', linewidth=1.)
     ax42 = ax4.twinx()
-    ep_line = ax42.plot(comp_ep[:], alpha=0.5, label='Epsilon')
-    for start, end in segments_peak:
-        # Add horizontal dotted line connecting start and end
-        ax42.hlines(y=comp_ep[start], xmin=start, xmax=end-1, colors='r', linestyles='dotted')
+    ep_tilde = ax42.plot(ep_tild_x, ep_tild, linestyle=(0, (5, 4)), alpha=0.3, label=r'$\tilde{\epsilon}$', linewidth=1.)
+    ax42.plot(0, comp_ep_old[0], color='r', marker='*', alpha=0.3)
+    for start, end in segments[:-1]:
+        if end > start :
+            ax42.plot(end-1, comp_ep_old[end-1], color='r', marker='*', alpha=0.3)
 
-    ax4.set_ylabel('Bellman Error')
 
-    # ax4lines = [be_line[0], ep_line[0]]
-    # ax4labels = [line.get_label() for line in ax4lines]
-    # ax4.legend(ax4lines, ax4labels, loc='upper right')
-    # ax4.grid(True)
+    ep_line = ax42.plot(comp_ep_old[:], alpha=0.3, label='$\epsilon$', linewidth=1.)
+
+    sns.set_palette('colorblind')
+    ax4.set_ylabel(r'\textbf{Bellman Error}')
+
+    ax4lines = [be_line[0], ep_tilde[0], ep_line[0]]
+    ax4labels = [line.get_label() for line in ax4lines]
+    ax4.legend(ax4lines, ax4labels, loc='upper right',bbox_to_anchor=(1.1, .9), frameon=False)
+    ax42.grid(False)
+    ax42.set_ylabel(r'\textbf{Epsilon}', rotation=270, labelpad=26)
+    ax4.grid(True, linestyle='--', alpha=0.3)
 
     ax3.plot(time, comp_ess, label='ESS')
-    ax3.set_ylabel('ESS')
-    ax3.plot(comp_ep[:], alpha=0.5, label='Epsilon')
-    ax3.legend()
-    ax3.grid(True)
-    ax3.set_xlabel('Training Steps')
+    ax3.set_ylabel(r'\textbf{ESS}')
+    ax3.plot(comp_ep_old[:], alpha=0.3, label=r'$\epsilon$')
+    ax3.legend(loc='upper right', bbox_to_anchor=(1., .5), frameon=False)
+    ax3.grid(True, linestyle='--', alpha=0.3)
+    ax3.set_xlabel(r'\textbf{Training Steps}')
     # Add a title to the figure
-    # fig.suptitle('Parallel Plots for Several Metrics')
-    # plt.savefig('../Figures/epsilon.png', dpi=300, bbox_inches='tight')
-    # Display the plot
+    sns.despine()
+    sns.set_style("whitegrid")
+    plt.savefig('../Figures/epsilon.pdf', dpi=600, bbox_inches='tight')
+    
     plt.show()
     
 def plt_font():
     plt.rcParams.update({
     'font.family': 'serif',
     'font.serif': ['Times New Roman'],
-    'axes.labelsize': 24,    # Font size for axis labels
-    'axes.titlesize': 16,    # Font size for titles
-    'legend.fontsize': 12,   # Font size for legend
-    'xtick.labelsize': 12,   # Font size for x-tick labels
-    'ytick.labelsize': 12,   # Font size for y-tick labels
-    'figure.titlesize': 18,   # Font size for figure title
+    'axes.labelsize': 10,    # Font size for axis labels
+    'axes.titlesize': 10,    # Font size for titles
+    'legend.fontsize': 10,   # Font size for legend
+    'xtick.labelsize': 10,   # Font size for x-tick labels
+    'ytick.labelsize': 10,   # Font size for y-tick labels
+    'figure.titlesize': 10,   # Font size for figure title
     'text.usetex': True,  
 })
