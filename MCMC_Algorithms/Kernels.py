@@ -807,13 +807,13 @@ class NUTS_pyro(Kernel):
         self.kwargs = kwargs
         self.original = False  #flag to identify whether the kernel subclass is origin
         
-    def get_pyro_kernel(self, parameter_len):
+    def get_pyro_kernel(self, parameter_len, data_key=None):
         """return the HMC pyro kernel with input parameters specified during initialisation of the class
         parameter_len: len
             - the dimension of the sampling (parameter) space
         """
         pyro.clear_param_store()
-        pyro_model = lambda data: self.model.pyro_model(data=data, parameter_len=parameter_len)
+        pyro_model = lambda data: self.model.pyro_model(data=data, parameter_len=parameter_len, data_key=data_key)
         self.pyro_kernel =  pyro.infer.mcmc.NUTS(model=pyro_model)#, step_size=self.stepsize, adapt_step_size=self.adapt_step_size, **self.kwargs)
         return self.pyro_kernel
 

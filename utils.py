@@ -9,6 +9,7 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from matplotlib.colors import Normalize
 import torch
 import seaborn as sns
+import networkx as nx
 from parameter import *
 plt.rcParams.update({
     'font.family': 'serif',
@@ -113,7 +114,6 @@ def plot_3d(X, Y, Z, title=None, xlabel='s0', ylabel='s1', zlabel='Value', show=
     
 def plot_obs(obs, env, env_name=ENV_NAME, title=None, xlabel='s0', ylabel='s1', zlabel='Path', show=SHOW, additional_info=[], save=False, figure_path = '../Figures/MCMC/'):
     print('plot obs......')
-    action_dim = env.action_space.n
     # arrows = {2: (1, 0), 0: (-1, 0), 1: (0,1), 3: (0, -1)} if action_dim == 4 else {0: (1, 1), 1: (1, -1)}#{0: (0, 1), 1: (0, -1)}
     # if env_name == 'DeepSea':
     #     arrows = {0: (1, 1), 1: (1, -1)}
@@ -123,7 +123,7 @@ def plot_obs(obs, env, env_name=ENV_NAME, title=None, xlabel='s0', ylabel='s1', 
     if additional_info != []:
         additional_info = expand_dims(additional_info)
         im = ax.imshow(additional_info)
-        cbar = fig.colorbar(im)
+        # cbar = fig.colorbar(im)
     if env_name == 'GridWorld':
         ax.set_xticks(np.arange(env.n_cell[1])) 
         ax.set_yticks(np.arange(env.n_cell[0])) 
@@ -133,15 +133,19 @@ def plot_obs(obs, env, env_name=ENV_NAME, title=None, xlabel='s0', ylabel='s1', 
     ax.set_ylabel(ylabel)
     cmap = plt.get_cmap('twilight')
     b = 0
-    if len(obs._buffers['done']) != 0:
-        for s0, s1, _, _, _ in np.array(list(obs._buffers.values())).T:
+    if len(obs._buffers['state1']) != 0:
+        for s0, s1 in zip(*list(obs._buffers.values())[:2]):
             ax.plot(s0[1], s0[0], marker='o', markersize=8, color=cmap(b))
             ax.arrow(s0[1], s0[0], s1[1]-s0[1], s1[0]-s0[0], head_width=0.2, fc=cmap(b), ec=cmap(b))
+        plt.text(obs._buffers['state0'][0][0], obs._buffers['state0'][0][1], '*', color='yellow', fontsize=40, ha='center', va='center')
+    else:
+        plt.text(obs._new_data_buffers['state0'][0][0], obs._new_data_buffers['state0'][0][1], '*', color='yellow', fontsize=40, ha='center', va='center')
     b = 0.7
-    if len(obs._new_data_buffers['done']) != 0:
-        for s0, s1, _, _, _ in np.array(list(obs._new_data_buffers.values())).T:
+    if len(obs._new_data_buffers['state1']) != 0:
+        for s0, s1 in zip(*list(obs._new_data_buffers.values())[:2]):
             ax.plot(s0[1], s0[0], marker='o', markersize=8, color=cmap(b))
             ax.arrow(s0[1], s0[0], s1[1]-s0[1], s1[0]-s0[0], head_width=0.2, fc=cmap(b), ec=cmap(b))
+
 
     ax.set_title(title)
     fig.tight_layout()
@@ -424,7 +428,7 @@ def display_smc_results_notebook(samples, n_0=0, n_1=None, smooth=1, Q_star=None
         horizon_lim = i + 1 if cell_idx == cell_idx_x else cell * (cell_idx_x + 1)
         for k in range(cell * (cell_idx_x), horizon_lim):
             for a in [0, 1]:
-                ax2[i%cell, k%cell].set_ylim(*ylim)#set_ylim(np.min(samples) * 0.8, np.max(samples)* 0.8)
+                ax2[i%cell, k%cell].set_ylim(-ylim, ylim)#set_ylim(np.min(samples) * 0.8, np.max(samples)* 0.8)
                 ax2[i%cell, k%cell].plot(range(n_0, n_1)[::subsample_int], means[:, i, k, a], label=f'Action {a}')
                 ax2[i%cell, k%cell].fill_between(range(n_0, n_1)[::subsample_int], lwbd[:, i, k, a], upbd[:, i, k, a], alpha=0.5)
 #                 for j in range(dim[1]//2):
@@ -837,3 +841,87 @@ def plt_font():
     'figure.titlesize': 10,   # Font size for figure title
     'text.usetex': True,  
 })
+    
+def plot_path(reward_map, path, title='Best Path on Reward Map'):
+    """
+    Plot the best path on a given reward map.
+    
+    Parameters:
+        reward_map (2D np.ndarray): The grid of reward values.
+        path (list of tuple): Sequence of (x, y) positions representing the path.
+        title (str): Plot title.
+    """
+    fig, ax = plt.subplots(figsize=(8, 6))
+    ax.imshow(reward_map, cmap='viridis', origin='upper')
+
+    # Plot the path with a line
+    xs, ys = zip(*path)
+    ax.plot(ys, xs, marker='o', color='r', linewidth=2, label='Best Path')
+
+    # Mark start and end
+    ax.scatter(ys[0], xs[0], marker='*', color='gold', s=200, label='Start')
+    ax.scatter(ys[-1], xs[-1], marker='s', color='white', s=100, label='End')
+
+    # Annotate steps
+    for i, (x, y) in enumerate(path):
+        ax.text(y, x, str(i), ha='center', va='center', color='black', fontsize=8, fontweight='bold')
+
+    ax.set_title(title)
+    ax.set_xticks(np.arange(reward_map.shape[1]))
+    ax.set_yticks(np.arange(reward_map.shape[0]))
+    ax.legend()
+    plt.tight_layout()
+    plt.show()
+
+def visualize_tree_on_grid(root, reward_map, best_path=None):
+    """
+    Visualize MCTS tree on top of a reward grid.
+
+    Parameters:
+        root (Node): Root of the MCTS tree.
+        reward_map (2D np.ndarray): Grid of reward values.
+        best_path (list of (x, y)): Optional. Highlighted path (e.g., best).
+    """
+    fig, ax = plt.subplots(figsize=(8, 6))
+    ax.imshow(reward_map, cmap='viridis', origin='upper')
+
+    G = nx.DiGraph()
+    node_positions = {}
+
+    # DFS to construct graph and positions
+    def build_graph(node):
+        pos = node.state[:2] if isinstance(node.state, tuple) else node.state
+        G.add_node(node)
+        node_positions[node] = (pos[1], pos[0])  # flipped for imshow compatibility
+        for child in node.children.values():
+            G.add_edge(node, child)
+            build_graph(child)
+
+    build_graph(root)
+
+    # Draw edges
+    for edge in G.edges:
+        x0, y0 = node_positions[edge[0]]
+        x1, y1 = node_positions[edge[1]]
+        ax.plot([x0, x1], [y0, y1], color='white', linewidth=1)
+
+    # Draw nodes
+    for node, (x, y) in node_positions.items():
+        ax.scatter(x, y, s=30, color='red')
+        ax.text(x + np.random.normal(scale=0.1), y+ np.random.normal(scale=0.1), f"{node.visits}", fontsize=12, ha='center', va='center', color='black')
+
+    # Optionally highlight best path
+    if best_path:
+        xs, ys = zip(*[(y, x) for x, y in best_path])
+        ax.plot(xs, ys, marker='o', color='gold', linewidth=2, label='Best Path')
+
+    ax.set_title("MCTS Tree Over Grid")
+    ax.set_xticks(np.arange(reward_map.shape[1]))
+    ax.set_yticks(np.arange(reward_map.shape[0]))
+    ax.grid(True, which='both', linestyle='--', linewidth=0.5)
+    ax.legend()
+    plt.tight_layout()
+    plt.show()
+
+
+        

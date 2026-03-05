@@ -13,7 +13,7 @@ from model import *
 
 class DeepSea:
     def __init__(self, depth, starting_position=(0,0), goal_position=(-1,-1)):
-        self.env_name = 'GridWorld'
+        self.env_name = 'DeepSea'
         self.n_cell = n_cell = (depth, depth)
         self.starting_position = starting_position
         if goal_position == (-1, -1):

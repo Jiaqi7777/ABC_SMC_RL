@@ -6,6 +6,7 @@ import torch
 from utils import *
 from scipy.sparse import csr_matrix, coo_array
 from parameter import *
+from MCMC_Algorithms.Models import *
 
 def uniform_grid(low, high, bins=(10,10), include_low=1, verbose=False):
     """Define a uniformly-spaced grid that can be used to discretize a space.
@@ -51,11 +52,16 @@ class Buffer:
                 self._buffers[k].append(vi)
         self._new_data_buffers = {key: [] for key in self.entry_keys}
 
-    def insert(self, items, unique=False, unique_verbose=True, update_new_data=False):
+    def insert(self, items, unique=False, unique_verbose=True, update_new_data=False, remove_keys=['state1']):
         if set(items.keys()) != set(self._buffers.keys()):
             raise IndexError
         unique_check = list(items.values())
-        unique_check.remove(items['state1'])
+        for r in remove_keys:
+            if r in items.keys():
+                if isinstance(items[r], float):
+                    unique_check.remove(float(items[r]))
+                else:
+                    unique_check.remove(tuple(items[r]))
         unique_check = str(unique_check)
         if unique:
             if unique_check in self.unique_set:
@@ -117,7 +123,7 @@ class Buffer:
         return len(list(self._buffers.values())[0])
 
 class Tabular:
-    def __init__(self, env, n_particle, prior='normal', discrete=False, gamma=0.95, std=0.1, mean=0, verbose=True, bins=(10,), initial_tables=None, initial_weights=None, idx=None):
+    def __init__(self, env, n_particle, prior='normal', discrete=False, gamma=0.95, std=0.1, mean=0, unary_sigma=1.0, verbose=True, bins=(10,), initial_tables=None, initial_weights=None, idx=None):
         self.env = env
         self.discrete = discrete
         self.obs_size = env.observation_space.shape
@@ -141,7 +147,11 @@ class Tabular:
         self.n_particle = n_particle if (initial_tables is None) else len(initial_tables)
         self._weights = initial_weights
         if prior == 'normal':
-            self.random_tables = torch.normal(mean=mean, std=std, size=((n_particle,) + self.bins + (self.action_size,)))
+            self.prior = IsotropicGaussianPrior(sd=PRIOR_SIGMA)
+            if self.action_size:
+                self.random_tables = self.prior.sample(shape=((n_particle,) + self.bins + (self.action_size,)))# (n_particle, H, W, action_size)
+            else:
+                self.random_tables = self.prior.sample(shape=((n_particle,) + self.bins))
             self.tables = initial_tables if (initial_tables is not None) else self.random_tables
             # self.tables = torch.tensor(np.repeat(initial_tables[np.newaxis, ...], n_particle, axis=0), dtype=torch.float32) if (initial_tables is not None) else self.random_tables
             #diagnosis
@@ -150,14 +160,40 @@ class Tabular:
                 # last_samples = torch.load('2DT1050000HMC.pt')[-1]
                 for i in idx:
                     self.tables[(slice(None), *i)] = torch.minimum(torch.normal(mean=mean, std=std, size=(n_particle, )), torch.zeros(n_particle))
-            if env.goal_idx:
+            if hasattr(env, 'goal_idx'):
                 for n in range(n_particle):
                     self.tables[n][env.goal_idx] = 0
-            if env.not_learnable_idx:
+            if hasattr(env, 'not_learnable_idx'):
                 for n in range(n_particle):
                     self.tables[n][env.not_learnable_idx] = 0
             if verbose:
-                print("Q table size:", self.tables[-1].shape)     
+                print("Q table size:", self.tables[-1].shape)   
+        elif prior == 'mrf':
+            # H, W = self.bins
+            if initial_tables is not None:
+                self.tables = initial_tables
+            else:
+                self.prior = GaussianMRFPrior(shape=self.bins, sigma=PRIOR_SIGMA, unary_mu=PRIOR_MEAN, unary_sigma=1.0)
+                mrf_tables = self.prior.sample(n_particle=n_particle)  # (n_particle, H, W)
+                self.tables = mrf_tables
+            if idx is not None:
+                for i in idx:
+                    self.tables[(slice(None), *i)] = torch.minimum(
+                        torch.normal(mean=mean, std=std, size=(n_particle,), device=mean.device),
+                        torch.zeros(n_particle, device=mean.device)
+                    )
+
+            if hasattr(env, 'goal_idx'):
+                for n in range(n_particle):
+                    self.tables[n][env.goal_idx] = 0
+
+            if hasattr(env, 'not_learnable_idx'):
+                for n in range(n_particle):
+                    self.tables[n][env.not_learnable_idx] = 0
+
+            if verbose:
+                print("Table size:", self.tables[-1].shape)
+              
         else:
             raise NotImplementedError(f'The prior method corresponds to {prior} has not been implemented')
 
@@ -260,6 +296,7 @@ class Tabular:
         index_arrays = []
         all_obs = np.array(list(obs._unique_buffers.values())).T
         for s0, _, a, _, _ in list(all_obs):
+            print(s0, a)
             index_arrays.append(np.array(s0 + (a,)))
         self.env.learnable_idx = tuple(torch.tensor(index_arrays).T)
         self.env.names = index_arrays
@@ -268,8 +305,11 @@ class Tabular:
         return self.tables
     
     def get_learnable_parameter(self):
-        return self.tables[(slice(None),  *self.env.learnable_idx)]
-
+        if hasattr(self.env, 'learnable_idx'):
+            return self.tables[(slice(None), *self.env.learnable_idx)]
+        print('learnable_idx not set')
+        return self.tables
+    
     def set_parameter(self, new_para, idx=None):
         if idx is None:
             self.tables = new_para

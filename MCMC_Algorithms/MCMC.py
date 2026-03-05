@@ -1,19 +1,9 @@
 import numpy as np
-import scipy.stats as stats
 import torch
-from copy import deepcopy
 from functools import partial
 import pyro
-import pyro.distributions as dist
 from tqdm.notebook import tqdm
 import math
-import sys
-import os
-import pickle
-os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
-sys.path.append('/scratch/Rabbit/work/ABC_SMC_RL/')
-sys.path.append('/Users/guojiaqi/work/ABC_SMC_RL/')
-print('system path', sys.path)
 '''module import'''
 from MCMC_Algorithms.Kernels import *
 from MCMC_Algorithms.Models import *
@@ -167,7 +157,7 @@ class MCMC_pyro(MCMC):
         """
         super(MCMC_pyro, self).__init__(kernel=kernel, warmup_steps=warmup_steps, num_samples=num_samples, initial_params=initial_params, params_dim=params_dim, **kwargs)
         self.kernel_ = kernel
-        self.pyro_kernel = kernel.get_pyro_kernel(parameter_len=self.params_dim)
+        self.pyro_kernel = kernel.get_pyro_kernel(parameter_len=self.params_dim, data_key=self.kernel_.model.data_key)
         self.pyro_mcmc = pyro.infer.mcmc.MCMC(kernel=self.pyro_kernel, num_samples=num_samples, initial_params={'prior_parameter': initial_params}, warmup_steps=warmup_steps, disable_progbar=disable_progbar, **kwargs)
         self.data = self.kernel.model.data
 

@@ -1,11 +1,18 @@
 import numpy as np
+import math
 from scipy.stats import truncnorm
 from copy import deepcopy
 import torch
+import torch.nn.functional as F
 import pyro
 import pyro.distributions as dist
 from parameter import *
-from parameter import *
+
+def laplacian(self, x):
+    # x: (B,1,H,W)
+    xpad = F.pad(x, (1,1,1,1), mode="reflect")  # or "replicate"
+    return F.conv2d(xpad, self.kernel.view(1,1,3,3), padding=0)
+
 
 def generate_samples(para, model, obs, batch_indices=None, buffer_size=BUFFER_SIZE, batch_training=BATCH_TRAINING):
     # print(para.shape, 'generate samples')
@@ -121,6 +128,13 @@ class IsotropicGaussianPrior:
             - the dimension of the parameter
         """
         return (self.sigma ** 2) * torch.eye(parameter_len)
+    
+    def sample(self, shape=(1,)):
+        """return a sample from the prior given the number of particles
+        n_particle: int
+            - the number of particles to sample
+        """
+        return torch.distributions.normal.Normal(loc=self.mean, scale=self.sigma).sample(shape)
 
 class TruncatedGaussianPrior:
     def __init__(self, sd=1., mean=0.):
@@ -162,6 +176,105 @@ class TruncatedGaussianPrior:
             - the dimension of the parameter
         """
         return 4 * (self.sigma ** 2) * torch.eye(parameter_len)
+
+class GaussianMRFPrior:
+    def __init__(self, shape, sigma=1.0, unary_mu=0.0, unary_sigma=1.0, device="cpu", dtype=torch.float32):
+        self.shape = shape  # (H, W)
+        self.sigma = float(sigma)
+        self.unary_mu = float(unary_mu)
+        self.unary_sigma = float(unary_sigma)
+        self.device = device
+        self.dtype = dtype
+
+        # 4-neighbour Laplacian kernel
+        self.kernel = torch.tensor([[0, -1,  0],
+                                    [-1,  4, -1],
+                                    [0, -1,  0]], dtype=dtype, device=device)
+
+    # ---------- Laplacian consistent with FFT model (periodic / torus) ----------
+    def laplacian(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Discrete Laplacian with circular boundary conditions.
+        x: (B, 1, H, W)
+        """
+        xpad = F.pad(x, (1, 1, 1, 1), mode="circular")
+        return F.conv2d(xpad, self.kernel.view(1, 1, 3, 3), padding=0)
+
+    # ---------- Unnormalized log prior and its gradient ----------
+    def logprior(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Unnormalized log p(x) for the GMRF:
+          log p(x) = -0.5 * [ tau * x^T L x + tau_u * ||x - mu||^2 ] + const
+        x: (B, 1, H, W)
+        returns: (B,)
+        """
+        tau = 1.0 / (self.sigma ** 2)
+        tau_u = 1.0 / (self.unary_sigma ** 2)
+
+        lap = self.laplacian(x)  # (B,1,H,W)
+
+        # x^T L x = sum_{i,j} x_{ij} (Lx)_{ij}
+        quad_pair = torch.sum(x * lap, dim=(1, 2, 3))
+
+        # ||x - mu||^2
+        diff = x - self.unary_mu
+        quad_unary = torch.sum(diff * diff, dim=(1, 2, 3))
+
+        energy = 0.5 * (tau * quad_pair + tau_u * quad_unary)
+        return -energy  # + const
+
+    def logprior_grad(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Gradient of logprior wrt x:
+          ∇ log p(x) = - ( tau * Lx + tau_u * (x - mu) )
+        x: (B, 1, H, W)
+        returns: (B, 1, H, W)
+        """
+        tau = 1.0 / (self.sigma ** 2)
+        tau_u = 1.0 / (self.unary_sigma ** 2)
+
+        lap = self.laplacian(x)
+        return -(tau * lap + tau_u * (x - self.unary_mu))
+
+    # ---------- FFT eigenvalues for torus Laplacian ----------
+    def _laplacian_eigs_torus(self) -> torch.Tensor:
+        """
+        Eigenvalues of 2D 4-neighbour Laplacian with periodic BC:
+          λ(k,l)=4 - 2cos(2πk/H) - 2cos(2πl/W)
+        returns: (H, W) real tensor
+        """
+        H, W = self.shape
+        k = torch.arange(H, device=self.device, dtype=self.dtype)
+        l = torch.arange(W, device=self.device, dtype=self.dtype)
+
+        ang_k = 2.0 * math.pi * k / H
+        ang_l = 2.0 * math.pi * l / W
+
+        cos_k = torch.cos(ang_k).view(H, 1)
+        cos_l = torch.cos(ang_l).view(1, W)
+
+        return 4.0 - 2.0 * cos_k - 2.0 * cos_l
+
+    @torch.no_grad()
+    def sample(self, n_particle=1, eps=1e-8) -> torch.Tensor:
+        """
+        Exact sampling for periodic BC:
+          x ~ N(mu, Q^{-1}), Q = tau * L + tau_u * I
+        returns: (n_particle, H, W)
+        """
+        H, W = self.shape
+        tau = 1.0 / (self.sigma ** 2)
+        tau_u = 1.0 / (self.unary_sigma ** 2)
+
+        lam_L = self._laplacian_eigs_torus()          # (H,W)
+        lam_Q = tau * lam_L + tau_u                  # (H,W)
+        lam_Q = torch.clamp(lam_Q, min=eps)
+
+        z = torch.randn((n_particle, H, W), device=self.device, dtype=self.dtype)
+        Z = torch.fft.fft2(z)
+        X = Z / torch.sqrt(lam_Q)
+        x = torch.fft.ifft2(X).real + self.unary_mu
+        return x
 
         
 class GaussianABCLikelihood():
@@ -481,13 +594,13 @@ class DeterministicSRModel():
             # prior_parameter = full_para.clone()
         mean = self.abclikelihood.compute_mean(parameter=prior_parameter, mean_fn=self.llh_transform_fn, llh_info_dict=dict())
         with pyro.plate("data_plate"):
-            # print(mean, 'mean')
             pyro.sample("obs", dist.MultivariateNormal(mean, self.abclikelihood.covariance_matrix(data_len=len(self.data))), obs=data)
             
 class DeterministicSRModelSMC(DeterministicSRModel):
-    def __init__(self, prior, abclikelihood, data, old_data, new_data, llh_transform_fn_old=None, llh_transform_fn_new=None, llh_transform_grad_fn_old=None, llh_transform_grad_fn_new=None, new_epsilon=None, *args):
+    def __init__(self, prior, abclikelihood, data, old_data, new_data, data_key=None, llh_transform_fn_old=None, llh_transform_fn_new=None, llh_transform_grad_fn_old=None, llh_transform_grad_fn_new=None, new_epsilon=None, *args):
         super(DeterministicSRModelSMC, self).__init__(prior, abclikelihood, data, *args)
         self.data = data
+        self.data_key = data_key
         self.old_data = old_data
         self.new_data = new_data
         self.llh_transform_fn_old = llh_transform_fn_old
@@ -497,7 +610,6 @@ class DeterministicSRModelSMC(DeterministicSRModel):
         self.new_epsilon = new_epsilon
         
     def llh_new(self, parameter, epsilon, old=False):
-        # print('llh new')
         if old:
             data = self.old_data
             llh_transform_fn = self.llh_transform_fn_old
@@ -510,10 +622,8 @@ class DeterministicSRModelSMC(DeterministicSRModel):
         """compute the loglikelihood given the abclikelihood and return the loglikelihood with the llh_info_dict"""
         if epsilon is None:
             epsilon = self.new_epsilon
-        old_epsilon = self.new_epsilon if len(self.new_data) == 0 else self.abclikelihood.epsilon 
-        # print('old', self.abclikelihood.epsilon)
+        old_epsilon = self.new_epsilon if len(self.new_data) == 0 else self.abclikelihood.epsilon
         old_llh, _ = self.abclikelihood.llh(data=self.old_data, parameter=parameter, llh_transform_fn=self.llh_transform_fn_old, epsilon=old_epsilon)
-        # print('new', epsilon, self.new_data)
         new_llh, _ = self.abclikelihood.llh(data=self.new_data, parameter=parameter, llh_transform_fn=self.llh_transform_fn_new, epsilon=epsilon)
         return old_llh + new_llh, llh_info_dict
     
@@ -527,15 +637,16 @@ class DeterministicSRModelSMC(DeterministicSRModel):
         llh_grad_new, llh_grad_info = self.abclikelihood.llh_gradient(data=self.new_data, parameter=parameter, llh_info_dict=llh_info_dict, llh_transform_fn=self.llh_transform_fn_new, llh_transform_grad_fn=self.llh_transform_grad_fn_new, epsilon=new_epsilon)
         return logprior_grad + llh_grad_new + llh_grad_old, llh_grad_info
 
-    def pyro_model(self, data, parameter_len):
+    def pyro_model(self, data, parameter_len, data_key=None):
         """the equivalent pyro model, for use in pyro MCMC functions
         data: torch.tensor
             - this input is required as a standard format of a pyro model
         parameter_len: int
             - the dimension of the parameter
         """
-        old_data = torch.tensor(data._buffers["rewards"], dtype=torch.float32)
-        new_data = torch.tensor(data._new_data_buffers["rewards"], dtype=torch.float32)
+        data_key = data_key if data_key is not None else "rewards"
+        old_data = torch.tensor(data._buffers[data_key], dtype=torch.float32)
+        new_data = torch.tensor(data._new_data_buffers[data_key], dtype=torch.float32)
         data = torch.cat((old_data, new_data), dim=0)
         prior_parameter = pyro.sample("prior_parameter", dist.MultivariateNormal(torch.zeros(parameter_len), torch.eye(parameter_len)*self.prior.sigma**2))
         mean_old = self.abclikelihood.compute_mean(parameter=prior_parameter, mean_fn=self.llh_transform_fn_old)
