@@ -1,6 +1,6 @@
 import numpy as np
 
-def brute_force_max_path_gridworld(start_state, T, rewards):
+def brute_force_max_path_gridworld(start_state, T, rewards, cfg):
     """
     Find the best path in GridWorld of exactly T steps without revisiting.
     
@@ -50,7 +50,7 @@ def brute_force_max_path_gridworld(start_state, T, rewards):
             if next_state in visited and not is_revisiting_start:
                 continue
             # print('next_state', next_state)
-            reward = rewards[state[0], state[1]]
+            reward = cfg.reward_scale * rewards[state[0], state[1]] ** cfg.reward_power
             added = False
             if not is_revisiting_start:
                 visited.add(next_state)

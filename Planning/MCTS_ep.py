@@ -7,22 +7,28 @@ import numpy as np
 import torch
 from dataclasses import dataclass
 
+from MCMC_Algorithms.INLA import sample_fields, theta_posterior_delta_method
+from Environment.env_util import Pos, Action, next_pos, legal_actions, proposal_action_score, ProposalConfig
+from Environment.rewards import RewardConfig, eval_plan
+
 @dataclass
 class BeliefMaps:
     rbar_map: np.ndarray   # E[theta^2]  shape (H,W)
     var_map: np.ndarray    # Var[theta]  shape (H,W)
 
-def belief_to_maps_theta2(belief, obstacle_mask=None, eps: float = 1e-8) -> BeliefMaps:
+def belief_to_maps_theta2(belief, power=2, obstacle_mask=None, beta: float = 0.0, eps: float = 1e-8) -> BeliefMaps:
     """
     belief.tables: torch.Tensor of shape (N,H,W)
     Returns:
-      rbar_map = E[theta^2]
+      rbar_map = E[theta^power]
       var_map  = Var[theta]
     """
     tables = torch.log(1 + torch.exp(belief.tables)) # (N,H,W)
-    rbar = (tables ** 2).mean(dim=0)                  # E[theta^2]
+    rbar = (tables ** power).mean(dim=0)                  # E[theta^power]
     var  = tables.var(dim=0, unbiased=False) + eps    # Var[theta]
 
+    if beta>0:
+        rbar = rbar + beta * var
     rbar_np = rbar.detach().cpu().numpy()
     var_np  = var.detach().cpu().numpy()
 
@@ -34,32 +40,12 @@ def belief_to_maps_theta2(belief, obstacle_mask=None, eps: float = 1e-8) -> Beli
 
     return BeliefMaps(rbar_map=rbar_np, var_map=var_np)
 
-
-Pos = Tuple[int, int]
-Action = int
-
-DIRS = {0: (-1,0), 1: (0,1), 2: (1,0), 3: (0,-1)}
-
-def next_pos(env, s: Pos, a: Action) -> Pos:
-    di, dj = DIRS[a]
-    ni, nj = s[0] + di, s[1] + dj
-    if 0 <= ni < env.rows and 0 <= nj < env.cols and (not env.obstacle_mask[ni, nj]):
-        return (ni, nj)
-    return s
-
-def legal_actions(env, s: Pos) -> List[Action]:
-    return [0,1,2,3]
-
-def K_score(env, s: Pos, a: Action, bmaps: BeliefMaps, alpha: float) -> float:
-    sp = next_pos(env, s, a)
-    return float(bmaps.rbar_map[sp] + alpha * bmaps.var_map[sp])
-
-def greedy_heuristic_plan(env, s0: Pos, bmaps: BeliefMaps, T: int, alpha: float, rng: random.Random) -> List[Action]:
+def greedy_heuristic_plan(env, s0: Pos, beliefSample, T: int, alpha: float, rng: random.Random, belief_var=None) -> List[Action]:
     U = []
     s = s0
     for _ in range(T):
         A = legal_actions(env, s)
-        scores = [K_score(env, s, a, bmaps, alpha) for a in A]
+        scores = [K_score(env, s, a, beliefSample, alpha, belief_var=belief_var) for a in A]
         m = max(scores)
         best = [a for a, sc in zip(A, scores) if sc == m]
         a_star = rng.choice(best)
@@ -93,25 +79,22 @@ def _softmax_sample(actions, scores, temperature, rng):
 
 def proposal_value_explore_return_norepeat(
     env,
-    s0,
-    origin,
-    bmaps,
-    T,
+    s0: Pos,
+    origin: Pos,
+    beliefSample,
+    T: int,
     rng,
     *,
-    w_r=1.0,          # mean/value weight
-    w_v=0.5,          # variance/exploration weight
-    w_rep=1.5,        # repeat-visit penalty
-    w_inv=5.0,        # invalid move penalty
-    w_ret=0.5,        # return-to-origin weight (base)
-    ret_power=2.0,    # how strongly return pressure ramps near the end
-    temperature=0.35, # <1 = greedier, >1 = more random
-    eps=1e-9
+    cfg: Optional[ProposalConfig] = None,
+    belief_var=None,
 ):
     """
     Returns a length-T action tuple.
-    Favors high rbar, high var, novelty, and returning to origin near the end.
+    Favors high value, high variance, novelty, and returning to origin.
     """
+    if cfg is None:
+        cfg = ProposalConfig()
+
     s = s0
     visited = {s0}
     U = []
@@ -119,42 +102,29 @@ def proposal_value_explore_return_norepeat(
     for t in range(T):
         A = legal_actions(env, s)
 
-        # ramp return pressure as remaining steps shrink
-        # near t=T-1, pressure ~ w_ret; near t=0, smaller
-        frac = (t + 1) / T
-        w_ret_t = w_ret * (frac ** ret_power)
+        scores = [
+            proposal_action_score(
+                env=env,
+                s=s,
+                a=a,
+                t=t,
+                T=T,
+                origin=origin,
+                visited=visited,
+                beliefSample=beliefSample,
+                belief_var=belief_var,
+                cfg=cfg,
+            )
+            for a in A
+        ]
 
-        scores = []
-        for a in A:
-            sp = next_pos(env, s, a)
-
-            # base value/exploration
-            val = float(bmaps.rbar_map[sp])
-            var = float(bmaps.var_map[sp])
-            sc = w_r * val + w_v * var
-
-            # invalid moves (should be rare since valid_actions filters, but keep safety)
-            if sp == s:
-                sc -= w_inv
-
-            # avoid repeats
-            if sp in visited:
-                sc -= w_rep
-
-            # encourage returning to origin (stronger later)
-            dist = abs(sp[0] - origin[0]) + abs(sp[1] - origin[1])
-            sc -= w_ret_t * dist
-
-            scores.append(sc)
-
-        a_star = _softmax_sample(A, scores, temperature, rng)
+        a_star = _softmax_sample(A, scores, cfg.temperature, rng)
         U.append(a_star)
 
         s = next_pos(env, s, a_star)
         visited.add(s)
 
     return tuple(U)
-
 
 @dataclass
 class EdgeStats:
@@ -164,11 +134,19 @@ class EdgeStats:
 
 @dataclass
 class Node:
+    node_id: int
     s0: Pos
     depth: int
+
+    parent_id: Optional[int] = None
+    incoming_plan: Optional[Tuple[Action, ...]] = None
+
     N: int = 0
     plans: List[Tuple[Action, ...]] = field(default_factory=list)
     stats: Dict[Tuple[Action, ...], EdgeStats] = field(default_factory=dict)
+
+    # maps macro-plan U to child node id
+    children: Dict[Tuple[Action, ...], int] = field(default_factory=dict)
 
 class PWMCTSTheta2:
     def __init__(
@@ -182,7 +160,9 @@ class PWMCTSTheta2:
         alpha_pw: float,
         alpha_score: float,
         p_flip: float,
-        rng: Optional[random.Random] = None
+        rng: Optional[random.Random] = None,
+        reward_cfg: Optional[RewardConfig] = None,
+        proposal_cfg: Optional[ProposalConfig] = None,
     ):
         self.T = T
         self.K = K
@@ -194,8 +174,12 @@ class PWMCTSTheta2:
         self.alpha_score = alpha_score
         self.p_flip = p_flip
         self.rng = rng or random.Random(0)
-        self.tree: Dict[Tuple[Hashable, int], Node] = {}
-
+        self.reward_cfg = reward_cfg or RewardConfig()
+        self.proposal_cfg = proposal_cfg or ProposalConfig(w_r=1.0, w_v=alpha_score, w_rep=2.0, w_inv=5.0, w_ret=0.6, ret_power=2.0, temperature=0.35)
+        self.tree: Dict[int, Node] = {}
+        self.root_id: Optional[int] = None
+        self._next_node_id: int = 0
+        
     def _key(self, s0: Pos, depth: int) -> Tuple[Hashable, int]:
         return (s0, depth)
 
@@ -205,6 +189,61 @@ class PWMCTSTheta2:
             self.tree[key] = Node(s0=s0, depth=depth)
         return self.tree[key]
 
+    def _new_node(
+        self,
+        *,
+        s0: Pos,
+        depth: int,
+        parent_id: Optional[int] = None,
+        incoming_plan: Optional[Tuple[Action, ...]] = None,
+    ) -> int:
+        node_id = self._next_node_id
+        self._next_node_id += 1
+
+        self.tree[node_id] = Node(
+            node_id=node_id,
+            s0=s0,
+            depth=depth,
+            parent_id=parent_id,
+            incoming_plan=incoming_plan,
+        )
+        
+        return node_id
+
+
+    def _get_or_create_root(self, root_pos: Pos) -> int:
+        if self.root_id is None:
+            self.root_id = self._new_node(
+                s0=root_pos,
+                depth=0,
+                parent_id=None,
+                incoming_plan=None,
+            )
+        return self.root_id
+    
+    def _child_after_plan(self, node: Node, U: Tuple[Action, ...]) -> Node:
+        """
+        Return the child node linked to macro-plan U.
+
+        This does NOT compute a next physical state.
+        The child is defined purely by the tree edge:
+            node --U--> child
+        """
+        U = tuple(U)
+
+        if U in node.children:
+            return self.tree[node.children[U]]
+
+        child_id = self._new_node(
+            s0=node.s0,                 # state stays the same in your formulation
+            depth=node.depth + 1,
+            parent_id=node.node_id,
+            incoming_plan=U,
+        )
+
+        node.children[U] = child_id
+        return self.tree[child_id]
+    
     def _pw_allows_expand(self, node: Node) -> bool:
         if len(node.plans) == 0:
             return True
@@ -219,22 +258,17 @@ class PWMCTSTheta2:
         # standard PW budget (only widen if still under budget)
         return len(node.plans) < self.k_pw * (node.N ** self.alpha_pw)
 
-    def _propose_plan(self, env, node, bmaps):
+    def _propose_plan(self, env, node, beliefSample, belief_var=None):
         origin = getattr(self, "_origin", node.s0)
         return proposal_value_explore_return_norepeat(
             env,
             s0=node.s0,
             origin=origin,
-            bmaps=bmaps,
+            beliefSample=beliefSample,
             T=self.T,
             rng=self.rng,
-            w_r=1.0,
-            w_v=self.alpha_score,   # reuse your alpha_score as variance weight
-            w_rep=2.0,
-            w_inv=5.0,
-            w_ret=0.6,
-            ret_power=2.0,
-            temperature=0.35,
+            cfg=self.proposal_cfg,# reuse your alpha_score as variance weight
+            belief_var=belief_var,  
         )
 
     def _select_ucb(self, node: Node) -> Tuple[Action, ...]:
@@ -250,21 +284,21 @@ class PWMCTSTheta2:
         assert best_U is not None
         return best_U
 
-    def _eval_plan_expected_theta2(self, env, s0: Pos, bmaps: BeliefMaps, U: Tuple[Action, ...]) -> Tuple[float, Pos]:
+    def _eval_plan_expected_theta2_original(self, env, s0: Pos, beliefSample, U: Tuple[Action, ...]) -> Tuple[float, Pos]:
         """
         Planning reward = sum gamma^t * E[theta_{s_{t+1}}^2] (invalid move penalty optional)
         """
         s = s0
         R = 0.0
         disc = 1.0
-        visited = set(s0)
+        visited = set({s0})
         for t, a in enumerate(U):
             sp = next_pos(env, s, a)
             if sp in visited and t < self.T - 1:  # loop detected, break and return reward so far
                 r = -5  # large penalty for loops
             else:
-                r = float(bmaps.rbar_map[sp])  # E[theta^2] at next cell
-            visited.add(s)
+                r = float(beliefSample[sp])**2  # E[theta^2] at next cell
+            visited.add(sp)
             R += disc * r
             disc *= self.gamma
             s = sp
@@ -272,52 +306,214 @@ class PWMCTSTheta2:
             dist = abs(s[0]-s0[0]) + abs(s[1]-s0[1])
             R -= 2 * dist# large penalty for not returning to start proportional to the distance 
         return R, s
+    
+    def _eval_plan_expected_theta2(self, env, s0: Pos, beliefSample, U: Tuple[Action, ...]):
+        return eval_plan(
+            env=env,
+            s0=s0,
+            theta_field=beliefSample,
+            U=U,
+            gamma=self.gamma,
+            cfg=self.reward_cfg,
+        )
 
-    def simulate(self, env, s0: Pos, bmaps: BeliefMaps, depth: int) -> float:
-        if depth >= self.K:
+    def simulate(self, env, node_id: int, beliefSample, belief_var=None) -> float:
+        node = self.tree[node_id]
+
+        if node.depth >= self.K:
             return 0.0
 
-        node = self._node(s0, depth)
-
+        # Progressive widening
         if self._pw_allows_expand(node):
-            U_new = self._propose_plan(env, node, bmaps)
+            U_new = self._propose_plan(
+                env,
+                node,
+                beliefSample,
+                belief_var=belief_var,
+            )
+            U_new = tuple(U_new)
+
             if U_new not in node.stats:
                 node.plans.append(U_new)
                 node.stats[U_new] = EdgeStats()
 
+        # Select a plan
         untried = [U for U in node.plans if node.stats[U].N == 0]
+
         if untried:
-            U = random.choice(untried)  # random or highest prior
+            U = self.rng.choice(untried)
         else:
             U = self._select_ucb(node)
-        R_macro, s_next = self._eval_plan_expected_theta2(env, s0, bmaps, U)
 
-        G_next = self.simulate(env, s_next, bmaps, depth + 1)
+        # Evaluate this macro-plan from the fixed state s0
+        R_macro, _ = self._eval_plan_expected_theta2(
+            env,
+            node.s0,
+            beliefSample,
+            U,
+        )
+
+        # Move to linked child node, not physical next state
+        child = self._child_after_plan(node, U)
+
+        G_next = self.simulate(
+            env,
+            child.node_id,
+            beliefSample,
+            belief_var=belief_var,
+        )
+
         G = R_macro + self.gamma_macro * G_next
 
+        # Backprop
         node.N += 1
         st = node.stats[U]
         st.N += 1
         st.W += G
         st.Q = st.W / st.N
+
         return G
 
-    def plan(self, env, root_pos: Pos, bmaps: BeliefMaps, num_sims: int, return_most_visited: bool = True) -> List[Action]:
+    def plan(self, env, root_pos: Pos, belief, num_sims: int, return_most_visited: bool = True, sample_fn=None, var_fn=None) -> List[Action]:
         self._origin = (int(root_pos[0]), int(root_pos[1]))
-        for _ in range(num_sims):
-            self.simulate(env, root_pos, bmaps, 0)
+        root_id = self._get_or_create_root(root_pos)
+        root = self.tree[root_id]
 
-        root = self._node(root_pos, 0)
+        # Keep root s0 fixed/updated
+        root.s0 = root_pos
+        root.depth = 0
+
+        if sample_fn is None:
+            samples = sample_fields(
+                belief=belief,
+                n_samples=num_sims
+            )['theta_samples']
+        else:
+            samples = sample_fn(belief=belief, n_samples=num_sims)['theta_samples']
+        belief_var = None if var_fn is None else var_fn(belief=belief)[1].reshape(env.n_cell)
+        for i in range(num_sims):
+            beliefSample = samples[i].reshape(env.n_cell)
+            self.simulate(
+                env,
+                root_id,
+                beliefSample,
+                belief_var=belief_var,
+            )
+        root = self.tree[root_id]
+        plan_weights = np.array([root.stats[U].N for U in root.plans], dtype=float)
         if not root.plans:
-            return greedy_heuristic_plan(env, root_pos, bmaps, self.T, self.alpha_score, self.rng)
+            return greedy_heuristic_plan(env, root_pos, beliefSample, self.T, self.alpha_score, self.rng, belief_var=belief_var)
+        plan_weights = [root.stats[U].N for U in root.plans]
+        return list(root.plans), np.array(plan_weights)
 
-        best = max(root.plans, key=lambda U: root.stats[U].N if return_most_visited else root.stats[U].Q)
-        return list(best)
+        # return list(root.plans), plan_weights
+        # for i in range(num_sims):
+        #     beliefSample = samples[i].reshape(env.n_cell)
+        #     self.simulate(env, root_pos, beliefSample, 0, belief_var=belief_var)
+
+        # root = self._node(root_pos, 0)
+
+        #best = max(root.plans, key=lambda U: root.stats[U].N if return_most_visited else root.stats[U].Q)
+    
+    def _collect_descendants(self, node_id: int, keep: set) -> None:
+        if node_id in keep:
+            return
+
+        keep.add(node_id)
+
+        node = self.tree[node_id]
+
+        for child_id in node.children.values():
+            if child_id in self.tree:
+                self._collect_descendants(child_id, keep)
 
 
-# -----------------------------
-# Minimal example glue (replace with your own)
-# -----------------------------
+    def _shift_subtree_depths(self, node_id: int, depth_shift: int) -> None:
+        node = self.tree[node_id]
+        node.depth -= depth_shift
+
+        for child_id in node.children.values():
+            if child_id in self.tree:
+                self._shift_subtree_depths(child_id, depth_shift)
+
+
+    def _decay_stats_in_place(self, node: Node, decay: float) -> None:
+        node.N = int(round(decay * node.N))
+
+        for U, st in node.stats.items():
+            st.N = int(round(decay * st.N))
+            st.W = decay * st.W
+
+            if st.N > 0:
+                st.Q = st.W / st.N
+            else:
+                st.W = 0.0
+                st.Q = 0.0
+    
+    def reuse_subtree_from_selected_plan(
+        self,
+        selected_plan: Tuple[Action, ...],
+        *,
+        decay: float = 0.5,
+        reduce_horizon: bool = True,
+    ) -> Optional[int]:
+        """
+        Re-root the tree at the child linked by selected_plan.
+
+        This follows:
+            old_root --selected_plan--> new_root
+
+        It does not compute any physical next state.
+        """
+        if self.root_id is None:
+            return None
+
+        selected_plan = tuple(selected_plan)
+        old_root = self.tree[self.root_id]
+
+        if selected_plan not in old_root.children:
+            # Selected plan was never expanded into a child.
+            # No subtree to reuse.
+            self.tree = {}
+            self.root_id = None
+            self._next_node_id = 0
+            return None
+
+        new_root_id = old_root.children[selected_plan]
+
+        # Keep only descendants of the new root.
+        keep = set()
+        self._collect_descendants(new_root_id, keep)
+
+        self.tree = {
+            node_id: node
+            for node_id, node in self.tree.items()
+            if node_id in keep
+        }
+
+        new_root = self.tree[new_root_id]
+        old_depth = new_root.depth
+
+        # Remove parent link because this is now the root.
+        new_root.parent_id = None
+        new_root.incoming_plan = None
+
+        self.root_id = new_root_id
+
+        # Shift depths so new root has depth 0.
+        self._shift_subtree_depths(new_root_id, depth_shift=old_depth)
+
+        # Decay old statistics.
+        for node in self.tree.values():
+            self._decay_stats_in_place(node, decay=decay)
+
+        if reduce_horizon:
+            self.K = max(0, self.K - 1)
+
+        return new_root_id
+
+
+
 if __name__ == "__main__":
     import sys
     import os
@@ -340,19 +536,29 @@ if __name__ == "__main__":
 
     # After you update belief.tables via SMC:
     bmaps = belief_to_maps_theta2(belief, obstacle_mask=env.obstacle_mask)
-
+    reward_cfg = RewardConfig(
+            loop_penalty=5.0,
+            return_penalty=2.0,
+            reward_power=2.0,
+            use_loop_penalty=True,
+            use_return_penalty=True,
+        )
+    alpha_score=0.7
+    proposal_cfg = ProposalConfig(w_r=1.0, w_v=alpha_score, w_rep=2.0, w_inv=5.0, w_ret=0.6, ret_power=2.0, temperature=0.35)
     planner = PWMCTSTheta2(
         T=10, K=2, gamma=0.99,
         c_ucb=1.0,
         k_pw=2.0, alpha_pw=0.5,
-        alpha_score=0.7,   # uncertainty bonus weight in K-score
+        alpha_score=alpha_score,   # uncertainty bonus weight in K-score
         p_flip=0.05,
         rng=random.Random(123),
+        reward_cfg=reward_cfg,
+        proposal_cfg=proposal_cfg,
     )
 
-    U_star = planner.plan(env, root_pos=start_pos, bmaps=bmaps, num_sims=500)
+    plans, plan_weights = planner.plan(env, root_pos=start_pos, beliefSample=bmap.rbar_map, num_sims=500)
     # execute first action (receding horizon) or execute the full plan if you want
-    a0 = U_star
-    print(a0)
+    U = rng.choice(plans, p=plan_weights/sum(plan_weights))
+    print(U)
     # pos, reward, done = env.step(a0)
 

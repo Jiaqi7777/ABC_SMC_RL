@@ -136,6 +136,14 @@ class IrregularGridWorld:
         done = self.t >= self.horizon
         return self.agent_pos, reward, done
     
+    def rollout(self, actions):
+        self.reset()
+        trajectory = [self.start_pos]
+        for action in actions:
+            new_pos, _, _ = self.step(action)
+            trajectory.append(new_pos)
+        return trajectory
+    
     @staticmethod
     def get_neighbors(i, j, max_rows=None, max_cols=None):
         """

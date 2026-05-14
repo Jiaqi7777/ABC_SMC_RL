@@ -11,6 +11,7 @@ import torch
 import seaborn as sns
 import networkx as nx
 from parameter import *
+from typing import Tuple
 plt.rcParams.update({
     'font.family': 'serif',
     'font.serif': ['Times New Roman'],
@@ -22,6 +23,37 @@ plt.rcParams.update({
     'figure.titlesize': 18,   # Font size for figure title
     'text.usetex': True,  
 })
+
+def flatten_index(i: int, j: int, W: int) -> int:
+    return i * W + j
+
+
+def unflatten_index(k: int, W: int) -> Tuple[int, int]:
+    return divmod(k, W)
+
+
+def sigmoid(x: np.ndarray) -> np.ndarray:
+    out = np.empty_like(x, dtype=float)
+    pos = x >= 0
+    neg = ~pos
+    out[pos] = 1.0 / (1.0 + np.exp(-x[pos]))
+    ex = np.exp(x[neg])
+    out[neg] = ex / (1.0 + ex)
+    return out
+
+
+def softplus(z: np.ndarray, a: float = 1.0, b: float = 0.0) -> np.ndarray:
+    x = z + b
+    return a * np.where(x > 30.0, x, np.log1p(np.exp(x)))
+
+
+def softplus_prime(z: np.ndarray, a: float = 1.0, b: float = 0.0) -> np.ndarray:
+    return a * sigmoid(z + b)
+
+
+def softplus_second(z: np.ndarray, a: float = 1.0, b: float = 0.0) -> np.ndarray:
+    s = sigmoid(z + b)
+    return a * s * (1.0 - s)
 def argmaxs(arr):
     mask = arr == arr.max()
     return random.choice(np.array(range(len(arr)))[mask])
@@ -851,7 +883,7 @@ def plot_path(reward_map, path, title='Best Path on Reward Map'):
         path (list of tuple): Sequence of (x, y) positions representing the path.
         title (str): Plot title.
     """
-    fig, ax = plt.subplots(figsize=(8, 6))
+    fig, ax = plt.subplots(figsize=(7, 7))
     ax.imshow(reward_map, cmap='viridis', origin='upper')
 
     # Plot the path with a line
@@ -882,7 +914,7 @@ def visualize_tree_on_grid(root, reward_map, best_path=None):
         reward_map (2D np.ndarray): Grid of reward values.
         best_path (list of (x, y)): Optional. Highlighted path (e.g., best).
     """
-    fig, ax = plt.subplots(figsize=(8, 6))
+    fig, ax = plt.subplots(figsize=(7, 7))
     ax.imshow(reward_map, cmap='viridis', origin='upper')
 
     G = nx.DiGraph()
